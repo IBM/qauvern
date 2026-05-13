@@ -325,6 +325,7 @@ projects:
 """)
     try:
         from datetime import datetime as dt
+
         parser = load_config(path)
         projects = parser.get_projects()
         assert projects[0].net_grants[0].end_date == dt(2026, 6, 15)
@@ -351,6 +352,7 @@ projects:
 """)
     try:
         from datetime import datetime as dt
+
         parser = load_config(path)
         projects = parser.get_projects()
         assert projects[0].net_grants[0].end_date == dt(2026, 5, 29)
