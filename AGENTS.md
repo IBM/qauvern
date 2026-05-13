@@ -41,6 +41,24 @@ All commits must be DCO signed-off. Use `git commit -s`.
   with `--dry-run` or write a test with `mock_api.py`.
 - Do not hardcode API keys or CRNs in source files.
 
+## Release Process
+
+Releases are automated via GitHub Actions. To release a new version:
+
+1. Update the `version` in `pyproject.toml` (semver format: `X.Y.Z`)
+2. Add a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md` with release notes
+3. Add the version link at the bottom of `CHANGELOG.md`
+4. Merge to `main`
+
+The release workflow triggers on any push to `main` that changes `pyproject.toml`. It will:
+- Validate the version format and check no tag already exists
+- Run the full test suite across all supported Python versions
+- Build the distribution
+- Publish to PyPI via trusted publishing
+- Create a git tag and GitHub Release with changelog notes
+
+PyPI publishing uses trusted publishing (OIDC), configured via the `pypi` GitHub environment.
+
 ## Maintenance Rule
 
 After any design change (algorithm, API endpoints, data model, config format), update `Design.md`
