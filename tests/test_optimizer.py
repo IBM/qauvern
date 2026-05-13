@@ -463,6 +463,7 @@ def test_no_target_usage_caps_at_limit() -> None:
 
     rec = next((r for r in result.recommendations if r.instance_crn == "crn:test:1"), None)
     assert rec is not None
+    assert instance.limit_seconds is not None
     assert rec.new_allocation <= instance.limit_seconds
 
 

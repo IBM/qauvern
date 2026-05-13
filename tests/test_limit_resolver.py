@@ -199,8 +199,12 @@ def test_two_active_grants_stack(resolver: LimitResolver) -> None:
 
 def test_one_active_one_expired_grant(resolver: LimitResolver) -> None:
     today = date(2026, 4, 27)
-    expired = NetGrant(start_date=datetime(2026, 3, 30), net_grant_seconds=100000, end_date=datetime(2026, 4, 27))  # expired
-    active = NetGrant(start_date=datetime(2026, 4, 27), net_grant_seconds=50000, end_date=datetime(2026, 5, 25))  # active today
+    expired = NetGrant(
+        start_date=datetime(2026, 3, 30), net_grant_seconds=100000, end_date=datetime(2026, 4, 27)
+    )  # expired
+    active = NetGrant(
+        start_date=datetime(2026, 4, 27), net_grant_seconds=50000, end_date=datetime(2026, 5, 25)
+    )  # active today
     project = make_project(project_limit_seconds=50000, net_grants=[expired, active])
     result = resolver.resolve(project, make_instance(), today)
     assert result == 100000  # 50000 base + 50000 active grant only
