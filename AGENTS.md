@@ -31,6 +31,10 @@ just fmt
 - The mock supports setting account allocation, per-instance allocations/limits, and usage across
   five time windows (28d, 14d, 7d, 3d, 24h).
 
+## Committing
+
+All commits must be DCO signed-off. Use `git commit -s`.
+
 ## Key Prohibitions
 
 - Do not run `qauvern optimize` against a real account to verify behavior — use `analyze`

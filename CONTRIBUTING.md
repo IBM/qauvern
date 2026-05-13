@@ -3,9 +3,26 @@
 ## Pre-requisites
 
 - [Just](https://just.systems/man/en/)
-- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)`
 
-### Pre-commit Hooks
+## Signing Commits
+
+All commits must be signed off under the [Developer Certificate of Origin](https://developercertificate.org/).
+Use `git commit -s` (or `--signoff`) to append a `Signed-off-by` trailer to your commit message.
+PRs without sign-off will fail the DCO check.
+
+```bash
+git commit -s -m "Your commit message"
+```
+
+To sign off existing commits, amend or rebase with `--signoff`:
+
+```bash
+git commit --amend --signoff
+git rebase --signoff main
+```
+
+## Pre-commit hooks (detect-secrets)
 
 This project uses `detect-secrets` to prevent accidental commits of sensitive information.
 
