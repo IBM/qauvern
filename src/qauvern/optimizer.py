@@ -1,0 +1,352 @@
+# (C) Copyright IBM 2026
+#
+# This code is licensed under the Apache License, Version 2.0. You may
+# obtain a copy of this license in the LICENSE.txt file in the root directory
+# of this source tree or at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# Any modifications or derivative works of this code must retain this
+# copyright notice, and modified files need to carry a notice indicating
+# that they have been altered from the originals.
+
+"""Optimization algorithm for IBM Quantum instance allocation."""
+
+from datetime import date
+
+from .limit_resolver import LimitResolver
+from .models import Account, Instance, OptimizationResult, Project
+
+
+class AllocationOptimizer:
+    """Optimizer for quantum instance allocations."""
+
+    def __init__(
+        self,
+        account: Account,
+        projects: list[Project],
+        minimum_allocation_seconds: int = 60,
+        today: date | None = None,
+    ):
+        """Initialize the optimizer.
+
+        Args:
+            account: Account with instances to optimize
+            projects: List of projects with allocation constraints
+            minimum_allocation_seconds: Minimum allocation to maintain for each instance (default: 60 seconds)
+            today: Date to use for limit override resolution (defaults to date.today())
+        """
+        self.account = account
+        self.projects = projects
+        self.minimum_allocation_seconds = minimum_allocation_seconds
+        self.today = today or date.today()
+        self.project_map = self._build_project_map()
+        self._limit_resolver = LimitResolver()
+
+    def _build_project_map(self) -> dict[str, Project]:
+        """Build a mapping of CRN to Project.
+
+        Note: Each project has exactly one CRN (project == instance).
+        """
+        project_map = {}
+        for project in self.projects:
+            project_map[project.crn] = project
+        return project_map
+
+    def _get_project_for_instance(self, instance: Instance) -> Project | None:
+        """Get the project associated with an instance."""
+        return self.project_map.get(instance.crn)
+
+    def _calculate_project_consumption(self, project: Project) -> int:
+        """Calculate total consumption for a project.
+
+        Note: Each project has exactly one instance (CRN).
+        """
+        for instance in self.account.instances:
+            if instance.crn == project.crn:
+                return instance.consumed_seconds
+        return 0
+
+    def _calculate_project_remaining(self, project: Project) -> int | None:
+        """Calculate remaining allocation for a project.
+
+        Returns None if project has no target_usage_seconds (uncapped).
+        """
+        if project.target_usage_seconds is None:
+            return None
+        consumed = self._calculate_project_consumption(project)
+        return max(0, project.target_usage_seconds - consumed)
+
+    def _get_active_instances(self, threshold_seconds: int = 3600) -> list[Instance]:
+        """Get instances that have been used recently.
+
+        Args:
+            threshold_seconds: Minimum usage to consider active (default: 1 hour)
+
+        Returns:
+            List of active instances
+        """
+        return [inst for inst in self.account.instances if inst.consumed_seconds >= threshold_seconds]
+
+    def _get_inactive_instances(self, threshold_seconds: int = 3600) -> list[Instance]:
+        """Get instances that have minimal or no usage.
+
+        Args:
+            threshold_seconds: Maximum usage to consider inactive (default: 1 hour)
+
+        Returns:
+            List of inactive instances
+        """
+        return [inst for inst in self.account.instances if inst.consumed_seconds < threshold_seconds]
+
+    def analyze(self) -> OptimizationResult:
+        """Analyze current allocations and provide recommendations based on core algorithm.
+
+        Core Algorithm (from Design.md):
+        1. Get detailed usage for all instances
+        2. Allocation can never be reduced below current 28d usage (system constraint)
+        3. Exhausted instances (used all allotted time) → allocation=0, limit=1
+        4. Create composite activity score using exponential weighting:
+           - Each bucket's usage/days is multiplied by bias^exponent
+           - Exponents: 24h=5.0, 3d=4.0, 7d=3.0, 14d=2.0, 28d=1.0
+           - With bias=2.0, creates strong recency bias (24h has 16x weight vs 28d)
+        5. Instances with score=0 → minimal allocation
+        6. Temporarily reduce active instances to their 28-day usage to free up allocation
+        7. Redistribute all available allocation to active instances proportionally by activity score
+
+        Returns:
+            OptimizationResult with recommendations but no changes applied
+        """
+        result = OptimizationResult(
+            account=self.account,
+            projects=self.projects,
+            recommendations=[],
+        )
+
+        # Step 1: Categorize instances by activity score
+        print("\n=== Step 1: Categorizing Instances ===")
+        instance_scores = {}
+        exhausted = []
+        inactive = []  # score = 0
+        active = []  # score > 0
+
+        for instance in self.account.instances:
+            project = self._get_project_for_instance(instance)
+            if not project:
+                continue
+
+            # Check if instance has exhausted its project allocation
+            if instance.exhausted:
+                exhausted.append(instance)
+                continue
+
+            # Use the activity_score property from Instance model
+            score = instance.activity_score
+            instance_scores[instance.crn] = score
+
+            if score == 0:
+                inactive.append(instance)
+            else:
+                active.append(instance)
+
+        print(f"  Exhausted instances: {len(exhausted)}")
+        print(f"  Inactive instances (score=0): {len(inactive)}")
+        print(f"  Active instances (score>0): {len(active)}")
+
+        # Step 2: Handle exhausted instances - set allocation=0, limit=1
+        print("\n=== Step 2: Handling Exhausted Instances ===")
+        exhausted_count = 0
+        for instance in exhausted:
+            if instance.allocation_seconds > 0 or (instance.limit_seconds is None or instance.limit_seconds != 1):
+                result.add_recommendation(
+                    instance_crn=instance.crn,
+                    current_allocation=instance.allocation_seconds,
+                    new_allocation=0,
+                    reason="Instance has exhausted project allocation for accounting period",
+                )
+                exhausted_count += 1
+        print(f"  Recommendations for exhausted instances: {exhausted_count}")
+
+        # Step 3: Reduce allocation for inactive instances (score = 0)
+        # Allocation cannot go below current 28d usage
+        print("\n=== Step 3: Processing Inactive Instances ===")
+        freed_allocation = 0
+        inactive_reduced = 0
+        inactive_increased = 0
+        for instance in inactive:
+            # Minimum is the greater of: minimum_allocation_seconds or current 28d usage
+            min_allocation = max(self.minimum_allocation_seconds, instance.consumed_seconds)
+            if instance.allocation_seconds > min_allocation:
+                freed = instance.allocation_seconds - min_allocation
+                freed_allocation += freed
+                result.add_recommendation(
+                    instance_crn=instance.crn,
+                    current_allocation=instance.allocation_seconds,
+                    new_allocation=min_allocation,
+                    reason=f"No recent activity (score=0), reducing to minimum (cannot go below 28d usage: {instance.consumed_seconds}s)",
+                )
+                inactive_reduced += 1
+            elif instance.allocation_seconds < min_allocation:
+                # Need to increase allocation to meet minimum (28d usage floor)
+                additional = min_allocation - instance.allocation_seconds
+                result.add_recommendation(
+                    instance_crn=instance.crn,
+                    current_allocation=instance.allocation_seconds,
+                    new_allocation=min_allocation,
+                    reason=f"Allocation below 28d usage floor, increasing to minimum: {instance.consumed_seconds}s",
+                )
+                freed_allocation -= additional  # This reduces available allocation
+                inactive_increased += 1
+        print(f"  Inactive instances reduced: {inactive_reduced}")
+        print(f"  Inactive instances increased (below 28d floor): {inactive_increased}")
+        print(f"  Allocation freed from inactive: {freed_allocation}s")
+
+        # Step 4: Temporarily reduce active instances to their 28-day usage
+        # This frees up all allocation not already consumed this period
+        print("\n=== Step 4: Reducing Active Instances to 28-Day Usage ===")
+        active_freed = 0
+        for instance in active:
+            # Reduce to 28-day usage (cannot go below this anyway)
+            min_allocation = max(self.minimum_allocation_seconds, instance.consumed_seconds)
+            if instance.allocation_seconds > min_allocation:
+                freed = instance.allocation_seconds - min_allocation
+                freed_allocation += freed
+                active_freed += freed
+        print(f"  Allocation freed from active instances: {active_freed}s")
+
+        # Step 5: Calculate total allocation to distribute
+        # Use ALL available allocation (freed + account available)
+        print("\n=== Step 5: Calculating Total Available Allocation ===")
+        reserve_factor = 1.0 - (self.account.allocation_reserve_percent / 100.0)
+        total_to_allocate = int((freed_allocation + self.account.available_seconds) * reserve_factor)
+        print(f"  Freed from inactive: {freed_allocation - active_freed}s")
+        print(f"  Freed from active (temporary reduction): {active_freed}s")
+        print(f"  Account available: {self.account.available_seconds}s")
+        print(f"  Total to allocate: {total_to_allocate}s")
+
+        # Step 6: Distribute allocation to active instances in two phases
+        print("\n=== Step 6: Distributing to Active Instances ===")
+        if active and total_to_allocate > 0:
+            # All active instances have been reduced to 28-day usage in Step 4
+            # Now distribute all available allocation proportionally by activity score
+            print("  Distributing all available allocation by activity score")
+            print(f"    Total to distribute: {total_to_allocate}s")
+
+            # Calculate total score across all active instances
+            total_score = sum(instance_scores[inst.crn] for inst in active)
+            print(f"    Total activity score: {total_score:.1f}")
+
+            if total_score > 0:
+                # Sort by score (highest first) for better distribution
+                active_sorted = sorted(active, key=lambda x: instance_scores[x.crn], reverse=True)
+
+                active_recommendations = 0
+                for instance in active_sorted:
+                    project = self._get_project_for_instance(instance)
+                    if not project:
+                        continue
+
+                    # Calculate how much more this instance could use
+                    project_remaining = self._calculate_project_remaining(project)
+                    if project_remaining is not None and project_remaining <= 0:
+                        continue
+
+                    # Calculate proportional share based on activity score
+                    score = instance_scores[instance.crn]
+                    proportional_share = int((score / total_score) * total_to_allocate)
+
+                    # Start from 28-day usage floor
+                    min_allocation = max(self.minimum_allocation_seconds, instance.consumed_seconds)
+                    new_allocation = min_allocation + proportional_share
+
+                    # Cap allocation: use project target if available, otherwise limit_seconds
+                    if project_remaining is not None:
+                        max_allocation = instance.allocation_seconds + project_remaining
+                        if new_allocation > max_allocation:
+                            new_allocation = max_allocation
+                    elif instance.limit_seconds is not None:
+                        if new_allocation > instance.limit_seconds:
+                            new_allocation = instance.limit_seconds
+
+                    # Only create recommendation if allocation changes
+                    if new_allocation != instance.allocation_seconds:
+                        result.add_recommendation(
+                            instance_crn=instance.crn,
+                            current_allocation=instance.allocation_seconds,
+                            new_allocation=new_allocation,
+                            reason=f"Active instance (activity score: {score:.1f}, fairness: {instance.fairness:.2f})",
+                        )
+                        active_recommendations += 1
+
+                print(f"    Recommendations for active instances: {active_recommendations}")
+        else:
+            print("  No active instances or no allocation to distribute")
+
+        print("\n=== Analysis Complete ===")
+        print(f"Total recommendations: {len(result.recommendations)}")
+
+        return result
+
+    def optimize(self) -> OptimizationResult:
+        """Optimize allocations and calculate new limits.
+
+        This method calculates optimal allocations but does not apply them.
+        Use the apply() method to actually update the instances.
+
+        Returns:
+            OptimizationResult with optimized allocations
+        """
+        result = self.analyze()
+
+        # Calculate new limits for each instance using LimitResolver
+        for instance in self.account.instances:
+            project = self._get_project_for_instance(instance)
+            if not project:
+                continue
+
+            new_limit = self._limit_resolver.resolve(project, instance, self.today)
+
+            if new_limit is not None and new_limit != instance.limit_seconds:
+                existing_rec = next((rec for rec in result.recommendations if rec.instance_crn == instance.crn), None)
+                if existing_rec:
+                    existing_rec.new_limit = new_limit
+                else:
+                    result.add_recommendation(
+                        instance_crn=instance.crn,
+                        current_allocation=instance.allocation_seconds,
+                        new_allocation=instance.allocation_seconds,
+                        reason="Updating limit via LimitResolver",
+                    )
+                    result.recommendations[-1].new_limit = new_limit
+
+        return result
+
+    def validate_allocations(self) -> tuple[bool, list[str]]:
+        """Validate that current allocations are within constraints.
+
+        Returns:
+            Tuple of (is_valid, list of error messages)
+        """
+        errors = []
+
+        # Check that sum of allocations doesn't exceed account target
+        total_allocated = sum(inst.allocation_seconds for inst in self.account.instances)
+        if total_allocated > self.account.target_usage_seconds:
+            errors.append(
+                f"Total instance allocations ({total_allocated}s) exceeds "
+                f"account target ({self.account.target_usage_seconds}s)"
+            )
+
+        # Check that each project's instance doesn't exceed project target
+        # Note: Each project has exactly one instance (CRN)
+        for project in self.projects:
+            if project.target_usage_seconds is None:
+                continue
+            project_allocated = sum(
+                inst.allocation_seconds for inst in self.account.instances if inst.crn == project.crn
+            )
+            if project_allocated > project.target_usage_seconds:
+                errors.append(
+                    f"Project '{project.name}' total allocation ({project_allocated}s) "
+                    f"exceeds project target ({project.target_usage_seconds}s)"
+                )
+
+        return len(errors) == 0, errors

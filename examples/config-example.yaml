@@ -1,0 +1,87 @@
+# qauvern configuration example
+#
+# This file defines the account, plan, balance period, and projects for
+# optimizing quantum instance allocations.
+#
+# NOTE: Each project corresponds to exactly one service instance (CRN).
+# NOTE: All instances in this config must belong to the specified account and plan.
+# Projects and instances are conceptually the same thing.
+
+# IBM Cloud Account ID
+account_id: "your-account-id-here"
+
+# Plan ID - all instances in this config must use this plan
+# Common plan IDs:
+#   - 91b2c828-2952-4f05-aed8-bedf92c6c480 (Standard/Internal)
+#   - 7f666d17-7893-47d8-b9e5-... (Premium)
+#   - 5304b575-3cff-4455-9c5e-... (Lite)
+plan_id: "your-plan-id-here"
+
+# Minimum allocation in seconds to maintain for each instance (optional)
+# Default: 60 seconds (1 minute)
+# This ensures inactive instances maintain a baseline allocation
+minimum_allocation_seconds: 60
+
+# Optional: Hold back a percentage of account allocation from rebalancing.
+# The reserved amount stays unallocated (not distributed to any instance).
+# Useful when clients prefer to manage consumption via limits rather than saturating allocations.
+# Must be in range [0, 100). Defaults to 0 (no reserve, existing behavior).
+# allocation_reserve_percent: 20
+
+# Balance period - the time frame for optimization
+balance_period:
+  start_date: "2026-01-01T00:00:00"
+  end_date: "2026-12-31T23:59:59"
+
+# API Configuration (optional)
+# If not provided, will use IBMCLOUD_API_KEY environment variable
+api:
+  api_key: "${IBMCLOUD_API_KEY}"  # Can reference environment variables
+  base_url: "https://quantum.cloud.ibm.com/api"  # Optional, defaults to production
+
+# Projects - each project has exactly one instance CRN
+projects:
+  - name: "Quantum Chemistry Research"
+    description: "Drug discovery and molecular simulation"
+    # Service instance CRN for this project
+    crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-1::"
+    # Optional: Total allocation target for this project in seconds (balance period).
+    # When set, the instance is marked "exhausted" once consumed_balance_period exceeds this value,
+    # and the optimizer caps allocation at this target.
+    # When omitted, allocation is optimized between minimum_allocation_seconds and limit_seconds.
+    # Example: 50 hours = 50 * 3600 = 180000 seconds (~1.875 QAU)
+    target_usage_seconds: 180000
+    # Optional: Override balance period for this project
+    # start_date: "2026-01-01T00:00:00"
+    # end_date: "2026-06-30T23:59:59"
+
+    # Optional: Base limit for this instance. Must be >= target_usage_seconds (if set).
+    # When set, the optimizer applies this limit on every run.
+    # project_limit_seconds: 216000  # 60 hours
+
+    # Optional: Grant additional time above project_limit_seconds.
+    # The effective limit decays as pre-grant usage rolls out of the rolling window.
+    # Multiple grants stack. Limit snaps back to project_limit_seconds after end_date.
+    # end_date is optional; defaults to start_date + 28 days if omitted.
+    # net_grants:
+    #   - start_date: "2026-05-01T00:00:00"
+    #     net_grant_seconds: 360000  # 100 extra hours, default 28-day window
+    #   - start_date: "2026-06-15T00:00:00"
+    #     end_date: "2026-07-31T00:00:00"
+    #     net_grant_seconds: 180000  # 50 extra hours until July 31
+
+  - name: "Quantum Machine Learning"
+    description: "ML algorithm development and training"
+    crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-2::"
+    target_usage_seconds: 108000  # 30 hours (~0.625 QAU)
+
+  - name: "Quantum Optimization"
+    description: "Supply chain and logistics optimization"
+    crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-3::"
+    target_usage_seconds: 72000  # 20 hours (~0.417 QAU)
+
+  - name: "Educational Projects"
+    description: "Student research and learning"
+    crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-4::"
+    target_usage_seconds: 36000  # 10 hours (~0.208 QAU)
+

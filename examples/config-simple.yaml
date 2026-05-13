@@ -1,0 +1,27 @@
+# Simple qauvern configuration
+#
+# Minimal example with just two projects
+# Note: Each project corresponds to exactly one service instance (CRN)
+# Note: All instances must belong to the specified account and plan
+
+account_id: "my-ibm-cloud-account-id"
+plan_id: "91b2c828-2952-4f05-aed8-bedf92c6c480"  # Standard plan
+
+# Minimum allocation to maintain for each instance (optional, default: 60 seconds)
+minimum_allocation_seconds: 60
+
+balance_period:
+  start_date: "2026-01-01T00:00:00"
+  end_date: "2026-12-31T23:59:59"
+
+projects:
+  - name: "Research Project A"
+    crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/123:inst-a1::"
+    # 30 hours = 30 * 3600 = 108000 seconds (~0.625 QAU)
+    target_usage_seconds: 108000
+
+  - name: "Research Project B"
+    crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/123:inst-b1::"
+    # 20 hours = 20 * 3600 = 72000 seconds (~0.417 QAU)
+    target_usage_seconds: 72000
+
