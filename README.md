@@ -29,7 +29,7 @@ There are two ways to install qauvern:
 
 ### Option 1: Pex (single-file executable)
 
-Download `qauvern.pex` from the [GitHub Releases](https://github.com/ibm/qauvern/releases) page. The Pex file only requires Python 3.10+ on your system — no pip or virtual environment needed.
+Download `qauvern.pex` from the [GitHub Releases](https://github.com/ibm/qauvern/releases) page. The Pex file only requires Python 3.10+ on your macOS or Linux system — no pip or virtual environment needed.
 
 ```bash
 chmod +x qauvern.pex
