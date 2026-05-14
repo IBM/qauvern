@@ -48,7 +48,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -58,8 +57,8 @@ jobs:
           uv tool install rust-just
           uv sync
 
-      - name: Run tests
-        run: just test
+      - run: just lint
+      - run: just test
 
   build:
     needs: [validate, test]
@@ -67,11 +66,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
       - uses: astral-sh/setup-uv@v5
 
       - name: Build distribution
         run: uv build
+      - run: just pex
 
       - name: Store the distribution packages
         uses: actions/upload-artifact@v4
@@ -94,6 +93,9 @@ jobs:
         with:
           name: python-package-distributions
           path: dist/
+
+      - name: Remove non-PyPI artifacts
+        run: rm -f dist/*.pex
 
       - name: Publish distribution to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
