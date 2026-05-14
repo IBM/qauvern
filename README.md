@@ -43,14 +43,14 @@ just pex
 ./dist/qauvern.pex --help
 ```
 
-### Option 2: pip install from GitHub
+### Option 2: pip install
 
-Install into a virtual environment:
+Install ["qauvern"](https://pypi.org/project/qauvern/) into a virtual environment:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install "qauvern @ git+https://github.com/ibm/qauvern.git"
+pip install qauvern
 ```
 
 The `qauvern` CLI is available while the virtual environment is active:
