@@ -635,13 +635,15 @@ class IBMQuantumAPIClient:
                 crn = resource.get("id")
                 name = resource.get("name", "")
                 if crn:
-                    instances.append(Instance(
-                        crn=crn,
-                        name=name,
-                        allocation_seconds=0,
-                        limit_seconds=None,
-                        consumed_seconds=0,
-                    ))
+                    instances.append(
+                        Instance(
+                            crn=crn,
+                            name=name,
+                            allocation_seconds=0,
+                            limit_seconds=None,
+                            consumed_seconds=0,
+                        )
+                    )
 
             next_url = data.get("next_url")
             if not next_url:

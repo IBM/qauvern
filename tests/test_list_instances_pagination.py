@@ -42,10 +42,12 @@ def client() -> IBMQuantumAPIClient:
 
 def test_single_page_no_next_url(client: IBMQuantumAPIClient) -> None:
     """Single page with no next_url returns all instances on that page."""
-    page = _make_response([
-        _resource("crn:1", "inst-1"),
-        _resource("crn:2", "inst-2"),
-    ])
+    page = _make_response(
+        [
+            _resource("crn:1", "inst-1"),
+            _resource("crn:2", "inst-2"),
+        ]
+    )
     with patch.object(client.session, "get", return_value=page) as mock_get:
         result = client.list_instances("acct-1")
     assert len(result) == 2
@@ -111,9 +113,11 @@ def test_account_id_filter_across_pages(client: IBMQuantumAPIClient) -> None:
         ],
         next_url="https://resource-controller.cloud.ibm.com/v2/resource_instances?start=tok-y&account_id=acct-1",
     )
-    page2 = _make_response([
-        _resource("crn:3", "third-mine", account_id="acct-1"),
-    ])
+    page2 = _make_response(
+        [
+            _resource("crn:3", "third-mine", account_id="acct-1"),
+        ]
+    )
     with patch.object(client.session, "get", side_effect=[page1, page2]) as mock_get:
         result = client.list_instances("acct-1")
     assert len(result) == 3
