@@ -14,6 +14,7 @@ import os
 import re
 from datetime import date, datetime, timedelta
 from typing import Any
+from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
@@ -474,8 +475,6 @@ class IBMQuantumAPIClient:
         """
         # Note: Allocation updates are done through IBM Cloud Resource Controller API
         # The CRN needs to be URL-encoded when used in the path for Resource Controller
-        from urllib.parse import quote
-
         url = f"{self.resource_controller_url}/v2/resource_instances/{quote(instance_crn, safe='')}"
         # The API broker expects usage_allocation_seconds as a string, not an integer
         payload = {"parameters": {"usage_allocation_seconds": str(allocation_seconds)}}
@@ -586,8 +585,6 @@ class IBMQuantumAPIClient:
             The friendly name of the instance, or empty string if not found
         """
         # Use IBM Cloud Resource Controller API to get instance details
-        from urllib.parse import quote
-
         url = f"{self.resource_controller_url}/v2/resource_instances/{quote(instance_crn, safe='')}"
 
         try:
@@ -607,54 +604,53 @@ class IBMQuantumAPIClient:
         Returns:
             List of Instance objects with CRN and name populated
         """
-        # Use IBM Cloud Resource Controller API to list instances
-        # https://cloud.ibm.com/apidocs/resource-controller/resource-controller#list-resource-instances
-        # Note: The sub_type parameter doesn't work for quantum-computing, so we filter by resource_id instead
         url = f"{self.resource_controller_url}/v2/resource_instances"
-        params = {
+        params: dict[str, Any] = {
             "resource_id": QUANTUM_COMPUTING_RESOURCE_ID,
+            "account_id": account_id,
         }
 
-        response = self.session.get(url, params=params)
-
-        # Check for HTTP errors
-        if not response.ok:
-            error_msg = f"HTTP {response.status_code} for {url}"
-            try:
-                error_data = response.json()
-                if "message" in error_data:
-                    error_msg = f"{error_msg}: {error_data['message']}"
-            except Exception:
-                error_msg = f"{error_msg}: {response.text[:200]}"
-            raise requests.HTTPError(error_msg)
-
-        # Parse JSON response
-        try:
-            data = response.json()
-        except ValueError as e:
-            raise ValueError(f"Invalid JSON response from {url}. Response starts with: {response.text[:200]}") from e
-
         instances = []
-        for resource in data.get("resources", []):
-            # Filter by account_id since the API might return instances from all accounts
-            resource_account_id = resource.get("account_id", "")
-            if resource_account_id != account_id:
-                continue
+        while True:
+            response = self.session.get(url, params=params)
 
-            # Extract CRN and name from resource
-            crn = resource.get("id")  # The 'id' field contains the CRN
-            name = resource.get("name", "")
+            if not response.ok:
+                error_msg = f"HTTP {response.status_code} for {url}"
+                try:
+                    error_data = response.json()
+                    if "message" in error_data:
+                        error_msg = f"{error_msg}: {error_data['message']}"
+                except Exception:
+                    error_msg = f"{error_msg}: {response.text[:200]}"
+                raise requests.HTTPError(error_msg)
 
-            if crn:
-                # Create instance with basic info - allocation/usage will be fetched separately
-                instance = Instance(
-                    crn=crn,
-                    name=name,
-                    allocation_seconds=0,  # Will be populated by get_instance()
-                    limit_seconds=None,
-                    consumed_seconds=0,
-                )
-                instances.append(instance)
+            try:
+                data = response.json()
+            except ValueError as e:
+                raise ValueError(
+                    f"Invalid JSON response from {url}. Response starts with: {response.text[:200]}"
+                ) from e
+
+            for resource in data.get("resources", []):
+                crn = resource.get("id")
+                name = resource.get("name", "")
+                if crn:
+                    instances.append(Instance(
+                        crn=crn,
+                        name=name,
+                        allocation_seconds=0,
+                        limit_seconds=None,
+                        consumed_seconds=0,
+                    ))
+
+            next_url = data.get("next_url")
+            if not next_url:
+                break
+            parsed = urlparse(next_url)
+            start_token = parse_qs(parsed.query).get("start", [None])[0]
+            if not start_token:
+                break
+            params["start"] = start_token
 
         return instances
 
