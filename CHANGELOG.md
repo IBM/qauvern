@@ -5,6 +5,12 @@ All notable changes to qauvern will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-05-15
+
+### Fixed
+
+- `list_instances` now fetches all pages from the IBM Resource Controller API instead of silently returning only the first 100 results. Accounts with more than 100 instances were getting truncated lists.
+
 ## [0.2.2] - 2026-05-14
 
 ### Fixed
@@ -38,5 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - YAML configuration with `configure` command for auto-discovery
 - Configurable minimum allocation floor
 
+[0.2.3]: https://github.com/ibm/qauvern/releases/tag/v0.2.3
 [0.2.0]: https://github.com/ibm/qauvern/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ibm/qauvern/releases/tag/v0.1.0
