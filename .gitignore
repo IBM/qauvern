@@ -69,6 +69,11 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
+# Local config
+.envrc
+CLAUDE.md
+docs/superpowers/
+
 # Project specific
 config.yaml
 *.log
