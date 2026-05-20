@@ -67,3 +67,13 @@ just fmt
 ```bash
 just lint
 ```
+
+## Releasing
+
+Releases are automated via GitHub Actions. To release a new version:
+
+1. Bump `version` in `pyproject.toml` (semver: `X.Y.Z`)
+2. Add a `## [X.Y.Z]` section to `CHANGELOG.md`
+3. Merge to `main`
+
+The workflow validates the version, runs the test suite across Python 3.10–3.14, builds and publishes to PyPI, then creates a GitHub Release with a Git tag.
