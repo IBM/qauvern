@@ -4,18 +4,18 @@
 
 * QAU - Quantum Allocation Unit. 1 QAU represents 1600 minutes allocated to use on the IBM Quantum fleet during our 28 day rolling window
 * Rolling window - a backward looking 28 days of usage. The window rolls forward continuously. As clients use minutes in the quantum system, their available minutes for consumption decrease.
-* Account - all quantum access it based on an IBM Cloud account. IBM admins set the account level allocation based on the contracted QAUs that the client has provided
-* Project/Instance - **Projects and instances are conceptually the same thing.** Each project corresponds to exactly one service instance (identified by a unique CRN). A client will create one or more quantum service instances and set an allocation, in seconds, of time that the instance should consume during the 28 day rolling window.
-* Limits - in addition to allocations on instances, admins can optionally set limits on the instance, which provide a hard cap on the amount of time that the instance can consume.
-* Allocation - the amount of time that an instance is targetted to consume during the 28 day rolling window. When setting allocations on instances, sum of all the allocations must be less than or equal to the account level allocation.
-* Fair share scheduler - the way the IBM Quantum system determines which jobs should go next. This is optimized to meet contractual constraints. When we are ready to run a new job, we pick the instance with the lowest fairness value.
-* Fairness - a measure of how much of the allocation has be used. It is the ratio of consumed time in the 28 day rolling window, over the allocation in the instance. This ensures that instances that have used the least percentage of their allocation get highest priority. Jobs can still run if fairness is above 1, as long as the instance has not hit a limit.
+* Account - all quantum access is based on an IBM Cloud account. IBM admins set the account level allocation based on the contracted QAUs that the client has provided
+* [Project/Instance](https://quantum.cloud.ibm.com/docs/en/guides/instances) - **Projects and instances are conceptually the same thing.** Each project corresponds to exactly one service instance (identified by a unique CRN). A client will create one or more quantum service instances and set an allocation in seconds to configure the time that the instance should consume during the 28 day rolling window.
+* [Limits](https://quantum.cloud.ibm.com/docs/en/guides/allocation-limits) - in addition to allocations on instances, admins can optionally set limits on the instance, which provide a hard cap on the amount of time that the instance can consume.
+* [Allocations](https://quantum.cloud.ibm.com/docs/en/guides/allocation-limits) - the amount of time that an instance is targetted to consume during the 28 day rolling window. When setting allocations on instances, sum of all the allocations must be less than or equal to the account level allocation.
+* [Fair share scheduler](https://quantum.cloud.ibm.com/docs/en/guides/fair-share-scheduler) - the way the IBM Quantum system determines which jobs should go next. This is optimized to meet contractual constraints. When we are ready to run a new job, we pick the instance with the lowest fairness value.
+* Fairness - a measure of how much of the allocation has been used. It is the ratio of consumed time in the 28 day rolling window, over the allocation in the instance. This ensures that instances that have used the least percentage of their allocation get highest priority. Jobs can still run if fairness is above 1, as long as the instance has not hit a limit.
 
 ## Problem statement
 
-Access to our Quantum Systems is given with an allocation to clients over a 28 day rolling window. For clients with large allocation, they split this up into a bunch of instances that different people have access to. Quantum work tends to be bursty, so lots of project work happens one month, then analysis and paper writing for a couple of months after.
+Access to our Quantum Systems is given with an allocation to clients over a 28 day rolling window. For clients with large allocation, they split this up into a bunch of instances that different people have access to. Quantum work tends to be bursty, so lots of project work happens one month, then work dies down during analysis and paper writing for a couple of months after.
 
-For clients that have a large number of instances, the easy thing to do is allocate equally across all of those instances. However, it is likely that less than half of those instances get used in any given month. So this strategy is wasteful. We would much rather allocate more to the instances that are used more often, up to some project limit that the administrator sets for that. This would allow us to run more jobs, and also to run them faster.
+For clients that have a large number of instances, the easy thing to do is allocate equally across all of those instances. However, it is likely that less than half of those instances get used in any given month. So, this strategy is wasteful. We would much rather allocate more to the instances that are used more often, up to some project limit that the administrator sets for that. This would allow us to run more jobs, and also to run them faster.
 
 ## Solution
 
@@ -52,14 +52,14 @@ The client automatically extracts the region from the CRN and uses the appropria
 1. **Get Instance Details** - `GET /v1/instance`
    - Full URL: `https://quantum.cloud.ibm.com/api/v1/instance`
    - Headers: `Service-CRN: <instance_crn>`, `Authorization: Bearer <iam_token>`
-   - Returns: Instance details including `usage_allocation_seconds`, `backends`, `plan_id`
+   - Returns: Instance details, including `usage_allocation_seconds`, `backends`, `plan_id`
    - Response schema: `Instance`
    - **Note**: This endpoint does NOT return `instance_limit_seconds` or consumed usage data
 
 2. **Get Instance Configuration** - `GET /v1/instances/configuration`
    - Full URL: `https://quantum.cloud.ibm.com/api/v1/instances/configuration`
    - Headers: `Service-CRN: <instance_crn>`, `Authorization: Bearer <iam_token>`
-   - Returns: Instance configuration including limits
+   - Returns: Instance configuration, including limits
    - Response schema: `InstanceConfiguration`
 
 3. **Update Instance Configuration** - `PUT /v1/instances/configuration`
@@ -73,7 +73,7 @@ The client automatically extracts the region from the CRN and uses the appropria
 4. **Get Instance Usage (Rolling Window)** - `GET /v1/instances/usage`
    - Full URL: `https://quantum.cloud.ibm.com/api/v1/instances/usage`
    - Headers: `Service-CRN: <instance_crn>`, `Authorization: Bearer <iam_token>`
-   - Returns: Usage data including `usage_consumed_seconds`, `usage_allocation_seconds`, `usage_period`
+   - Returns: Usage data, including `usage_consumed_seconds`, `usage_allocation_seconds`, `usage_period`
    - Response schema: `GetUsageResponse`
    - **Note**: This endpoint only returns the rolling 28-day window usage. It does NOT support custom date ranges.
 
@@ -93,7 +93,7 @@ The client automatically extracts the region from the CRN and uses the appropria
 6. **Get Account Information** - `GET /v1/accounts/{account_id}`
    - Full URL: `https://quantum.cloud.ibm.com/api/v1/accounts/{account_id}`
    - Headers: `Authorization: Bearer <iam_token>`
-   - Returns: Account details including total allocation
+   - Returns: Account details, including total allocation
    - Response schema: `Account`
    - **Note**: This endpoint requires admin privileges on the account
 
@@ -134,14 +134,18 @@ The OpenAPI spec defines three security schemes:
 
 ### Implementation Language
 
-The tool should be written in python. It should have a cli. The cli should have the following sub commands:
+The tool should be written in Python.
+
+It should have a CLI with these subcommands:
 
 - `show` - show a summary of account allocation, and instance allocation and limits.
-- `instances` - show the summer usage of all instances in the account, but don't try to do account allocation because that requires admin privileges.
+- `instances` - show the summed usage of all instances in the account, but don't try to do account allocation because that requires admin privileges.
 - `optimize` - optimize the allocation of instances to maximize the usage of the account allocation.
 - `analyze` - analyze the usage of instances and account allocation, show suggestions for optimization, but do not make any changes.
 - `configure` - given a specific account id, list all the instances from the account and create a base yaml file for the tool to use.
 - `create` — create a new IBM Quantum service instance, specifying name, target region, resource group, plan, initial allocation, limit, and tags.
+
+ASCII color should be used on the CLI output.
 
 ### Staging environment
 
@@ -149,8 +153,6 @@ The CLI accepts a `--staging` flag (or `IBMCLOUD_STAGING` environment variable).
 - IAM token endpoint: `https://iam.test.cloud.ibm.com/identity/token`
 - Quantum API: `https://quantum.test.cloud.ibm.com/api`
 - Resource Controller: `https://resource-controller.test.cloud.ibm.com`
-
-ASCII color should be used on the cli output.
 
 ### Testing Framework
 
@@ -160,20 +162,20 @@ In order to test the tool, we need a testing framework that can respond to the A
 
 The following is a high level description of the load balancing algorithm:
 
-1. Get detailed usage for all instances
-2. Allocation can never be reduced below the current usage in the 28d period, the system will reject that
-3. Once an instance has used all the time that was allotted for it in the accounting period, it should have it's usage set to 0, and limit set to 1.
-4. For the time buckets of 28d, 14d, 7d, 3d, 24h, create a single composite activity score using exponential weighting:
-   - Each bucket's usage is divided by the number of days in that bucket
-   - The result is multiplied by bias^exponent where exponent reflects recency (24h=5.0, 3d=4.0, 7d=3.0, 14d=2.0, 28d=1.0)
-   - With bias=2.0, this creates strong differentiation: 24h usage has 16x more weight than 28d usage
-5. Based on this score, any instances with a score of 0 should have their allocation set to a minimal number
-6. Temporarily reduce all active instances to their 28-day usage floor to free up maximum allocation
-7. Redistribute all available allocation to active instances proportionally based on activity scores
+1. Get detailed usage for all instances.
+2. Enforce the constraint that allocation for any non-exhausted instance is never reduced below its own usage in the 28d rolling window.
+3. Once an instance has used all the time that was allotted for it in the accounting period, the instance should have its usage set to 0 and its limit set to 1.
+4. For each instance, compute a single composite activity score by summing weighted contributions from the 28d, 14d, 7d, 3d, and 24h usage buckets:
+   - Each bucket contributes `(bucket_usage / bucket_days) * bias^exponent`, where exponent reflects recency `(24h=5.0, 3d=4.0, 7d=3.0, 14d=2.0, 28d=1.0)`
+   - The instance's activity score is the sum of these per-bucket contributions
+   - With `bias=2.0`, this creates strong differentiation: 24h usage has 16x more weight than 28d usage
+5. Based on this score, any instances with a score of 0 should have their allocation set to a minimal number.
+6. Temporarily reduce all active instances to their 28-day usage floor to free up maximum allocation.
+7. Redistribute all available allocation to active instances proportionally based on activity scores.
 
 ## Limit-Centric Configuration
 
-Some clients manage consumption primarily via limits rather than saturating allocations. Three optional config fields support this workflow.
+Some clients manage consumption primarily via limits, rather than saturating allocations. Three optional config fields support this workflow.
 
 ### `allocation_reserve_percent` (account level)
 
@@ -185,7 +187,9 @@ Sets a base usage limit on the instance. Must be `>= target_usage_seconds`. When
 
 ### `net_grants` (project level)
 
-A list of additive time-budget boosts above `project_limit_seconds`. Each grant has `start_date` and `net_grant_seconds`. Grants are valid for exactly 28 days from `start_date`. Multiple grants stack; after 28 days the grant expires and the effective limit reverts to `project_limit_seconds`.
+A list of additive time-budget boosts above `project_limit_seconds`. Each grant has `start_date`, `net_grant_seconds`, and an optional `end_date` (defaults to `start_date + 28 days`). A grant is active when `start_date <= today < end_date`; once expired, the effective limit reverts to `project_limit_seconds`. Multiple active grants stack.
+
+Note that the rolloff math used to compute each grant's contribution (see LimitResolver) is anchored on the 28-day rolling window from `start_date` regardless of `end_date` — for grants longer than 28 days, the contribution plateaus once all pre-grant usage has exited the window.
 
 ### LimitResolver
 
