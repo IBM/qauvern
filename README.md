@@ -269,29 +269,3 @@ Run the optimizer periodically (e.g., weekly) to maintain optimal allocations:
 # Add to crontab for weekly optimization
 0 0 * * 0 qauvern optimize --config /path/to/config.yaml --yes
 ```
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, running tests, and submitting changes.
-
-For background on the IBM Quantum APIs that qauvern interacts with, see the [IBM Quantum API docs](https://quantum.cloud.ibm.com/docs/en/api/qiskit-runtime-rest/).
-
-For questions or bug reports, [open an issue](https://github.com/ibm/qauvern/issues).
-
-## License
-
-Apache License 2.0
-
-## Releasing
-
-Releases are automated via GitHub Actions. To release a new version:
-
-1. Bump `version` in `pyproject.toml` (semver: `X.Y.Z`)
-2. Add a `## [X.Y.Z]` section to `CHANGELOG.md`
-3. Merge to `main`
-
-The workflow validates the version, runs the test suite across Python 3.10–3.14, builds and publishes to PyPI, then creates a GitHub Release with a git tag.
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for version history and changes.

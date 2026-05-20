@@ -343,7 +343,7 @@ def format_instance_table(
 
 
 @click.group()
-@click.version_option(version="0.1.0")
+@click.version_option(package_name="qauvern")
 @click.option(
     "--staging",
     is_flag=True,
