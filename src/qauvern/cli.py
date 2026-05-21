@@ -10,6 +10,7 @@
 
 """Command-line interface for qauvern."""
 
+import functools
 import sys
 from datetime import date
 from pathlib import Path
@@ -370,6 +371,20 @@ def _load_config_and_client(
     return config_parser, client
 
 
+def handle_errors(func):
+    """Print any exception as ``Error: ...`` on stderr and exit with status 1."""
+
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+
+    return wrapper
+
+
 @click.group()
 @click.version_option(package_name="qauvern")
 @click.option(
@@ -394,252 +409,239 @@ def main(ctx, staging):
 @config_option
 @api_key_option
 @click.pass_context
+@handle_errors
 def show(ctx, config: str, api_key: str | None):
     """Show current account and instance allocations for a specific plan."""
-    try:
-        config_parser, client = _load_config_and_client(ctx, config, api_key)
-        account_id = config_parser.account_id
-        plan_id = config_parser.plan_id
+    config_parser, client = _load_config_and_client(ctx, config, api_key)
+    account_id = config_parser.account_id
+    plan_id = config_parser.plan_id
 
-        # Get account with instances filtered by plan
-        click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
-        account = client.get_account_with_instances(account_id, plan_id)
+    # Get account with instances filtered by plan
+    click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
+    account = client.get_account_with_instances(account_id, plan_id)
 
-        # Display account summary
-        click.echo("\n" + "=" * 80)
-        click.echo("ACCOUNT SUMMARY")
-        click.echo("=" * 80)
-        click.echo(f"Account ID: {account.account_id}")
-        click.echo(f"Plan: {get_plan_name(account.plan_id)}")
-        click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
-        click.echo(f"Consumed: {format_seconds(account.consumed_seconds)}")
-        click.echo(f"Available: {format_seconds(account.available_seconds)}")
-        if account.allocation_reserve_percent > 0:
-            click.echo(format_reserve_summary(account.available_seconds, account.allocation_reserve_percent))
-        limit_display = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
-        click.echo(f"Limit: {limit_display}")
-        click.echo(f"Utilization: {account.utilization:.1f}%")
+    # Display account summary
+    click.echo("\n" + "=" * 80)
+    click.echo("ACCOUNT SUMMARY")
+    click.echo("=" * 80)
+    click.echo(f"Account ID: {account.account_id}")
+    click.echo(f"Plan: {get_plan_name(account.plan_id)}")
+    click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
+    click.echo(f"Consumed: {format_seconds(account.consumed_seconds)}")
+    click.echo(f"Available: {format_seconds(account.available_seconds)}")
+    if account.allocation_reserve_percent > 0:
+        click.echo(format_reserve_summary(account.available_seconds, account.allocation_reserve_percent))
+    limit_display = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
+    click.echo(f"Limit: {limit_display}")
+    click.echo(f"Utilization: {account.utilization:.1f}%")
 
-        # Display instance details using utility function
-        click.echo("\n" + "=" * 80)
-        click.echo("INSTANCE USAGE SUMMARY")
-        click.echo("=" * 80)
+    # Display instance details using utility function
+    click.echo("\n" + "=" * 80)
+    click.echo("INSTANCE USAGE SUMMARY")
+    click.echo("=" * 80)
 
-        columns = ["name", "plan", "allocation", "consumed", "utilization", "limit", "fairness"]
-        table_data, headers = format_instance_table(account.instances, columns=columns)
+    columns = ["name", "plan", "allocation", "consumed", "utilization", "limit", "fairness"]
+    table_data, headers = format_instance_table(account.instances, columns=columns)
 
-        click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
 
 
 @main.command()
 @config_option
 @api_key_option
 @click.pass_context
+@handle_errors
 def instances(ctx, config: str, api_key: str | None):
     """Show instance usage summary for a specific plan.
 
     This command displays usage information for all instances defined in the
     configuration file that match the specified plan, without requiring admin privileges.
     """
-    try:
-        config_parser, client = _load_config_and_client(ctx, config, api_key)
-        plan_id = config_parser.plan_id
-        projects = config_parser.projects
+    config_parser, client = _load_config_and_client(ctx, config, api_key)
+    plan_id = config_parser.plan_id
+    projects = config_parser.projects
 
-        # Collect all CRNs from projects (one CRN per project)
-        all_crns = [project.crn for project in projects]
+    # Collect all CRNs from projects (one CRN per project)
+    all_crns = [project.crn for project in projects]
 
-        click.echo(f"Fetching usage information for {len(all_crns)} instances (plan: {get_plan_name(plan_id)})...")
+    click.echo(f"Fetching usage information for {len(all_crns)} instances (plan: {get_plan_name(plan_id)})...")
 
-        # Fetch instance information
-        instances_data = []
-        project_map = {}
+    # Fetch instance information
+    instances_data = []
+    project_map = {}
 
-        # Build project map (one CRN per project)
-        for project in projects:
-            project_map[project.crn] = project.name
+    # Build project map (one CRN per project)
+    for project in projects:
+        project_map[project.crn] = project.name
 
-        # Fetch each instance with 28-day usage data and filter by plan
-        for crn in all_crns:
+    # Fetch each instance with 28-day usage data and filter by plan
+    for crn in all_crns:
+        try:
+            instance = client.get_instance(crn)
+
+            # Filter by plan_id - only include instances matching the configured plan
+            if instance.plan != plan_id:
+                continue
+
+            # Fetch the friendly name from Resource Controller
+            instance.name = client.get_instance_name_from_crn(crn)
+
+            # Fetch 28-day usage data using /v1/instances/usage endpoint
+            # This endpoint does not require admin privileges
             try:
-                instance = client.get_instance(crn)
+                instance.consumed_seconds = client.get_instance_usage_28d(crn)
+            except ValueError as usage_error:
+                # Show detailed error for JSON parsing issues
+                click.echo(f"Warning: Could not fetch usage for {instance.name}:", err=True)
+                click.echo(f"  {usage_error}", err=True)
+                instance.consumed_seconds = 0
+            except Exception as usage_error:
+                click.echo(
+                    f"Warning: Could not fetch usage for {instance.name}: {usage_error}",
+                    err=True,
+                )
+                instance.consumed_seconds = 0
 
-                # Filter by plan_id - only include instances matching the configured plan
-                if instance.plan != plan_id:
-                    continue
+            instances_data.append(instance)
+        except Exception as e:
+            click.echo(f"Warning: Could not fetch instance {crn}: {e}", err=True)
 
-                # Fetch the friendly name from Resource Controller
-                instance.name = client.get_instance_name_from_crn(crn)
-
-                # Fetch 28-day usage data using /v1/instances/usage endpoint
-                # This endpoint does not require admin privileges
-                try:
-                    instance.consumed_seconds = client.get_instance_usage_28d(crn)
-                except ValueError as usage_error:
-                    # Show detailed error for JSON parsing issues
-                    click.echo(f"Warning: Could not fetch usage for {instance.name}:", err=True)
-                    click.echo(f"  {usage_error}", err=True)
-                    instance.consumed_seconds = 0
-                except Exception as usage_error:
-                    click.echo(
-                        f"Warning: Could not fetch usage for {instance.name}: {usage_error}",
-                        err=True,
-                    )
-                    instance.consumed_seconds = 0
-
-                instances_data.append(instance)
-            except Exception as e:
-                click.echo(f"Warning: Could not fetch instance {crn}: {e}", err=True)
-
-        if not instances_data:
-            click.echo("No instances found or accessible.", err=True)
-            sys.exit(1)
-
-        # Display instance summary using utility function
-        click.echo("\n" + "=" * 80)
-        click.echo("INSTANCE USAGE SUMMARY")
-        click.echo("=" * 80)
-
-        # Sort by fairness
-        sorted_instances = sorted(instances_data, key=lambda x: x.fairness, reverse=True)
-
-        columns = ["name", "plan", "allocation", "consumed", "utilization", "limit", "fairness"]
-        table_data, headers = format_instance_table(sorted_instances, columns=columns)
-
-        click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
-
-        # Calculate totals
-        total_allocation = sum(inst.allocation_seconds for inst in instances_data)
-        total_consumed = sum(inst.consumed_seconds for inst in instances_data)
-
-        # Display totals
-        click.echo("\n" + "=" * 80)
-        click.echo("TOTALS")
-        click.echo("=" * 80)
-        click.echo(f"Total Instances: {len(instances_data)}")
-        click.echo(f"Total Allocation: {format_seconds(total_allocation)}")
-        click.echo(f"Total Consumed: {format_seconds(total_consumed)}")
-        if total_allocation > 0:
-            utilization = (total_consumed / total_allocation) * 100
-            click.echo(f"Overall Utilization: {utilization:.1f}%")
-
-        click.echo("\nNote: This command does not require admin privileges.")
-        click.echo("Use 'show' command for full account-level information (requires admin access).")
-
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+    if not instances_data:
+        click.echo("No instances found or accessible.", err=True)
         sys.exit(1)
+
+    # Display instance summary using utility function
+    click.echo("\n" + "=" * 80)
+    click.echo("INSTANCE USAGE SUMMARY")
+    click.echo("=" * 80)
+
+    # Sort by fairness
+    sorted_instances = sorted(instances_data, key=lambda x: x.fairness, reverse=True)
+
+    columns = ["name", "plan", "allocation", "consumed", "utilization", "limit", "fairness"]
+    table_data, headers = format_instance_table(sorted_instances, columns=columns)
+
+    click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
+
+    # Calculate totals
+    total_allocation = sum(inst.allocation_seconds for inst in instances_data)
+    total_consumed = sum(inst.consumed_seconds for inst in instances_data)
+
+    # Display totals
+    click.echo("\n" + "=" * 80)
+    click.echo("TOTALS")
+    click.echo("=" * 80)
+    click.echo(f"Total Instances: {len(instances_data)}")
+    click.echo(f"Total Allocation: {format_seconds(total_allocation)}")
+    click.echo(f"Total Consumed: {format_seconds(total_consumed)}")
+    if total_allocation > 0:
+        utilization = (total_consumed / total_allocation) * 100
+        click.echo(f"Overall Utilization: {utilization:.1f}%")
+
+    click.echo("\nNote: This command does not require admin privileges.")
+    click.echo("Use 'show' command for full account-level information (requires admin access).")
 
 
 @main.command()
 @config_option
 @api_key_option
 @click.pass_context
+@handle_errors
 def analyze(ctx, config: str, api_key: str | None):
     """Analyze allocations and show optimization recommendations."""
-    try:
-        config_parser, client = _load_config_and_client(ctx, config, api_key)
-        account_id = config_parser.account_id
-        plan_id = config_parser.plan_id
-        projects = config_parser.projects
+    config_parser, client = _load_config_and_client(ctx, config, api_key)
+    account_id = config_parser.account_id
+    plan_id = config_parser.plan_id
+    projects = config_parser.projects
 
-        # Get account with instances filtered by plan
-        click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
-        account = client.get_account_with_instances(account_id, plan_id)
+    # Get account with instances filtered by plan
+    click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
+    account = client.get_account_with_instances(account_id, plan_id)
 
-        # Enrich instances with target usage and detailed usage data
-        click.echo("Fetching usage data for different time periods...")
-        enrich_instances_with_usage_data(account, projects, client, account_id, fetch_detailed_usage=True)
+    # Enrich instances with target usage and detailed usage data
+    click.echo("Fetching usage data for different time periods...")
+    enrich_instances_with_usage_data(account, projects, client, account_id, fetch_detailed_usage=True)
 
-        # Get minimum allocation from config
-        minimum_allocation_seconds = config_parser.minimum_allocation_seconds
+    # Get minimum allocation from config
+    minimum_allocation_seconds = config_parser.minimum_allocation_seconds
 
-        # Run optimization analysis
-        account.allocation_reserve_percent = config_parser.allocation_reserve_percent
-        click.echo("Analyzing allocations...")
-        optimizer = AllocationOptimizer(account, projects, minimum_allocation_seconds)
-        result = optimizer.optimize()
+    # Run optimization analysis
+    account.allocation_reserve_percent = config_parser.allocation_reserve_percent
+    click.echo("Analyzing allocations...")
+    optimizer = AllocationOptimizer(account, projects, minimum_allocation_seconds)
+    result = optimizer.optimize()
 
-        # Validate current allocations
-        is_valid, errors = optimizer.validate_allocations()
+    # Validate current allocations
+    is_valid, errors = optimizer.validate_allocations()
 
-        if not is_valid:
-            click.echo("\n" + "=" * 80)
-            click.echo("VALIDATION ERRORS")
-            click.echo("=" * 80)
-            for error in errors:
-                click.echo(f"❌ {error}")
-
-        # Display account summary with target usage and percentage
+    if not is_valid:
         click.echo("\n" + "=" * 80)
-        click.echo("ACCOUNT PLAN ALLOCATION SUMMARY")
+        click.echo("VALIDATION ERRORS")
         click.echo("=" * 80)
-        click.echo(f"Plan: {get_plan_name(plan_id)}")
-        click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
+        for error in errors:
+            click.echo(f"❌ {error}")
 
-        # Calculate target usage percentage for balance period
-        target_percentage = 0.0
-        if account.target_usage_seconds > 0:
-            # Sum up consumed_balance_period for all instances
-            total_balance_consumed = sum(inst.consumed_balance_period for inst in account.instances)
-            target_percentage = (total_balance_consumed / account.target_usage_seconds) * 100
+    # Display account summary with target usage and percentage
+    click.echo("\n" + "=" * 80)
+    click.echo("ACCOUNT PLAN ALLOCATION SUMMARY")
+    click.echo("=" * 80)
+    click.echo(f"Plan: {get_plan_name(plan_id)}")
+    click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
 
-        click.echo(
-            f"Consumed (Balance Period): {format_seconds(sum(inst.consumed_balance_period for inst in account.instances))} ({target_percentage:.1f}% of target)"
-        )
-        click.echo(f"Consumed (28-day): {format_seconds(account.consumed_seconds)}")
-        click.echo(f"Available: {format_seconds(account.available_seconds)}")
-        if account.allocation_reserve_percent > 0:
-            click.echo(format_reserve_summary(account.available_seconds, account.allocation_reserve_percent))
-        limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
-        click.echo(f"Limit: {limit_str}")
+    # Calculate target usage percentage for balance period
+    target_percentage = 0.0
+    if account.target_usage_seconds > 0:
+        # Sum up consumed_balance_period for all instances
+        total_balance_consumed = sum(inst.consumed_balance_period for inst in account.instances)
+        target_percentage = (total_balance_consumed / account.target_usage_seconds) * 100
 
-        # Display instance analysis table (show ALL instances) using utility function
-        click.echo("\n" + "=" * 80)
-        click.echo("INSTANCE ANALYSIS")
-        click.echo("=" * 80)
+    click.echo(
+        f"Consumed (Balance Period): {format_seconds(sum(inst.consumed_balance_period for inst in account.instances))} ({target_percentage:.1f}% of target)"
+    )
+    click.echo(f"Consumed (28-day): {format_seconds(account.consumed_seconds)}")
+    click.echo(f"Available: {format_seconds(account.available_seconds)}")
+    if account.allocation_reserve_percent > 0:
+        click.echo(format_reserve_summary(account.available_seconds, account.allocation_reserve_percent))
+    limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
+    click.echo(f"Limit: {limit_str}")
 
-        # Build a map of recommendations by CRN
-        rec_map = {}
-        for rec in result.recommendations:
-            rec_map[rec.instance_crn] = rec
+    # Display instance analysis table (show ALL instances) using utility function
+    click.echo("\n" + "=" * 80)
+    click.echo("INSTANCE ANALYSIS")
+    click.echo("=" * 80)
 
-        # Use utility function with all analysis columns
-        columns = [
-            "name",
-            "target",
-            "target_pct",
-            "period",
-            "28d",
-            "14d",
-            "7d",
-            "3d",
-            "24h",
-            "allocation",
-            "limit",
-            "new_limit",
-            "recommended",
-            "change",
-            "reason",
-        ]
-        table_data, headers = format_instance_table(
-            account.instances, projects=projects, columns=columns, rec_map=rec_map
-        )
+    # Build a map of recommendations by CRN
+    rec_map = {}
+    for rec in result.recommendations:
+        rec_map[rec.instance_crn] = rec
 
-        click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
+    # Use utility function with all analysis columns
+    columns = [
+        "name",
+        "target",
+        "target_pct",
+        "period",
+        "28d",
+        "14d",
+        "7d",
+        "3d",
+        "24h",
+        "allocation",
+        "limit",
+        "new_limit",
+        "recommended",
+        "change",
+        "reason",
+    ]
+    table_data, headers = format_instance_table(account.instances, projects=projects, columns=columns, rec_map=rec_map)
 
-        if result.recommendations:
-            click.echo(f"\nTotal recommendations: {len(result.recommendations)}")
-            click.echo("\nTo apply these recommendations, run: qauvern optimize")
-        else:
-            click.echo("\n✓ No optimization recommendations. Allocations are optimal.")
+    click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
 
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    if result.recommendations:
+        click.echo(f"\nTotal recommendations: {len(result.recommendations)}")
+        click.echo("\nTo apply these recommendations, run: qauvern optimize")
+    else:
+        click.echo("\n✓ No optimization recommendations. Allocations are optimal.")
 
 
 @main.command()
@@ -652,125 +654,122 @@ def analyze(ctx, config: str, api_key: str | None):
 )
 @click.confirmation_option(prompt="Are you sure you want to optimize allocations?")
 @click.pass_context
+@handle_errors
 def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     """Optimize instance allocations and apply changes for a specific plan."""
-    try:
-        config_parser, client = _load_config_and_client(ctx, config, api_key)
-        account_id = config_parser.account_id
-        plan_id = config_parser.plan_id
-        projects = config_parser.projects
+    config_parser, client = _load_config_and_client(ctx, config, api_key)
+    account_id = config_parser.account_id
+    plan_id = config_parser.plan_id
+    projects = config_parser.projects
 
-        # Get account with instances filtered by plan
-        click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
-        account = client.get_account_with_instances(account_id, plan_id)
+    # Get account with instances filtered by plan
+    click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
+    account = client.get_account_with_instances(account_id, plan_id)
 
-        # Enrich instances with target usage (no detailed usage needed for optimize)
-        enrich_instances_with_usage_data(account, projects, client, account_id, fetch_detailed_usage=True)
+    # Enrich instances with target usage (no detailed usage needed for optimize)
+    enrich_instances_with_usage_data(account, projects, client, account_id, fetch_detailed_usage=True)
 
-        # Get minimum allocation from config
-        minimum_allocation_seconds = config_parser.minimum_allocation_seconds
+    # Get minimum allocation from config
+    minimum_allocation_seconds = config_parser.minimum_allocation_seconds
 
-        # Run optimization
-        account.allocation_reserve_percent = config_parser.allocation_reserve_percent
-        click.echo("Computing optimal allocations...")
-        optimizer = AllocationOptimizer(account, projects, minimum_allocation_seconds)
-        result = optimizer.optimize()
+    # Run optimization
+    account.allocation_reserve_percent = config_parser.allocation_reserve_percent
+    click.echo("Computing optimal allocations...")
+    optimizer = AllocationOptimizer(account, projects, minimum_allocation_seconds)
+    result = optimizer.optimize()
 
-        if not result.recommendations:
-            click.echo("✓ No optimization needed. Allocations are already optimal.")
-            return
+    if not result.recommendations:
+        click.echo("✓ No optimization needed. Allocations are already optimal.")
+        return
 
-        # Display what will be changed
-        click.echo("\n" + "=" * 80)
-        click.echo("CHANGES TO BE APPLIED")
-        click.echo("=" * 80)
+    # Display what will be changed
+    click.echo("\n" + "=" * 80)
+    click.echo("CHANGES TO BE APPLIED")
+    click.echo("=" * 80)
 
-        # Build a map of CRN to instance name
-        instance_map = {inst.crn: inst.name for inst in account.instances}
+    # Build a map of CRN to instance name
+    instance_map = {inst.crn: inst.name for inst in account.instances}
 
-        rec_data = []
-        for rec in result.recommendations:
-            change = rec.change
-            if change > 0:
-                change_str = f"+{format_seconds(change)}"
-            else:
-                change_str = f"{format_seconds(change)}"
-            new_limit_str = format_seconds(rec.new_limit) if rec.new_limit is not None else "None"
+    rec_data = []
+    for rec in result.recommendations:
+        change = rec.change
+        if change > 0:
+            change_str = f"+{format_seconds(change)}"
+        else:
+            change_str = f"{format_seconds(change)}"
+        new_limit_str = format_seconds(rec.new_limit) if rec.new_limit is not None else "None"
 
-            # Get instance name, truncate if too long
-            instance_name = instance_map.get(rec.instance_crn, rec.instance_crn[:40] + "...")
-            if len(instance_name) > 40:
-                instance_name = instance_name[:37] + "..."
+        # Get instance name, truncate if too long
+        instance_name = instance_map.get(rec.instance_crn, rec.instance_crn[:40] + "...")
+        if len(instance_name) > 40:
+            instance_name = instance_name[:37] + "..."
 
-            rec_data.append(
-                [
-                    instance_name,
-                    format_seconds(rec.current_allocation),
-                    format_seconds(rec.new_allocation),
-                    change_str,
-                    new_limit_str,
-                ]
-            )
-
-        click.echo(
-            tabulate(
-                rec_data,
-                headers=["Instance Name", "Current", "New", "Change", "New Limit"],
-                tablefmt="grid",
-            )
+        rec_data.append(
+            [
+                instance_name,
+                format_seconds(rec.current_allocation),
+                format_seconds(rec.new_allocation),
+                change_str,
+                new_limit_str,
+            ]
         )
 
-        if dry_run:
-            click.echo("\n[DRY RUN] No changes were made.")
-            return
+    click.echo(
+        tabulate(
+            rec_data,
+            headers=["Instance Name", "Current", "New", "Change", "New Limit"],
+            tablefmt="grid",
+        )
+    )
 
-        # Apply changes - process reductions first, then additions
-        click.echo("\nApplying changes...")
-        success_count = 0
-        error_count = 0
+    if dry_run:
+        click.echo("\n[DRY RUN] No changes were made.")
+        return
 
-        # Process reductions first to free up allocation
-        all_changes = list(result.reductions) + list(result.additions)
+    # Apply changes - process reductions first, then additions
+    click.echo("\nApplying changes...")
+    success_count = 0
+    error_count = 0
 
-        for rec in all_changes:
-            # Get instance name
-            instance_name = instance_map.get(rec.instance_crn, rec.instance_crn[:40] + "...")
-            if len(instance_name) > 40:
-                instance_name = instance_name[:37] + "..."
+    # Process reductions first to free up allocation
+    all_changes = list(result.reductions) + list(result.additions)
 
-            # Format the change
-            change = rec.change
-            if change > 0:
-                change_str = f"+{format_seconds(change)}"
-            else:
-                change_str = f"{format_seconds(change)}"
+    for rec in all_changes:
+        # Get instance name
+        instance_name = instance_map.get(rec.instance_crn, rec.instance_crn[:40] + "...")
+        if len(instance_name) > 40:
+            instance_name = instance_name[:37] + "..."
 
-            try:
-                # Show what we're doing
-                click.echo(
-                    f"  Updating {instance_name}: {format_seconds(rec.current_allocation)} → {format_seconds(rec.new_allocation)} ({change_str})"
-                )
+        # Format the change
+        change = rec.change
+        if change > 0:
+            change_str = f"+{format_seconds(change)}"
+        else:
+            change_str = f"{format_seconds(change)}"
 
-                # Update allocation
-                client.update_instance_allocation(rec.instance_crn, rec.new_allocation)
+        try:
+            # Show what we're doing
+            click.echo(
+                f"  Updating {instance_name}: {format_seconds(rec.current_allocation)} → {format_seconds(rec.new_allocation)} ({change_str})"
+            )
 
-                # Update limit if specified
-                if rec.new_limit is not None:
-                    click.echo(f"    Setting limit: {format_seconds(rec.new_limit)}")
-                    client.update_instance_limit(rec.instance_crn, rec.new_limit)
+            # Update allocation
+            client.update_instance_allocation(rec.instance_crn, rec.new_allocation)
 
-                success_count += 1
-                click.echo("    ✓ Success")
-            except Exception as e:
-                click.echo(f"    ❌ Failed: {e}", err=True)
-                error_count += 1
+            # Update limit if specified
+            if rec.new_limit is not None:
+                click.echo(f"    Setting limit: {format_seconds(rec.new_limit)}")
+                client.update_instance_limit(rec.instance_crn, rec.new_limit)
 
-        click.echo(f"\n✓ Successfully updated {success_count} instances")
-        if error_count > 0:
-            click.echo(f"❌ Failed to update {error_count} instances")
+            success_count += 1
+            click.echo("    ✓ Success")
+        except Exception as e:
+            click.echo(f"    ❌ Failed: {e}", err=True)
+            error_count += 1
 
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+    click.echo(f"\n✓ Successfully updated {success_count} instances")
+    if error_count > 0:
+        click.echo(f"❌ Failed to update {error_count} instances")
 
 
 @main.command()
@@ -799,6 +798,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     help="Balance period end date (ISO format, default: 2026-12-31T23:59:59)",
 )
 @click.pass_context
+@handle_errors
 def configure(
     ctx,
     account_id: str,
@@ -813,116 +813,109 @@ def configure(
     specified account and generates a base YAML configuration file that can
     be customized with project information.
     """
-    try:
-        import yaml
+    import yaml
 
-        click.echo(f"Connecting to IBM Quantum API for account {account_id}...")
-        client = _build_client(ctx, api_key)
+    click.echo(f"Connecting to IBM Quantum API for account {account_id}...")
+    client = _build_client(ctx, api_key)
 
-        # List instances (does not require admin privileges)
-        click.echo("Fetching instances...")
-        instances = client.list_instances(account_id)
+    # List instances (does not require admin privileges)
+    click.echo("Fetching instances...")
+    instances = client.list_instances(account_id)
 
-        if not instances:
-            click.echo("⚠ No instances found in this account.", err=True)
-            sys.exit(1)
+    if not instances:
+        click.echo("⚠ No instances found in this account.", err=True)
+        sys.exit(1)
 
-        click.echo(f"Found {len(instances)} instances")
+    click.echo(f"Found {len(instances)} instances")
 
-        # Build configuration structure
-        config = {
-            "account_id": account_id,
-            "balance_period": {
-                "start_date": balance_start,
-                "end_date": balance_end,
-            },
-            "projects": [],
+    # Build configuration structure
+    config = {
+        "account_id": account_id,
+        "balance_period": {
+            "start_date": balance_start,
+            "end_date": balance_end,
+        },
+        "projects": [],
+    }
+
+    # Create one project per instance (since projects and instances are 1:1)
+    # Users can customize names and allocations
+    for i, inst in enumerate(instances, 1):
+        project = {
+            "name": f"Project {i}",
+            "description": f"Auto-generated from instance {inst.name or inst.crn[:50]}",
+            "crn": inst.crn,
+            "target_usage_seconds": inst.allocation_seconds or 96000,  # Default 1 QAU if not set
         }
+        config["projects"].append(project)
 
-        # Create one project per instance (since projects and instances are 1:1)
-        # Users can customize names and allocations
-        for i, inst in enumerate(instances, 1):
-            project = {
-                "name": f"Project {i}",
-                "description": f"Auto-generated from instance {inst.name or inst.crn[:50]}",
-                "crn": inst.crn,
-                "target_usage_seconds": inst.allocation_seconds or 96000,  # Default 1 QAU if not set
-            }
-            config["projects"].append(project)
+    # Add comments about customization
+    click.echo("\nGenerating configuration file...")
 
-        # Add comments about customization
-        click.echo("\nGenerating configuration file...")
+    # Write YAML file
+    output_path = Path(output)
+    with open(output_path, "w") as f:
+        f.write("# qauvern configuration\n")
+        f.write("# Auto-generated configuration file\n")
+        f.write("#\n")
+        f.write("# IMPORTANT: This is a base configuration with all instances\n")
+        f.write("# grouped into a single project. You should customize this by:\n")
+        f.write("#\n")
+        f.write("# 1. Creating separate projects for different teams/purposes\n")
+        f.write("# 2. Assigning instance CRNs to appropriate projects\n")
+        f.write("# 3. Setting appropriate target_usage_seconds for each project\n")
+        f.write("# 4. Adjusting balance period dates as needed\n")
+        f.write("#\n")
+        f.write(f"# Account: {account_id}\n")
+        f.write(f"# Instances Found: {len(instances)}\n")
+        f.write("#\n")
+        f.write("# Note: Each project corresponds to exactly one service instance.\n")
+        f.write("#\n\n")
 
-        # Write YAML file
-        output_path = Path(output)
-        with open(output_path, "w") as f:
-            f.write("# qauvern configuration\n")
-            f.write("# Auto-generated configuration file\n")
-            f.write("#\n")
-            f.write("# IMPORTANT: This is a base configuration with all instances\n")
-            f.write("# grouped into a single project. You should customize this by:\n")
-            f.write("#\n")
-            f.write("# 1. Creating separate projects for different teams/purposes\n")
-            f.write("# 2. Assigning instance CRNs to appropriate projects\n")
-            f.write("# 3. Setting appropriate target_usage_seconds for each project\n")
-            f.write("# 4. Adjusting balance period dates as needed\n")
-            f.write("#\n")
-            f.write(f"# Account: {account_id}\n")
-            f.write(f"# Instances Found: {len(instances)}\n")
-            f.write("#\n")
-            f.write("# Note: Each project corresponds to exactly one service instance.\n")
-            f.write("#\n\n")
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-
-            f.write("\n# Instance Details:\n")
-            f.write("# The following instances were found in your account:\n")
-            f.write("#\n")
-            for inst in instances:
-                f.write(f"# - {inst.name or 'Unnamed'}\n")
-                f.write(f"#   CRN: {inst.crn}\n")
-                f.write(f"#   Allocation: {format_seconds(inst.allocation_seconds)}\n")
-                f.write(f"#   Consumed: {format_seconds(inst.consumed_seconds)}\n")
-                if inst.limit_seconds:
-                    f.write(f"#   Limit: {format_seconds(inst.limit_seconds)}\n")
-                f.write(f"#   Fairness: {inst.fairness:.2f}\n")
-                f.write("#\n")
-
-        click.echo(f"\n✓ Configuration file created: {output_path}")
-        click.echo("\nNext steps:")
-        click.echo(f"1. Edit {output_path} to customize project names and allocations")
-        click.echo("2. Run 'qauvern analyze' to see optimization recommendations")
-        click.echo("3. Run 'qauvern optimize' to apply optimizations")
-
-        # Display summary table
-        click.echo("\n" + "=" * 80)
-        click.echo("INSTANCE SUMMARY")
-        click.echo("=" * 80)
-
-        instance_data = []
+        f.write("\n# Instance Details:\n")
+        f.write("# The following instances were found in your account:\n")
+        f.write("#\n")
         for inst in instances:
-            instance_data.append(
-                [
-                    inst.name[:40],
-                    format_seconds(inst.allocation_seconds),
-                    format_seconds(inst.consumed_seconds),
-                    format_fairness(inst.fairness),
-                ]
-            )
+            f.write(f"# - {inst.name or 'Unnamed'}\n")
+            f.write(f"#   CRN: {inst.crn}\n")
+            f.write(f"#   Allocation: {format_seconds(inst.allocation_seconds)}\n")
+            f.write(f"#   Consumed: {format_seconds(inst.consumed_seconds)}\n")
+            if inst.limit_seconds:
+                f.write(f"#   Limit: {format_seconds(inst.limit_seconds)}\n")
+            f.write(f"#   Fairness: {inst.fairness:.2f}\n")
+            f.write("#\n")
 
-        click.echo(
-            tabulate(
-                instance_data,
-                headers=["Instance Name", "Allocation", "Consumed", "Fairness"],
-                tablefmt="grid",
-            )
+    click.echo(f"\n✓ Configuration file created: {output_path}")
+    click.echo("\nNext steps:")
+    click.echo(f"1. Edit {output_path} to customize project names and allocations")
+    click.echo("2. Run 'qauvern analyze' to see optimization recommendations")
+    click.echo("3. Run 'qauvern optimize' to apply optimizations")
+
+    # Display summary table
+    click.echo("\n" + "=" * 80)
+    click.echo("INSTANCE SUMMARY")
+    click.echo("=" * 80)
+
+    instance_data = []
+    for inst in instances:
+        instance_data.append(
+            [
+                inst.name[:40],
+                format_seconds(inst.allocation_seconds),
+                format_seconds(inst.consumed_seconds),
+                format_fairness(inst.fairness),
+            ]
         )
 
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
-        sys.exit(1)
+    click.echo(
+        tabulate(
+            instance_data,
+            headers=["Instance Name", "Allocation", "Consumed", "Fairness"],
+            tablefmt="grid",
+        )
+    )
 
 
 @main.command()
@@ -964,6 +957,7 @@ def configure(
     help="Tags to apply (can be specified multiple times)",
 )
 @click.pass_context
+@handle_errors
 def create(
     ctx,
     name: str,
@@ -979,70 +973,65 @@ def create(
 
     NAME is the name for the new instance.
     """
-    try:
-        plan_id = get_plan_id(plan)
+    plan_id = get_plan_id(plan)
 
-        allocation_seconds = None
-        if allocation is not None:
-            allocation_seconds = parse_seconds(allocation)
-            if allocation_seconds < 0:
-                raise click.BadParameter("Allocation must be non-negative")
+    allocation_seconds = None
+    if allocation is not None:
+        allocation_seconds = parse_seconds(allocation)
+        if allocation_seconds < 0:
+            raise click.BadParameter("Allocation must be non-negative")
 
-        limit_seconds = None
-        if limit is not None:
-            limit_seconds = parse_seconds(limit)
-            if limit_seconds <= 0:
-                raise click.BadParameter("Limit must be positive")
+    limit_seconds = None
+    if limit is not None:
+        limit_seconds = parse_seconds(limit)
+        if limit_seconds <= 0:
+            raise click.BadParameter("Limit must be positive")
 
-        client = _build_client(ctx, api_key)
+    client = _build_client(ctx, api_key)
 
-        click.echo(f"Creating instance '{name}' in {target} with plan {get_plan_name(plan_id)}...")
-        if allocation_seconds is not None:
-            click.echo(f"  Initial allocation: {format_seconds(allocation_seconds)}")
+    click.echo(f"Creating instance '{name}' in {target} with plan {get_plan_name(plan_id)}...")
+    if allocation_seconds is not None:
+        click.echo(f"  Initial allocation: {format_seconds(allocation_seconds)}")
 
-        tags = list(tag) if tag else None
-        result = client.create_instance(
-            name=name,
-            target=target,
-            resource_group=resource_group,
-            resource_plan_id=plan_id,
-            allocation_seconds=allocation_seconds,
-            tags=tags,
-        )
+    tags = list(tag) if tag else None
+    result = client.create_instance(
+        name=name,
+        target=target,
+        resource_group=resource_group,
+        resource_plan_id=plan_id,
+        allocation_seconds=allocation_seconds,
+        tags=tags,
+    )
 
-        instance_crn = result.get("id", "")
-        instance_name = result.get("name", name)
-        instance_state = result.get("state", "unknown")
+    instance_crn = result.get("id", "")
+    instance_name = result.get("name", name)
+    instance_state = result.get("state", "unknown")
 
-        click.echo("\nInstance created successfully.")
-        click.echo(f"  Name:   {instance_name}")
-        click.echo(f"  CRN:    {instance_crn}")
-        click.echo(f"  State:  {instance_state}")
-        click.echo(f"  Region: {target}")
-        click.echo(f"  Plan:   {get_plan_name(plan_id)}")
-        if allocation_seconds is not None:
-            click.echo(f"  Allocation: {format_seconds(allocation_seconds)}")
+    click.echo("\nInstance created successfully.")
+    click.echo(f"  Name:   {instance_name}")
+    click.echo(f"  CRN:    {instance_crn}")
+    click.echo(f"  State:  {instance_state}")
+    click.echo(f"  Region: {target}")
+    click.echo(f"  Plan:   {get_plan_name(plan_id)}")
+    if allocation_seconds is not None:
+        click.echo(f"  Allocation: {format_seconds(allocation_seconds)}")
 
-        if limit_seconds is not None and instance_crn:
-            click.echo(f"\nSetting instance limit to {format_seconds(limit_seconds)}...")
-            try:
-                client.update_instance_limit(instance_crn, limit_seconds)
-                click.echo(f"  Limit set successfully: {format_seconds(limit_seconds)}")
-            except Exception as limit_error:
-                click.echo(
-                    f"  Warning: Instance created but limit could not be set: {limit_error}",
-                    err=True,
-                )
-                click.echo(
-                    "  You can set the limit later using the Quantum API.",
-                    err=True,
-                )
+    if limit_seconds is not None and instance_crn:
+        click.echo(f"\nSetting instance limit to {format_seconds(limit_seconds)}...")
+        try:
+            client.update_instance_limit(instance_crn, limit_seconds)
+            click.echo(f"  Limit set successfully: {format_seconds(limit_seconds)}")
+        except Exception as limit_error:
+            click.echo(
+                f"  Warning: Instance created but limit could not be set: {limit_error}",
+                err=True,
+            )
+            click.echo(
+                "  You can set the limit later using the Quantum API.",
+                err=True,
+            )
 
-        click.echo(f"\nInstance '{instance_name}' is ready.")
-
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+    click.echo(f"\nInstance '{instance_name}' is ready.")
 
 
 if __name__ == "__main__":
