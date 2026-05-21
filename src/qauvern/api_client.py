@@ -186,6 +186,53 @@ class IBMQuantumAPIClient:
         """Set the Authorization header with the IAM token."""
         self.session.headers.update({"Authorization": f"Bearer {self.iam_token}"})
 
+    def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        crn: str | None = None,
+        account_id: str | None = None,
+        **kwargs: Any,
+    ) -> requests.Response:
+        """Send a request, attaching Service-CRN/Account-Id headers and checking for errors."""
+        headers = dict(kwargs.pop("headers", None) or {})
+        if crn is not None:
+            headers["Service-CRN"] = crn
+        if account_id is not None:
+            headers["Account-Id"] = account_id
+        response = self.session.request(method, url, headers=headers or None, **kwargs)
+        if response.ok:
+            return response
+
+        error_msg = f"HTTP {response.status_code} for {url}"
+        try:
+            error_data = response.json()
+            if "errors" in error_data:
+                error_msg = f"{error_msg}: {error_data['errors']}"
+            elif "message" in error_data:
+                error_msg = f"{error_msg}: {error_data['message']}"
+            else:
+                error_msg = f"{error_msg}: {error_data}"
+        except Exception:
+            error_msg = f"{error_msg}: {response.text[:500]}"
+        raise requests.HTTPError(error_msg)
+
+    def _request_json(self, method: str, url: str, **kwargs: Any) -> Any:
+        """Like _request, but parses and returns the JSON response body."""
+        response = self._request(method, url, **kwargs)
+        try:
+            return response.json()
+        except Exception as e:
+            details = (
+                f"Invalid JSON response from {url}.\n"
+                f"Status Code: {response.status_code}\n"
+                f"Content-Type: {response.headers.get('Content-Type', 'Not specified')}\n"
+                f"Response length: {len(response.text)} bytes\n"
+                f"Response body: {response.text[:500]}"
+            )
+            raise Exception(details) from e
+
     def refresh_token(self) -> None:
         """Refresh the IAM token.
 
@@ -204,11 +251,8 @@ class IBMQuantumAPIClient:
             Account object with allocation information for the specified plan
         """
         url = f"{self.base_url}/v1/accounts/{account_id}"
-        params = {"plan_id": plan_id}
-        response = self.session.get(url, params=params)
-        response.raise_for_status()
+        data = self._request_json("GET", url, params={"plan_id": plan_id})
 
-        data = response.json()
         # API returns plans array, extract the first (and only) plan
         plans = data.get("plans", [])
         if not plans:
@@ -233,35 +277,9 @@ class IBMQuantumAPIClient:
         Returns:
             Instance object with current configuration
         """
-        # Use the /v1/instance endpoint with Service-CRN header
-        # Use regional base URL based on the CRN's region
-        base_url = self._get_regional_base_url(instance_crn)
-        url = f"{base_url}/v1/instance"
-        headers = {"Service-CRN": instance_crn}
-        response = self.session.get(url, headers=headers)
+        url = f"{self._get_regional_base_url(instance_crn)}/v1/instance"
+        data = self._request_json("GET", url, crn=instance_crn)
 
-        # Check for HTTP errors
-        if not response.ok:
-            error_msg = f"HTTP {response.status_code} for {url}"
-            try:
-                error_data = response.json()
-                if "message" in error_data:
-                    error_msg = f"{error_msg}: {error_data['message']}"
-            except Exception:
-                error_msg = f"{error_msg}: {response.text[:200]}"
-            raise requests.HTTPError(error_msg)
-
-        # Parse JSON response
-        try:
-            data = response.json()
-        except ValueError as e:
-            # Provide detailed error information
-            error_details = f"Invalid JSON response from {url}.\n"
-            error_details += f"Status Code: {response.status_code}\n"
-            error_details += f"Content-Type: {response.headers.get('Content-Type', 'Not specified')}\n"
-            error_details += f"Response length: {len(response.text)} bytes\n"
-            error_details += f"Response body: {response.text[:500]}"
-            raise ValueError(error_details) from e
         # Map API response fields to Instance model
         # API returns: instance_limit_seconds, usage_allocation_seconds, backends, plan_id
         return Instance(
@@ -286,35 +304,8 @@ class IBMQuantumAPIClient:
         Returns:
             Consumed seconds in the 28-day window
         """
-        # Use the /v1/instances/usage endpoint with Service-CRN header
-        base_url = self._get_regional_base_url(instance_crn)
-        url = f"{base_url}/v1/instances/usage"
-        headers = {"Service-CRN": instance_crn}
-        response = self.session.get(url, headers=headers)
-
-        # Check for HTTP errors
-        if not response.ok:
-            error_msg = f"HTTP {response.status_code} for {url}"
-            try:
-                error_data = response.json()
-                if "message" in error_data:
-                    error_msg = f"{error_msg}: {error_data['message']}"
-            except Exception:
-                error_msg = f"{error_msg}: {response.text[:200]}"
-            raise requests.HTTPError(error_msg)
-
-        # Parse JSON response
-        try:
-            data = response.json()
-        except ValueError as e:
-            error_details = f"Invalid JSON response from {url}.\n"
-            error_details += f"Status Code: {response.status_code}\n"
-            error_details += f"Content-Type: {response.headers.get('Content-Type', 'Not specified')}\n"
-            error_details += f"Response length: {len(response.text)} bytes\n"
-            error_details += f"Response body: {response.text[:500]}"
-            raise ValueError(error_details) from e
-
-        # Return consumed seconds from the 28-day window
+        url = f"{self._get_regional_base_url(instance_crn)}/v1/instances/usage"
+        data = self._request_json("GET", url, crn=instance_crn)
         return int(data.get("usage_consumed_seconds", 0))
 
     def get_instance_usage(
@@ -331,42 +322,14 @@ class IBMQuantumAPIClient:
         Returns:
             InstanceUsage object with consumption data
         """
-        # Use the /v1/analytics/usage endpoint with instance as query parameter
-        # Use regional base URL based on the CRN's region
-        base_url = self._get_regional_base_url(instance_crn)
-        url = f"{base_url}/v1/analytics/usage"
-
-        # Format dates as ISO 8601 strings and pass instance CRN as query parameter
+        url = f"{self._get_regional_base_url(instance_crn)}/v1/analytics/usage"
         params = {
             "instance": instance_crn,  # Pass full CRN directly (requests will handle array serialization)
             "interval_start": (start_date.isoformat() + "Z" if not start_date.tzinfo else start_date.isoformat()),
             "interval_end": (end_date.isoformat() + "Z" if not end_date.tzinfo else end_date.isoformat()),
         }
+        data = self._request_json("GET", url, account_id=account_id, params=params)
 
-        # Add Account-Id header for analytics endpoint
-        headers = {"Account-Id": account_id}
-
-        # Session already has Authorization header from _ensure_authenticated
-        response = self.session.get(url, params=params, headers=headers)
-
-        # Check for HTTP errors
-        if not response.ok:
-            error_msg = f"HTTP {response.status_code} for {url}"
-            try:
-                error_data = response.json()
-                if "message" in error_data:
-                    error_msg = f"{error_msg}: {error_data['message']}"
-            except Exception:
-                error_msg = f"{error_msg}: {response.text[:200]}"
-            raise requests.HTTPError(error_msg)
-
-        # Parse JSON response
-        try:
-            data = response.json()
-        except ValueError as e:
-            raise ValueError(f"Invalid JSON response from {url}. Response starts with: {response.text[:200]}") from e
-
-        # Map API response fields from analytics endpoint
         # The analytics endpoint returns usage in MILLISECONDS, convert to seconds
         usage_ms = data.get("usage", 0)
         usage_seconds = int(usage_ms / 1000) if usage_ms else 0
@@ -430,31 +393,14 @@ class IBMQuantumAPIClient:
         Returns:
             Dict mapping date -> seconds consumed on that day
         """
-        base_url = self._get_regional_base_url(instance_crn)
-        url = f"{base_url}/v1/analytics/usage_grouped_by_date"
+        url = f"{self._get_regional_base_url(instance_crn)}/v1/analytics/usage_grouped_by_date"
         params = {
             "group_by": "instance",
             "instance": instance_crn,
             "interval_start": datetime.combine(start_date, datetime.min.time()).isoformat() + "Z",
             "interval_end": datetime.combine(end_date, datetime.min.time()).isoformat() + "Z",
         }
-        headers = {"Account-Id": account_id}
-        response = self.session.get(url, params=params, headers=headers)
-
-        if not response.ok:
-            error_msg = f"HTTP {response.status_code} for {url}"
-            try:
-                error_data = response.json()
-                if "message" in error_data:
-                    error_msg = f"{error_msg}: {error_data['message']}"
-            except Exception:
-                error_msg = f"{error_msg}: {response.text[:200]}"
-            raise requests.HTTPError(error_msg)
-
-        try:
-            data = response.json()
-        except ValueError as e:
-            raise ValueError(f"Invalid JSON response from {url}: {response.text[:200]}") from e
+        data = self._request_json("GET", url, account_id=account_id, params=params)
 
         result: dict[date, int] = {}
         for entry in data.get("data", []):
@@ -473,29 +419,11 @@ class IBMQuantumAPIClient:
         Returns:
             True if successful
         """
-        # Note: Allocation updates are done through IBM Cloud Resource Controller API
-        # The CRN needs to be URL-encoded when used in the path for Resource Controller
+        # Allocation updates go through the Resource Controller; the CRN is URL-encoded into the path.
         url = f"{self.resource_controller_url}/v2/resource_instances/{quote(instance_crn, safe='')}"
         # The API broker expects usage_allocation_seconds as a string, not an integer
         payload = {"parameters": {"usage_allocation_seconds": str(allocation_seconds)}}
-
-        response = self.session.patch(url, json=payload)
-
-        # Provide detailed error message for debugging
-        if not response.ok:
-            error_msg = f"HTTP {response.status_code} for {url}"
-            try:
-                error_data = response.json()
-                if "errors" in error_data:
-                    error_msg = f"{error_msg}: {error_data['errors']}"
-                elif "message" in error_data:
-                    error_msg = f"{error_msg}: {error_data['message']}"
-                else:
-                    error_msg = f"{error_msg}: {error_data}"
-            except Exception:
-                error_msg = f"{error_msg}: {response.text[:500]}"
-            raise requests.HTTPError(error_msg)
-
+        self._request("PATCH", url, json=payload)
         return True
 
     def update_instance_limit(self, instance_crn: str, limit_seconds: int | None) -> bool:
@@ -508,16 +436,10 @@ class IBMQuantumAPIClient:
         Returns:
             True if successful
         """
-        # Use the /v1/instances/configuration endpoint with Service-CRN header
-        # Use regional base URL based on the CRN's region
-        base_url = self._get_regional_base_url(instance_crn)
-        url = f"{base_url}/v1/instances/configuration"
-        headers = {"Service-CRN": instance_crn}
+        url = f"{self._get_regional_base_url(instance_crn)}/v1/instances/configuration"
         # API expects instance_limit field, not limit_seconds
         payload = {"instance_limit": limit_seconds}
-
-        response = self.session.put(url, json=payload, headers=headers)
-        response.raise_for_status()
+        self._request("PUT", url, crn=instance_crn, json=payload)
         return True
 
     def create_instance(
@@ -557,23 +479,7 @@ class IBMQuantumAPIClient:
         if tags:
             payload["tags"] = tags
 
-        response = self.session.post(url, json=payload)
-
-        if not response.ok:
-            error_msg = f"HTTP {response.status_code} creating instance"
-            try:
-                error_data = response.json()
-                if "errors" in error_data:
-                    error_msg = f"{error_msg}: {error_data['errors']}"
-                elif "message" in error_data:
-                    error_msg = f"{error_msg}: {error_data['message']}"
-                else:
-                    error_msg = f"{error_msg}: {error_data}"
-            except Exception:
-                error_msg = f"{error_msg}: {response.text[:500]}"
-            raise requests.HTTPError(error_msg)
-
-        return response.json()
+        return self._request_json("POST", url, json=payload)
 
     def get_instance_name_from_crn(self, instance_crn: str) -> str:
         """Get the friendly name of an instance from its CRN using Resource Controller API.
@@ -584,13 +490,9 @@ class IBMQuantumAPIClient:
         Returns:
             The friendly name of the instance, or empty string if not found
         """
-        # Use IBM Cloud Resource Controller API to get instance details
         url = f"{self.resource_controller_url}/v2/resource_instances/{quote(instance_crn, safe='')}"
-
         try:
-            response = self.session.get(url)
-            response.raise_for_status()
-            data = response.json()
+            data = self._request_json("GET", url)
             return data.get("name", "")
         except Exception:
             return ""
@@ -612,25 +514,7 @@ class IBMQuantumAPIClient:
 
         instances = []
         while True:
-            response = self.session.get(url, params=params)
-
-            if not response.ok:
-                error_msg = f"HTTP {response.status_code} for {url}"
-                try:
-                    error_data = response.json()
-                    if "message" in error_data:
-                        error_msg = f"{error_msg}: {error_data['message']}"
-                except Exception:
-                    error_msg = f"{error_msg}: {response.text[:200]}"
-                raise requests.HTTPError(error_msg)
-
-            try:
-                data = response.json()
-            except ValueError as e:
-                raise ValueError(
-                    f"Invalid JSON response from {url}. Response starts with: {response.text[:200]}"
-                ) from e
-
+            data = self._request_json("GET", url, params=params)
             for resource in data.get("resources", []):
                 crn = resource.get("id")
                 name = resource.get("name", "")
