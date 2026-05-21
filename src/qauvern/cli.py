@@ -60,10 +60,9 @@ def enrich_instances_with_usage_data(
                 if project and project.start_date:
                     from datetime import datetime
 
-                    usage_balance = client.get_instance_usage(
+                    instance.consumed_balance_period = client.get_instance_usage_seconds(
                         instance.crn, project.start_date, datetime.now(), account_id
                     )
-                    instance.consumed_balance_period = usage_balance.consumed_seconds
                 else:
                     instance.consumed_balance_period = 0
 

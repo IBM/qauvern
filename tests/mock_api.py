@@ -13,7 +13,7 @@
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from qauvern.models import Account, Instance, InstanceUsage
+from qauvern.models import Account, Instance
 
 
 class MockIBMQuantumAPIClient:
@@ -110,33 +110,23 @@ class MockIBMQuantumAPIClient:
             raise ValueError(f"Instance {instance_crn} not found in mock data")
         return self.instances[instance_crn]
 
-    def get_instance_usage(
+    def get_instance_usage_seconds(
         self, instance_crn: str, start_date: datetime, end_date: datetime, account_id: str
-    ) -> InstanceUsage:
+    ) -> int:
         """Get mock usage analytics for an instance."""
         key = f"{instance_crn}:{start_date.isoformat()}:{end_date.isoformat()}"
 
         if key in self.usage_data:
-            data = self.usage_data[key]
-            consumed = data["total_seconds"]
-        else:
-            # Default to instance's consumed_seconds if no specific usage data
-            instance = self.get_instance(instance_crn)
-            consumed = instance.consumed_seconds
+            return self.usage_data[key]["total_seconds"]
 
-        instance = self.get_instance(instance_crn)
-        return InstanceUsage(
-            crn=instance_crn,
-            consumed_seconds=consumed,
-            allocation_seconds=instance.allocation_seconds,
-            limit_seconds=instance.limit_seconds,
-        )
+        # Default to instance's consumed_seconds if no specific usage data
+        return self.get_instance(instance_crn).consumed_seconds
 
-    def get_rolling_window_usage(self, instance_crn: str, account_id: str, days: int = 28) -> InstanceUsage:
-        """Get mock usage for the rolling window period."""
+    def get_rolling_window_seconds(self, instance_crn: str, account_id: str, days: int = 28) -> int:
+        """Get mock usage in seconds for the rolling window period."""
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
-        return self.get_instance_usage(instance_crn, start_date, end_date, account_id)
+        return self.get_instance_usage_seconds(instance_crn, start_date, end_date, account_id)
 
     def update_instance_allocation(self, instance_crn: str, allocation_seconds: int) -> bool:
         """Update the allocation for a mock instance."""
