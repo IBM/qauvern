@@ -18,7 +18,7 @@ import click
 from tabulate import tabulate
 
 from .api_client import IBMQuantumAPIClient, get_plan_id, get_plan_name
-from .config import load_config
+from .config import ConfigParser, load_config
 from .models import Account, Instance, OptimizationRecommendation, Project
 from .optimizer import AllocationOptimizer
 
@@ -341,6 +341,35 @@ def format_instance_table(
     return table_data, headers
 
 
+config_option = click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True),
+    required=True,
+    help="Path to configuration YAML file",
+)
+
+api_key_option = click.option(
+    "--api-key",
+    "-k",
+    envvar="IBMCLOUD_API_KEY",
+    help="IBM Cloud API key (or set IBMCLOUD_API_KEY env var)",
+)
+
+
+def _build_client(ctx: click.Context, api_key: str | None) -> IBMQuantumAPIClient:
+    staging = ctx.obj.get("staging", False)
+    return IBMQuantumAPIClient(api_key=api_key, staging=staging)
+
+
+def _load_config_and_client(
+    ctx: click.Context, config: str, api_key: str | None
+) -> tuple[ConfigParser, IBMQuantumAPIClient]:
+    config_parser = load_config(config)
+    client = _build_client(ctx, api_key)
+    return config_parser, client
+
+
 @click.group()
 @click.version_option(package_name="qauvern")
 @click.option(
@@ -362,31 +391,15 @@ def main(ctx, staging):
 
 
 @main.command()
-@click.option(
-    "--config",
-    "-c",
-    type=click.Path(exists=True),
-    required=True,
-    help="Path to configuration YAML file",
-)
-@click.option(
-    "--api-key",
-    "-k",
-    envvar="IBMCLOUD_API_KEY",
-    help="IBM Cloud API key (or set IBMCLOUD_API_KEY env var)",
-)
+@config_option
+@api_key_option
 @click.pass_context
 def show(ctx, config: str, api_key: str | None):
     """Show current account and instance allocations for a specific plan."""
     try:
-        # Load configuration
-        config_parser = load_config(config)
+        config_parser, client = _load_config_and_client(ctx, config, api_key)
         account_id = config_parser.account_id
         plan_id = config_parser.plan_id
-
-        # Initialize API client with staging flag
-        staging = ctx.obj.get("staging", False)
-        client = IBMQuantumAPIClient(api_key=api_key, staging=staging)
 
         # Get account with instances filtered by plan
         click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
@@ -422,19 +435,8 @@ def show(ctx, config: str, api_key: str | None):
 
 
 @main.command()
-@click.option(
-    "--config",
-    "-c",
-    type=click.Path(exists=True),
-    required=True,
-    help="Path to configuration YAML file",
-)
-@click.option(
-    "--api-key",
-    "-k",
-    envvar="IBMCLOUD_API_KEY",
-    help="IBM Cloud API key (or set IBMCLOUD_API_KEY env var)",
-)
+@config_option
+@api_key_option
 @click.pass_context
 def instances(ctx, config: str, api_key: str | None):
     """Show instance usage summary for a specific plan.
@@ -443,14 +445,9 @@ def instances(ctx, config: str, api_key: str | None):
     configuration file that match the specified plan, without requiring admin privileges.
     """
     try:
-        # Load configuration
-        config_parser = load_config(config)
+        config_parser, client = _load_config_and_client(ctx, config, api_key)
         plan_id = config_parser.plan_id
         projects = config_parser.projects
-
-        # Initialize API client with staging flag
-        staging = ctx.obj.get("staging", False)
-        client = IBMQuantumAPIClient(api_key=api_key, staging=staging)
 
         # Collect all CRNs from projects (one CRN per project)
         all_crns = [project.crn for project in projects]
@@ -538,32 +535,16 @@ def instances(ctx, config: str, api_key: str | None):
 
 
 @main.command()
-@click.option(
-    "--config",
-    "-c",
-    type=click.Path(exists=True),
-    required=True,
-    help="Path to configuration YAML file",
-)
-@click.option(
-    "--api-key",
-    "-k",
-    envvar="IBMCLOUD_API_KEY",
-    help="IBM Cloud API key (or set IBMCLOUD_API_KEY env var)",
-)
+@config_option
+@api_key_option
 @click.pass_context
 def analyze(ctx, config: str, api_key: str | None):
     """Analyze allocations and show optimization recommendations."""
     try:
-        # Load configuration
-        config_parser = load_config(config)
+        config_parser, client = _load_config_and_client(ctx, config, api_key)
         account_id = config_parser.account_id
         plan_id = config_parser.plan_id
         projects = config_parser.projects
-
-        # Initialize API client with staging flag
-        staging = ctx.obj.get("staging", False)
-        client = IBMQuantumAPIClient(api_key=api_key, staging=staging)
 
         # Get account with instances filtered by plan
         click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
@@ -662,19 +643,8 @@ def analyze(ctx, config: str, api_key: str | None):
 
 
 @main.command()
-@click.option(
-    "--config",
-    "-c",
-    type=click.Path(exists=True),
-    required=True,
-    help="Path to configuration YAML file",
-)
-@click.option(
-    "--api-key",
-    "-k",
-    envvar="IBMCLOUD_API_KEY",
-    help="IBM Cloud API key (or set IBMCLOUD_API_KEY env var)",
-)
+@config_option
+@api_key_option
 @click.option(
     "--dry-run",
     is_flag=True,
@@ -685,15 +655,10 @@ def analyze(ctx, config: str, api_key: str | None):
 def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     """Optimize instance allocations and apply changes for a specific plan."""
     try:
-        # Load configuration
-        config_parser = load_config(config)
+        config_parser, client = _load_config_and_client(ctx, config, api_key)
         account_id = config_parser.account_id
         plan_id = config_parser.plan_id
         projects = config_parser.projects
-
-        # Initialize API client with staging flag
-        staging = ctx.obj.get("staging", False)
-        client = IBMQuantumAPIClient(api_key=api_key, staging=staging)
 
         # Get account with instances filtered by plan
         click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
@@ -815,12 +780,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     required=True,
     help="IBM Cloud account ID to configure",
 )
-@click.option(
-    "--api-key",
-    "-k",
-    envvar="IBMCLOUD_API_KEY",
-    help="IBM Cloud API key (or set IBMCLOUD_API_KEY env var)",
-)
+@api_key_option
 @click.option(
     "--output",
     "-o",
@@ -856,10 +816,8 @@ def configure(
     try:
         import yaml
 
-        # Initialize API client with staging flag
         click.echo(f"Connecting to IBM Quantum API for account {account_id}...")
-        staging = ctx.obj.get("staging", False)
-        client = IBMQuantumAPIClient(api_key=api_key, staging=staging)
+        client = _build_client(ctx, api_key)
 
         # List instances (does not require admin privileges)
         click.echo("Fetching instances...")
@@ -987,12 +945,7 @@ def configure(
     required=True,
     help="Plan name (internal, premium, paygo) or plan UUID",
 )
-@click.option(
-    "--api-key",
-    "-k",
-    envvar="IBMCLOUD_API_KEY",
-    help="IBM Cloud API key (or set IBMCLOUD_API_KEY env var)",
-)
+@api_key_option
 @click.option(
     "--allocation",
     "-a",
@@ -1041,8 +994,7 @@ def create(
             if limit_seconds <= 0:
                 raise click.BadParameter("Limit must be positive")
 
-        staging = ctx.obj.get("staging", False)
-        client = IBMQuantumAPIClient(api_key=api_key, staging=staging)
+        client = _build_client(ctx, api_key)
 
         click.echo(f"Creating instance '{name}' in {target} with plan {get_plan_name(plan_id)}...")
         if allocation_seconds is not None:
