@@ -166,9 +166,7 @@ def test_summary_table_truncates_long_names() -> None:
 
 
 def test_summary_table_uses_format_seconds() -> None:
-    rows, _ = build_instance_summary_table(
-        [_make_instance(allocation_seconds=36000, consumed_seconds=18000)]
-    )
+    rows, _ = build_instance_summary_table([_make_instance(allocation_seconds=36000, consumed_seconds=18000)])
     assert rows[0][1] == "10.0h"
     assert rows[0][2] == "5.0h"
 
@@ -183,9 +181,7 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
-def _invoke_configure(
-    runner: CliRunner, mock_client: MockIBMQuantumAPIClient, args: list[str]
-) -> Result:
+def _invoke_configure(runner: CliRunner, mock_client: MockIBMQuantumAPIClient, args: list[str]) -> Result:
     with patch("qauvern.cli.IBMQuantumAPIClient", return_value=mock_client):
         return runner.invoke(main, ["configure", *args])
 
