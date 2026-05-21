@@ -88,7 +88,7 @@ def test_balance_period_missing_dates_raises() -> None:
     for missing in ["start_date", "end_date"]:
         dates = {"start_date": "2026-01-01T00:00:00", "end_date": "2026-12-31T23:59:59"}
         del dates[missing]
-        period_yaml = "\n".join(f"  {k}: \"{v}\"" for k, v in dates.items())
+        period_yaml = "\n".join(f'  {k}: "{v}"' for k, v in dates.items())
         path = _write_config(f"""
 account_id: "acc-1"
 plan_id: "plan-1"
@@ -108,7 +108,7 @@ def test_project_missing_required_field_raises() -> None:
     for missing in ["name", "crn"]:
         fields = {"name": "Project A", "crn": "crn:test:1"}
         del fields[missing]
-        project_yaml = "\n".join(f"    {k}: \"{v}\"" for k, v in fields.items())
+        project_yaml = "\n".join(f'    {k}: "{v}"' for k, v in fields.items())
         path = _write_config(f"""
 account_id: "acc-1"
 plan_id: "plan-1"
