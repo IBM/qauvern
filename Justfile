@@ -11,6 +11,9 @@ lint:
 test *args:
     uv run pytest {{args}}
 
+run *args:
+  uv run qauvern {{args}}
+
 pex:
     uvx pex . \
         -c qauvern \
