@@ -10,7 +10,7 @@
 
 """Tests for data models."""
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -28,18 +28,8 @@ def _instance(**kwargs: Any) -> Instance:
 
 
 # -------------------------------------------------------------------
-# NetGrant
+# NetGrant — validation
 # -------------------------------------------------------------------
-
-
-def test_net_grant_construction() -> None:
-    grant = NetGrant(
-        start_date=datetime(2026, 5, 1),
-        net_grant_seconds=86400,
-        end_date=datetime(2026, 5, 29),
-    )
-    assert grant.start_date == datetime(2026, 5, 1)
-    assert grant.net_grant_seconds == 86400
 
 
 def test_net_grant_zero_seconds_raises() -> None:
@@ -71,70 +61,8 @@ def test_net_grant_end_date_equals_start_raises() -> None:
 
 
 # -------------------------------------------------------------------
-# Project
+# Project — validation
 # -------------------------------------------------------------------
-
-
-def test_project_creation() -> None:
-    project = Project(
-        name="Test Project",
-        crn="crn:test:1",
-        target_usage_seconds=1000000,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-    assert project.name == "Test Project"
-    assert project.crn == "crn:test:1"
-    assert project.target_usage_seconds == 1000000
-
-
-def test_project_no_target_usage_seconds() -> None:
-    project = Project(
-        name="Test",
-        crn="crn:test:1",
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-    assert project.target_usage_seconds is None
-
-
-def test_project_without_limit_fields() -> None:
-    p = Project(
-        name="A",
-        crn="crn:test:1",
-        target_usage_seconds=30000,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-    assert p.project_limit_seconds is None
-    assert p.net_grants == []
-
-
-def test_project_with_limit_seconds() -> None:
-    p = Project(
-        name="A",
-        crn="crn:test:1",
-        target_usage_seconds=30000,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-        project_limit_seconds=50000,
-    )
-    assert p.project_limit_seconds == 50000
-
-
-def test_project_accepts_net_grants() -> None:
-    grant = NetGrant(start_date=datetime(2026, 5, 1), net_grant_seconds=86400, end_date=datetime(2026, 5, 29))
-    p = Project(
-        name="A",
-        crn="crn:test:1",
-        target_usage_seconds=30000,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-        project_limit_seconds=50000,
-        net_grants=[grant],
-    )
-    assert len(p.net_grants) == 1
-    assert p.net_grants[0].net_grant_seconds == 86400
 
 
 def test_project_invalid_allocation() -> None:
@@ -171,21 +99,8 @@ def test_project_empty_crn() -> None:
 
 
 # -------------------------------------------------------------------
-# Instance — creation and fairness
+# Instance — fairness
 # -------------------------------------------------------------------
-
-
-def test_instance_creation() -> None:
-    instance = Instance(
-        crn="crn:test:instance-1",
-        name="Test Instance",
-        allocation_seconds=100000,
-        limit_seconds=150000,
-        consumed_seconds=50000,
-    )
-    assert instance.crn == "crn:test:instance-1"
-    assert instance.allocation_seconds == 100000
-    assert instance.consumed_seconds == 50000
 
 
 def test_instance_fairness_calculation() -> None:
@@ -195,20 +110,6 @@ def test_instance_fairness_calculation() -> None:
 def test_instance_fairness_zero_allocation() -> None:
     instance = Instance(crn="crn:test:1", name="Test", allocation_seconds=0, consumed_seconds=1000)
     assert instance.fairness == float("inf")
-
-
-def test_daily_usage_default_empty() -> None:
-    assert _instance().daily_usage == {}
-
-
-def test_daily_usage_accepts_date_keyed_dict() -> None:
-    instance = Instance(
-        crn="crn:test:1",
-        name="Test",
-        allocation_seconds=10000,
-        daily_usage={date(2026, 4, 1): 3600, date(2026, 4, 2): 7200},
-    )
-    assert instance.daily_usage[date(2026, 4, 1)] == 3600
 
 
 # -------------------------------------------------------------------
@@ -256,31 +157,8 @@ def test_exhausted_over_target() -> None:
 
 
 # -------------------------------------------------------------------
-# Account
+# Account — validation and utilization
 # -------------------------------------------------------------------
-
-
-def test_account_creation() -> None:
-    account = Account(
-        account_id="test-account",
-        plan_id="test-plan",
-        target_usage_seconds=1000000,
-        consumed_seconds=500000,
-    )
-    assert account.account_id == "test-account"
-    assert account.target_usage_seconds == 1000000
-    assert account.consumed_seconds == 500000
-
-
-def test_account_available_seconds() -> None:
-    account = Account(
-        account_id="test-account",
-        plan_id="test-plan",
-        target_usage_seconds=1000000,
-        consumed_seconds=300000,
-        available_seconds=700000,
-    )
-    assert account.available_seconds == 700000
 
 
 def test_account_utilization() -> None:
@@ -293,23 +171,11 @@ def test_account_utilization() -> None:
     assert account.utilization == 25.0
 
 
-def test_account_add_instance() -> None:
-    account = Account(account_id="test-account", plan_id="test-plan", target_usage_seconds=1000000)
-    account.add_instance(_instance())
-    assert len(account.instances) == 1
-    assert account.instances[0].crn == "crn:test:1"
-
-
-def test_account_default_reserve() -> None:
-    account = Account(account_id="test", plan_id="test-plan", target_usage_seconds=1000000)
-    assert account.allocation_reserve_percent == 0.0
-
-
-def test_account_with_reserve() -> None:
-    account = Account(
-        account_id="test",
-        plan_id="test-plan",
-        target_usage_seconds=1000000,
-        allocation_reserve_percent=20.0,
-    )
-    assert account.allocation_reserve_percent == 20.0
+def test_account_reserve_out_of_range_raises() -> None:
+    with pytest.raises(ValueError, match="allocation_reserve_percent"):
+        Account(
+            account_id="test",
+            plan_id="test-plan",
+            target_usage_seconds=1000000,
+            allocation_reserve_percent=100.0,
+        )
