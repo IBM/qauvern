@@ -24,4 +24,3 @@ projects:
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/123:inst-b1::"
     # 20 hours = 20 * 3600 = 72000 seconds (~0.417 QAU)
     target_usage_seconds: 72000
-

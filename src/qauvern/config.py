@@ -160,10 +160,6 @@ class ConfigParser:
         self._projects_loaded = True
         return projects
 
-    def get_api_config(self) -> dict[str, str]:
-        """Get API configuration if present."""
-        return self.config_data.get("api", {})
-
 
 def load_config(config_path: str) -> ConfigParser:
     """Load and return a configuration parser.
