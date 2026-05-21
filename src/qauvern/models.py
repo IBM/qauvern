@@ -57,24 +57,6 @@ class Project:
 
 
 @dataclass
-class InstanceUsage:
-    """Represents usage data for a service instance."""
-
-    crn: str
-    consumed_seconds: int
-    allocation_seconds: int
-    limit_seconds: int | None = None
-    fairness: float = 0.0
-
-    def __post_init__(self) -> None:
-        """Calculate fairness value."""
-        if self.allocation_seconds > 0:
-            self.fairness = self.consumed_seconds / self.allocation_seconds
-        else:
-            self.fairness = float("inf") if self.consumed_seconds > 0 else 0.0
-
-
-@dataclass
 class Instance:
     """Represents a quantum service instance."""
 

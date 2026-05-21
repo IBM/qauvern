@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
-from .models import Account, Instance, InstanceUsage
+from .models import Account, Instance
 
 # Known plan ID to name mappings
 # These are common IBM Quantum service plans
@@ -308,9 +308,9 @@ class IBMQuantumAPIClient:
         data = self._request_json("GET", url, crn=instance_crn)
         return int(data.get("usage_consumed_seconds", 0))
 
-    def get_instance_usage(
+    def get_instance_usage_seconds(
         self, instance_crn: str, start_date: datetime, end_date: datetime, account_id: str
-    ) -> InstanceUsage:
+    ) -> int:
         """Get usage analytics for an instance with custom date range.
 
         Args:
@@ -320,7 +320,7 @@ class IBMQuantumAPIClient:
             account_id: The account ID (used as subscription_id)
 
         Returns:
-            InstanceUsage object with consumption data
+            Consumed seconds in the given date range
         """
         url = f"{self._get_regional_base_url(instance_crn)}/v1/analytics/usage"
         params = {
@@ -332,17 +332,10 @@ class IBMQuantumAPIClient:
 
         # The analytics endpoint returns usage in MILLISECONDS, convert to seconds
         usage_ms = data.get("usage", 0)
-        usage_seconds = int(usage_ms / 1000) if usage_ms else 0
+        return int(usage_ms / 1000) if usage_ms else 0
 
-        return InstanceUsage(
-            crn=instance_crn,
-            consumed_seconds=usage_seconds,
-            allocation_seconds=0,  # Analytics endpoint doesn't return allocation
-            limit_seconds=None,  # Analytics endpoint doesn't return limit
-        )
-
-    def get_rolling_window_usage(self, instance_crn: str, account_id: str, days: int = 28) -> InstanceUsage:
-        """Get usage for the rolling window period.
+    def get_rolling_window_seconds(self, instance_crn: str, account_id: str, days: int = 28) -> int:
+        """Get usage in seconds for the rolling window period.
 
         Args:
             instance_crn: The CRN of the service instance
@@ -350,11 +343,11 @@ class IBMQuantumAPIClient:
             days: Number of days in the rolling window (default: 28)
 
         Returns:
-            InstanceUsage object for the rolling window
+            Consumed seconds in the rolling window
         """
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
-        return self.get_instance_usage(instance_crn, start_date, end_date, account_id)
+        return self.get_instance_usage_seconds(instance_crn, start_date, end_date, account_id)
 
     def get_detailed_usage(self, instance_crn: str, account_id: str) -> dict:
         """Get detailed usage data for multiple time periods using analytics endpoint.
@@ -371,17 +364,19 @@ class IBMQuantumAPIClient:
         """
         end_date = datetime.now()
 
-        # Fetch usage for different time periods
-        usage_14d = self.get_instance_usage(instance_crn, end_date - timedelta(days=14), end_date, account_id)
-        usage_7d = self.get_instance_usage(instance_crn, end_date - timedelta(days=7), end_date, account_id)
-        usage_3d = self.get_instance_usage(instance_crn, end_date - timedelta(days=3), end_date, account_id)
-        usage_24h = self.get_instance_usage(instance_crn, end_date - timedelta(hours=24), end_date, account_id)
-
         return {
-            "consumed_14day": usage_14d.consumed_seconds,
-            "consumed_7day": usage_7d.consumed_seconds,
-            "consumed_3day": usage_3d.consumed_seconds,
-            "consumed_24h": usage_24h.consumed_seconds,
+            "consumed_14day": self.get_instance_usage_seconds(
+                instance_crn, end_date - timedelta(days=14), end_date, account_id
+            ),
+            "consumed_7day": self.get_instance_usage_seconds(
+                instance_crn, end_date - timedelta(days=7), end_date, account_id
+            ),
+            "consumed_3day": self.get_instance_usage_seconds(
+                instance_crn, end_date - timedelta(days=3), end_date, account_id
+            ),
+            "consumed_24h": self.get_instance_usage_seconds(
+                instance_crn, end_date - timedelta(hours=24), end_date, account_id
+            ),
         }
 
     def get_daily_usage(self, instance_crn: str, account_id: str, start_date: date, end_date: date) -> dict[date, int]:
@@ -575,8 +570,7 @@ class IBMQuantumAPIClient:
                     continue
 
                 # Get usage data
-                usage = self.get_rolling_window_usage(instance.crn, account_id)
-                instance.consumed_seconds = usage.consumed_seconds
+                instance.consumed_seconds = self.get_rolling_window_seconds(instance.crn, account_id)
 
                 # Add to consumed total
                 total_consumed += instance.consumed_seconds

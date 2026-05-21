@@ -14,7 +14,7 @@ from datetime import datetime
 
 import pytest
 
-from qauvern.models import Account, Instance, InstanceUsage, NetGrant, Project
+from qauvern.models import Account, Instance, NetGrant, Project
 
 
 def test_project_creation() -> None:
@@ -233,28 +233,6 @@ def test_account_get_instance_by_crn() -> None:
 
     not_found = account.get_instance_by_crn("crn:test:3")
     assert not_found is None
-
-
-def test_usage_fairness_calculation() -> None:
-    """Test fairness calculation in usage."""
-    usage = InstanceUsage(
-        crn="crn:test:1",
-        consumed_seconds=50000,
-        allocation_seconds=100000,
-    )
-
-    assert usage.fairness == 0.5
-
-
-def test_usage_fairness_zero_allocation() -> None:
-    """Test fairness with zero allocation."""
-    usage = InstanceUsage(
-        crn="crn:test:1",
-        consumed_seconds=1000,
-        allocation_seconds=0,
-    )
-
-    assert usage.fairness == float("inf")
 
 
 def test_net_grant_construction() -> None:
