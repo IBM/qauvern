@@ -33,12 +33,6 @@ balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
 
-# API Configuration (optional)
-# If not provided, will use IBMCLOUD_API_KEY environment variable
-api:
-  api_key: "${IBMCLOUD_API_KEY}"  # Can reference environment variables
-  base_url: "https://quantum.cloud.ibm.com/api"  # Optional, defaults to production
-
 # Projects - each project has exactly one instance CRN
 projects:
   - name: "Quantum Chemistry Research"
