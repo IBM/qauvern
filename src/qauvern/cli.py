@@ -19,7 +19,9 @@ import click
 from tabulate import tabulate
 
 from .api_client import IBMQuantumAPIClient, get_plan_id, get_plan_name
+from .commands.configure import build_configure_yaml, build_instance_summary_table
 from .config import ConfigParser, load_config
+from .formatting import format_fairness, format_seconds
 from .models import Account, Instance, OptimizationRecommendation, Project
 from .optimizer import AllocationOptimizer
 
@@ -93,29 +95,6 @@ def enrich_instances_with_usage_data(
                 instance.consumed_3day = 0
                 instance.consumed_24h = 0
                 instance.daily_usage = {}
-
-
-def format_seconds(seconds: int) -> str:
-    """Format seconds into a human-readable string."""
-    seconds = abs(seconds)
-    hours = seconds / 3600
-    if hours < 1:
-        return f"{seconds}s"
-    elif hours < 24:
-        return f"{hours:.1f}h"
-    else:
-        days = hours / 24
-        return f"{days:.1f}d"
-
-
-def format_fairness(fairness: float) -> str:
-    """Format fairness value with color indicators."""
-    if fairness < 0.5:
-        return click.style(f"{fairness:.2f} ✓", fg="green")
-    elif fairness < 1.0:
-        return click.style(f"{fairness:.2f} ⚠", fg="yellow")
-    else:
-        return click.style(f"{fairness:.2f} ✗", fg="red")
 
 
 def format_limit_display(
@@ -813,12 +792,9 @@ def configure(
     specified account and generates a base YAML configuration file that can
     be customized with project information.
     """
-    import yaml
-
     click.echo(f"Connecting to IBM Quantum API for account {account_id}...")
     client = _build_client(ctx, api_key)
 
-    # List instances (does not require admin privileges)
     click.echo("Fetching instances...")
     instances = client.list_instances(account_id)
 
@@ -827,65 +803,10 @@ def configure(
         sys.exit(1)
 
     click.echo(f"Found {len(instances)} instances")
-
-    # Build configuration structure
-    config = {
-        "account_id": account_id,
-        "balance_period": {
-            "start_date": balance_start,
-            "end_date": balance_end,
-        },
-        "projects": [],
-    }
-
-    # Create one project per instance (since projects and instances are 1:1)
-    # Users can customize names and allocations
-    for i, inst in enumerate(instances, 1):
-        project = {
-            "name": f"Project {i}",
-            "description": f"Auto-generated from instance {inst.name or inst.crn[:50]}",
-            "crn": inst.crn,
-            "target_usage_seconds": inst.allocation_seconds or 96000,  # Default 1 QAU if not set
-        }
-        config["projects"].append(project)
-
-    # Add comments about customization
     click.echo("\nGenerating configuration file...")
 
-    # Write YAML file
     output_path = Path(output)
-    with open(output_path, "w") as f:
-        f.write("# qauvern configuration\n")
-        f.write("# Auto-generated configuration file\n")
-        f.write("#\n")
-        f.write("# IMPORTANT: This is a base configuration with all instances\n")
-        f.write("# grouped into a single project. You should customize this by:\n")
-        f.write("#\n")
-        f.write("# 1. Creating separate projects for different teams/purposes\n")
-        f.write("# 2. Assigning instance CRNs to appropriate projects\n")
-        f.write("# 3. Setting appropriate target_usage_seconds for each project\n")
-        f.write("# 4. Adjusting balance period dates as needed\n")
-        f.write("#\n")
-        f.write(f"# Account: {account_id}\n")
-        f.write(f"# Instances Found: {len(instances)}\n")
-        f.write("#\n")
-        f.write("# Note: Each project corresponds to exactly one service instance.\n")
-        f.write("#\n\n")
-
-        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-
-        f.write("\n# Instance Details:\n")
-        f.write("# The following instances were found in your account:\n")
-        f.write("#\n")
-        for inst in instances:
-            f.write(f"# - {inst.name or 'Unnamed'}\n")
-            f.write(f"#   CRN: {inst.crn}\n")
-            f.write(f"#   Allocation: {format_seconds(inst.allocation_seconds)}\n")
-            f.write(f"#   Consumed: {format_seconds(inst.consumed_seconds)}\n")
-            if inst.limit_seconds:
-                f.write(f"#   Limit: {format_seconds(inst.limit_seconds)}\n")
-            f.write(f"#   Fairness: {inst.fairness:.2f}\n")
-            f.write("#\n")
+    output_path.write_text(build_configure_yaml(account_id, instances, balance_start, balance_end))
 
     click.echo(f"\n✓ Configuration file created: {output_path}")
     click.echo("\nNext steps:")
@@ -893,29 +814,12 @@ def configure(
     click.echo("2. Run 'qauvern analyze' to see optimization recommendations")
     click.echo("3. Run 'qauvern optimize' to apply optimizations")
 
-    # Display summary table
     click.echo("\n" + "=" * 80)
     click.echo("INSTANCE SUMMARY")
     click.echo("=" * 80)
 
-    instance_data = []
-    for inst in instances:
-        instance_data.append(
-            [
-                inst.name[:40],
-                format_seconds(inst.allocation_seconds),
-                format_seconds(inst.consumed_seconds),
-                format_fairness(inst.fairness),
-            ]
-        )
-
-    click.echo(
-        tabulate(
-            instance_data,
-            headers=["Instance Name", "Allocation", "Consumed", "Fairness"],
-            tablefmt="grid",
-        )
-    )
+    rows, headers = build_instance_summary_table(instances)
+    click.echo(tabulate(rows, headers=headers, tablefmt="grid"))
 
 
 @main.command()
