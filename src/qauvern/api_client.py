@@ -233,13 +233,6 @@ class IBMQuantumAPIClient:
             )
             raise Exception(details) from e
 
-    def refresh_token(self) -> None:
-        """Refresh the IAM token.
-
-        Call this method if you receive authentication errors, as IAM tokens expire.
-        """
-        self._obtain_iam_token()
-
     def get_account(self, account_id: str, plan_id: str) -> Account:
         """Get account information including allocation for a specific plan.
 
