@@ -42,7 +42,6 @@ class Project:
     start_date: datetime
     end_date: datetime
     target_usage_seconds: int | None = None
-    description: str | None = None
     project_limit_seconds: int | None = None
     net_grants: list[NetGrant] = field(default_factory=list)
 
@@ -65,7 +64,6 @@ class Instance:
     allocation_seconds: int
     limit_seconds: int | None = None
     consumed_seconds: int = 0  # Usage in 28-day rolling window
-    project_name: str | None = None
     plan: str | None = None
     target_usage_seconds: int = 0  # Target usage from project configuration
     consumed_balance_period: int = 0  # Usage since balance period start
@@ -74,13 +72,6 @@ class Instance:
     consumed_3day: int = 0  # Usage in last 3 days
     consumed_24h: int = 0  # Usage in last 24 hours
     daily_usage: dict[date, int] = field(default_factory=dict)
-
-    @property
-    def in_debt(self) -> bool:
-        """True when consumed_seconds exceeds the currently-set limit."""
-        if self.limit_seconds is None:
-            return False
-        return self.consumed_seconds > self.limit_seconds
 
     @property
     def fairness(self) -> float:
@@ -117,13 +108,6 @@ class Instance:
         if self.consumed_seconds > 0:
             score += (self.consumed_seconds / 28.0) * (bias**1.0)
         return score
-
-    @property
-    def remaining_limit(self) -> int | None:
-        """Calculate remaining limit for this instance."""
-        if self.limit_seconds is not None:
-            return max(0, self.limit_seconds - self.consumed_seconds)
-        return None
 
     @property
     def exhausted(self) -> bool:
@@ -168,13 +152,6 @@ class Account:
     def add_instance(self, instance: Instance) -> None:
         """Add an instance to the account."""
         self.instances.append(instance)
-
-    def get_instance_by_crn(self, crn: str) -> Instance | None:
-        """Get an instance by its CRN."""
-        for instance in self.instances:
-            if instance.crn == crn:
-                return instance
-        return None
 
 
 @dataclass
