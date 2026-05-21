@@ -177,8 +177,6 @@ class OptimizationResult:
     account: Account
     projects: list[Project]
     recommendations: list[OptimizationRecommendation]
-    total_reallocated: int = 0
-    instances_updated: int = 0
 
     @property
     def reductions(self) -> list[OptimizationRecommendation]:
