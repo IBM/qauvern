@@ -127,7 +127,6 @@ class ConfigParser:
                 target_usage_seconds=target_usage_seconds,
                 start_date=start_date,
                 end_date=end_date,
-                description=proj_data.get("description"),
                 project_limit_seconds=project_limit_seconds,
                 net_grants=net_grants,
             )
