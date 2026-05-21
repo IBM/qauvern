@@ -179,7 +179,7 @@ projects:
 """)
     try:
         parser = load_config(path)
-        projects = parser.get_projects()
+        projects = parser.projects
         assert projects[0].project_limit_seconds == 50000
     finally:
         os.unlink(path)
@@ -204,7 +204,7 @@ projects:
 """)
     try:
         parser = load_config(path)
-        projects = parser.get_projects()
+        projects = parser.projects
         assert len(projects[0].net_grants) == 1
         assert projects[0].net_grants[0].net_grant_seconds == 180000
     finally:
@@ -232,7 +232,7 @@ projects:
 """)
     try:
         parser = load_config(path)
-        projects = parser.get_projects()
+        projects = parser.projects
         assert len(projects[0].net_grants) == 2
         assert projects[0].net_grants[1].net_grant_seconds == 96000
     finally:
@@ -254,7 +254,7 @@ projects:
 """)
     try:
         parser = load_config(path)
-        projects = parser.get_projects()
+        projects = parser.projects
         assert projects[0].net_grants == []
     finally:
         os.unlink(path)
@@ -275,7 +275,7 @@ projects:
 """)
     try:
         parser = load_config(path)
-        projects = parser.get_projects()
+        projects = parser.projects
         assert projects[0].target_usage_seconds is None
     finally:
         os.unlink(path)
@@ -327,7 +327,7 @@ projects:
         from datetime import datetime as dt
 
         parser = load_config(path)
-        projects = parser.get_projects()
+        projects = parser.projects
         assert projects[0].net_grants[0].end_date == dt(2026, 6, 15)
     finally:
         os.unlink(path)
@@ -354,7 +354,7 @@ projects:
         from datetime import datetime as dt
 
         parser = load_config(path)
-        projects = parser.get_projects()
+        projects = parser.projects
         assert projects[0].net_grants[0].end_date == dt(2026, 5, 29)
     finally:
         os.unlink(path)
@@ -376,7 +376,7 @@ projects:
 """)
     try:
         parser = load_config(path)
-        assert parser.get_allocation_reserve_percent() == 20.0
+        assert parser.allocation_reserve_percent == 20.0
     finally:
         os.unlink(path)
 
@@ -396,7 +396,7 @@ projects:
 """)
     try:
         parser = load_config(path)
-        assert parser.get_allocation_reserve_percent() == 0.0
+        assert parser.allocation_reserve_percent == 0.0
     finally:
         os.unlink(path)
 

@@ -11,6 +11,7 @@
 """Configuration file parser for qauvern."""
 
 from datetime import datetime, timedelta
+from functools import cached_property
 from pathlib import Path
 
 import yaml
@@ -22,15 +23,8 @@ class ConfigParser:
     """Parser for YAML configuration files."""
 
     def __init__(self, config_path: str):
-        """Initialize the config parser.
-
-        Args:
-            config_path: Path to the YAML configuration file
-        """
         self.config_path = Path(config_path)
         self.config_data: dict = {}
-        self._projects_cache: list[Project] = []
-        self._projects_loaded = False
 
     def load(self) -> None:
         """Load and parse the configuration file."""
@@ -41,8 +35,6 @@ class ConfigParser:
             self.config_data = yaml.safe_load(f)
 
         self._validate_config()
-        # Validate project constraints during load
-        self.get_projects()
 
     def _validate_config(self) -> None:
         """Validate the configuration structure."""
@@ -63,62 +55,55 @@ class ConfigParser:
         if "start_date" not in balance_period or "end_date" not in balance_period:
             raise ValueError("balance_period must contain start_date and end_date")
 
-    def get_account_id(self) -> str:
-        """Get the account ID from config."""
+        # Validate project constraints eagerly.
+        self.projects
+
+    @property
+    def account_id(self) -> str:
         return self.config_data["account_id"]
 
-    def get_plan_id(self) -> str:
-        """Get the plan ID from config."""
+    @property
+    def plan_id(self) -> str:
         return self.config_data["plan_id"]
 
-    def get_minimum_allocation_seconds(self) -> int:
-        """Get the global minimum allocation in seconds.
-
-        Returns:
-            Minimum allocation in seconds, defaults to 60 (1 minute) if not specified
-        """
+    @property
+    def minimum_allocation_seconds(self) -> int:
         return self.config_data.get("minimum_allocation_seconds", 60)
 
-    def get_allocation_reserve_percent(self) -> float:
-        """Get the allocation reserve percent from config. Defaults to 0.0."""
+    @property
+    def allocation_reserve_percent(self) -> float:
         return float(self.config_data.get("allocation_reserve_percent", 0.0))
 
-    def get_balance_period(self) -> dict[str, datetime]:
-        """Get the balance period dates."""
+    @cached_property
+    def balance_period(self) -> dict[str, datetime]:
         period = self.config_data["balance_period"]
         return {
             "start_date": datetime.fromisoformat(period["start_date"]),
             "end_date": datetime.fromisoformat(period["end_date"]),
         }
 
-    def get_projects(self) -> list[Project]:
+    @cached_property
+    def projects(self) -> list[Project]:
         """Parse and return the list of projects.
 
         Note: Each project corresponds to exactly one service instance (CRN).
         """
-        if self._projects_loaded:
-            return self._projects_cache
-
         projects = []
-        period = self.get_balance_period()
+        period = self.balance_period
 
         for proj_data in self.config_data["projects"]:
-            # Validate required fields
             required = ["name", "crn"]
             for field in required:
                 if field not in proj_data:
                     raise ValueError(f"Project missing required field: {field}")
 
-            # Use project-specific dates if provided, otherwise use balance period
             start_date = (
                 datetime.fromisoformat(proj_data["start_date"]) if "start_date" in proj_data else period["start_date"]
             )
             end_date = datetime.fromisoformat(proj_data["end_date"]) if "end_date" in proj_data else period["end_date"]
 
-            # Parse optional project_limit_seconds
             project_limit_seconds = proj_data.get("project_limit_seconds")
 
-            # Parse optional net_grants
             net_grants = []
             for grant_data in proj_data.get("net_grants", []):
                 grant_start = datetime.fromisoformat(grant_data["start_date"])
@@ -147,7 +132,6 @@ class ConfigParser:
                 net_grants=net_grants,
             )
 
-            # Validate limit constraints
             if project_limit_seconds is not None and target_usage_seconds is not None:
                 if project_limit_seconds < target_usage_seconds:
                     raise ValueError(
@@ -156,8 +140,6 @@ class ConfigParser:
                     )
             projects.append(project)
 
-        self._projects_cache = projects
-        self._projects_loaded = True
         return projects
 
 

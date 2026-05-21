@@ -382,8 +382,8 @@ def show(ctx, config: str, api_key: str | None):
     try:
         # Load configuration
         config_parser = load_config(config)
-        account_id = config_parser.get_account_id()
-        plan_id = config_parser.get_plan_id()
+        account_id = config_parser.account_id
+        plan_id = config_parser.plan_id
 
         # Initialize API client with staging flag
         staging = ctx.obj.get("staging", False)
@@ -446,8 +446,8 @@ def instances(ctx, config: str, api_key: str | None):
     try:
         # Load configuration
         config_parser = load_config(config)
-        plan_id = config_parser.get_plan_id()
-        projects = config_parser.get_projects()
+        plan_id = config_parser.plan_id
+        projects = config_parser.projects
 
         # Initialize API client with staging flag
         staging = ctx.obj.get("staging", False)
@@ -558,9 +558,9 @@ def analyze(ctx, config: str, api_key: str | None):
     try:
         # Load configuration
         config_parser = load_config(config)
-        account_id = config_parser.get_account_id()
-        plan_id = config_parser.get_plan_id()
-        projects = config_parser.get_projects()
+        account_id = config_parser.account_id
+        plan_id = config_parser.plan_id
+        projects = config_parser.projects
 
         # Initialize API client with staging flag
         staging = ctx.obj.get("staging", False)
@@ -575,10 +575,10 @@ def analyze(ctx, config: str, api_key: str | None):
         enrich_instances_with_usage_data(account, projects, client, account_id, fetch_detailed_usage=True)
 
         # Get minimum allocation from config
-        minimum_allocation_seconds = config_parser.get_minimum_allocation_seconds()
+        minimum_allocation_seconds = config_parser.minimum_allocation_seconds
 
         # Run optimization analysis
-        account.allocation_reserve_percent = config_parser.get_allocation_reserve_percent()
+        account.allocation_reserve_percent = config_parser.allocation_reserve_percent
         click.echo("Analyzing allocations...")
         optimizer = AllocationOptimizer(account, projects, minimum_allocation_seconds)
         result = optimizer.optimize()
@@ -688,9 +688,9 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     try:
         # Load configuration
         config_parser = load_config(config)
-        account_id = config_parser.get_account_id()
-        plan_id = config_parser.get_plan_id()
-        projects = config_parser.get_projects()
+        account_id = config_parser.account_id
+        plan_id = config_parser.plan_id
+        projects = config_parser.projects
 
         # Initialize API client with staging flag
         staging = ctx.obj.get("staging", False)
@@ -704,10 +704,10 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
         enrich_instances_with_usage_data(account, projects, client, account_id, fetch_detailed_usage=True)
 
         # Get minimum allocation from config
-        minimum_allocation_seconds = config_parser.get_minimum_allocation_seconds()
+        minimum_allocation_seconds = config_parser.minimum_allocation_seconds
 
         # Run optimization
-        account.allocation_reserve_percent = config_parser.get_allocation_reserve_percent()
+        account.allocation_reserve_percent = config_parser.allocation_reserve_percent
         click.echo("Computing optimal allocations...")
         optimizer = AllocationOptimizer(account, projects, minimum_allocation_seconds)
         result = optimizer.optimize()
