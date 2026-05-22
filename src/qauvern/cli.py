@@ -22,13 +22,13 @@ from .api_client import IBMQuantumAPIClient, get_plan_id, get_plan_name
 from .commands.configure import build_configure_yaml, build_instance_summary_table
 from .config import ConfigParser, load_config
 from .formatting import format_fairness, format_seconds
-from .models import Account, Instance, OptimizationRecommendation, Project
+from .models import Account, Instance, InstanceConfig, OptimizationRecommendation
 from .optimizer import AllocationOptimizer
 
 
 def enrich_instances_with_usage_data(
     account: Account,
-    projects: list[Project],
+    instance_configs: list[InstanceConfig],
     client: IBMQuantumAPIClient,
     account_id: str,
     fetch_detailed_usage: bool = False,
@@ -37,34 +37,34 @@ def enrich_instances_with_usage_data(
 
     Args:
         account: Account object with instances to enrich
-        projects: List of projects with configuration
+        instance_configs: List of instance configs with configuration
         client: API client for fetching usage data
         account_id: Account ID for analytics authentication
         fetch_detailed_usage: If True, fetch detailed usage for multiple time periods
     """
     for instance in account.instances:
-        # Find the project for this instance
-        project = None
-        for proj in projects:
-            if proj.crn == instance.crn:
-                project = proj
+        # Find the config for this instance
+        config = None
+        for cfg in instance_configs:
+            if cfg.crn == instance.crn:
+                config = cfg
                 break
 
-        # Set target_usage_seconds from project configuration
-        if project and project.target_usage_seconds:
-            instance.target_usage_seconds = project.target_usage_seconds
+        # Set target_usage_seconds from instance config
+        if config and config.target_usage_seconds:
+            instance.target_usage_seconds = config.target_usage_seconds
         else:
             instance.target_usage_seconds = 0
 
         # Optionally fetch detailed usage data
         if fetch_detailed_usage:
             try:
-                # Usage since balance period start (if project found)
-                if project and project.start_date:
+                # Usage since balance period start (if config found)
+                if config and config.start_date:
                     from datetime import datetime
 
                     instance.consumed_balance_period = client.get_instance_usage_seconds(
-                        instance.crn, project.start_date, datetime.now(), account_id
+                        instance.crn, config.start_date, datetime.now(), account_id
                     )
                 else:
                     instance.consumed_balance_period = 0
@@ -157,7 +157,7 @@ def parse_seconds(value: str) -> int:
 
 def format_instance_table(
     instances: list[Instance],
-    projects: list[Project] | None = None,
+    instance_configs: list[InstanceConfig] | None = None,
     columns: list[str] | None = None,
     rec_map: dict[str, "OptimizationRecommendation"] | None = None,
 ) -> tuple[list[list[str]], list[str]]:
@@ -165,7 +165,7 @@ def format_instance_table(
 
     Args:
         instances: List of Instance objects to display
-        projects: Optional list of Project objects (needed for target columns)
+        instance_configs: Optional list of InstanceConfig objects (needed for target columns)
         columns: List of column names to display. Available columns:
             - name: Instance name
             - plan: Plan name
@@ -193,11 +193,11 @@ def format_instance_table(
     if columns is None:
         columns = ["name", "plan", "allocation", "consumed", "utilization", "limit", "fairness"]
 
-    # Build project map if projects provided
-    project_map = {}
-    if projects:
-        for proj in projects:
-            project_map[proj.crn] = proj
+    # Build config map if instance_configs provided
+    config_map = {}
+    if instance_configs:
+        for cfg in instance_configs:
+            config_map[cfg.crn] = cfg
 
     # Column header mapping
     header_map = {
@@ -227,7 +227,7 @@ def format_instance_table(
 
     for instance in instances:
         row = []
-        project = project_map.get(instance.crn) if project_map else None
+        config = config_map.get(instance.crn) if config_map else None
         rec = rec_map.get(instance.crn) if rec_map else None
 
         for col in columns:
@@ -236,13 +236,13 @@ def format_instance_table(
             elif col == "plan":
                 row.append(get_plan_name(instance.plan))
             elif col == "target":
-                if project and project.target_usage_seconds is not None:
-                    row.append(format_seconds(project.target_usage_seconds))
+                if config and config.target_usage_seconds is not None:
+                    row.append(format_seconds(config.target_usage_seconds))
                 else:
                     row.append("-")
             elif col == "target_pct":
-                if project and project.target_usage_seconds:
-                    pct = (instance.consumed_balance_period / project.target_usage_seconds) * 100
+                if config and config.target_usage_seconds:
+                    pct = (instance.consumed_balance_period / config.target_usage_seconds) * 100
                     row.append(f"{pct:.1f}%")
                 else:
                     row.append("-")
@@ -271,9 +271,9 @@ def format_instance_table(
             elif col == "limit":
                 _has_grant = False
                 _in_debt = getattr(instance, "in_debt", False)
-                if project:
+                if config:
                     _today = date.today()
-                    for _grant in getattr(project, "net_grants", []):
+                    for _grant in getattr(config, "net_grants", []):
                         _gs = _grant.start_date.date()
                         if _gs <= _today < _grant.end_date.date():
                             _has_grant = True
@@ -282,9 +282,9 @@ def format_instance_table(
             elif col == "new_limit":
                 _has_grant = False
                 _in_debt = getattr(instance, "in_debt", False)
-                if project:
+                if config:
                     _today = date.today()
-                    for _grant in getattr(project, "net_grants", []):
+                    for _grant in getattr(config, "net_grants", []):
                         _gs = _grant.start_date.date()
                         if _gs <= _today < _grant.end_date.date():
                             _has_grant = True
@@ -376,8 +376,8 @@ def handle_errors(func):
 def main(ctx, staging):
     """qauvern — IBM Quantum Load Balancer.
 
-    Optimize quantum instance allocations across projects to maximize
-    utilization of your quantum allocation.
+    Optimize quantum instance allocations to maximize utilization of your
+    quantum allocation.
     """
     # Store staging flag in context for subcommands
     ctx.ensure_object(dict)
@@ -438,20 +438,15 @@ def instances(ctx, config: str, api_key: str | None):
     """
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     plan_id = config_parser.plan_id
-    projects = config_parser.projects
+    instance_configs = config_parser.instance_configs
 
-    # Collect all CRNs from projects (one CRN per project)
-    all_crns = [project.crn for project in projects]
+    # Collect all CRNs from instance configs (one CRN per config)
+    all_crns = [cfg.crn for cfg in instance_configs]
 
     click.echo(f"Fetching usage information for {len(all_crns)} instances (plan: {get_plan_name(plan_id)})...")
 
     # Fetch instance information
     instances_data = []
-    project_map = {}
-
-    # Build project map (one CRN per project)
-    for project in projects:
-        project_map[project.crn] = project.name
 
     # Fetch each instance with 28-day usage data and filter by plan
     for crn in all_crns:
@@ -531,7 +526,7 @@ def analyze(ctx, config: str, api_key: str | None):
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     account_id = config_parser.account_id
     plan_id = config_parser.plan_id
-    projects = config_parser.projects
+    instance_configs = config_parser.instance_configs
 
     # Get account with instances filtered by plan
     click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
@@ -539,7 +534,7 @@ def analyze(ctx, config: str, api_key: str | None):
 
     # Enrich instances with target usage and detailed usage data
     click.echo("Fetching usage data for different time periods...")
-    enrich_instances_with_usage_data(account, projects, client, account_id, fetch_detailed_usage=True)
+    enrich_instances_with_usage_data(account, instance_configs, client, account_id, fetch_detailed_usage=True)
 
     # Get minimum allocation from config
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
@@ -547,7 +542,7 @@ def analyze(ctx, config: str, api_key: str | None):
     # Run optimization analysis
     account.allocation_reserve_percent = config_parser.allocation_reserve_percent
     click.echo("Analyzing allocations...")
-    optimizer = AllocationOptimizer(account, projects, minimum_allocation_seconds)
+    optimizer = AllocationOptimizer(account, instance_configs, minimum_allocation_seconds)
     result = optimizer.optimize()
 
     # Validate current allocations
@@ -612,7 +607,9 @@ def analyze(ctx, config: str, api_key: str | None):
         "change",
         "reason",
     ]
-    table_data, headers = format_instance_table(account.instances, projects=projects, columns=columns, rec_map=rec_map)
+    table_data, headers = format_instance_table(
+        account.instances, instance_configs=instance_configs, columns=columns, rec_map=rec_map
+    )
 
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
 
@@ -639,14 +636,14 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     account_id = config_parser.account_id
     plan_id = config_parser.plan_id
-    projects = config_parser.projects
+    instance_configs = config_parser.instance_configs
 
     # Get account with instances filtered by plan
     click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
     account = client.get_account_with_instances(account_id, plan_id)
 
     # Enrich instances with target usage (no detailed usage needed for optimize)
-    enrich_instances_with_usage_data(account, projects, client, account_id, fetch_detailed_usage=True)
+    enrich_instances_with_usage_data(account, instance_configs, client, account_id, fetch_detailed_usage=True)
 
     # Get minimum allocation from config
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
@@ -654,7 +651,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     # Run optimization
     account.allocation_reserve_percent = config_parser.allocation_reserve_percent
     click.echo("Computing optimal allocations...")
-    optimizer = AllocationOptimizer(account, projects, minimum_allocation_seconds)
+    optimizer = AllocationOptimizer(account, instance_configs, minimum_allocation_seconds)
     result = optimizer.optimize()
 
     if not result.recommendations:
@@ -790,7 +787,7 @@ def configure(
 
     This command queries the IBM Quantum API to list all instances in the
     specified account and generates a base YAML configuration file that can
-    be customized with project information.
+    be customized.
     """
     click.echo(f"Connecting to IBM Quantum API for account {account_id}...")
     client = _build_client(ctx, api_key)
@@ -810,7 +807,7 @@ def configure(
 
     click.echo(f"\n✓ Configuration file created: {output_path}")
     click.echo("\nNext steps:")
-    click.echo(f"1. Edit {output_path} to customize project names and allocations")
+    click.echo(f"1. Edit {output_path} to customize instance names and allocations")
     click.echo("2. Run 'qauvern analyze' to see optimization recommendations")
     click.echo("3. Run 'qauvern optimize' to apply optimizations")
 

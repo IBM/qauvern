@@ -16,7 +16,7 @@ from datetime import date, datetime
 
 @dataclass
 class NetGrant:
-    """An additive time budget boost above project_limit_seconds."""
+    """An additive time budget boost above limit_seconds."""
 
     start_date: datetime
     net_grant_seconds: int
@@ -30,23 +30,18 @@ class NetGrant:
 
 
 @dataclass
-class Project:
-    """Represents a quantum project with allocation constraints.
-
-    Note: A project corresponds to exactly one service instance (CRN).
-    Projects and instances are conceptually the same thing.
-    """
+class InstanceConfig:
+    """Configuration for a single quantum instance, keyed by CRN."""
 
     name: str
     crn: str
     start_date: datetime
     end_date: datetime
     target_usage_seconds: int | None = None
-    project_limit_seconds: int | None = None
+    limit_seconds: int | None = None
     net_grants: list[NetGrant] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        """Validate project data."""
         if self.target_usage_seconds is not None and self.target_usage_seconds <= 0:
             raise ValueError("target_usage_seconds must be positive")
         if self.start_date >= self.end_date:
@@ -65,7 +60,7 @@ class Instance:
     limit_seconds: int | None = None
     consumed_seconds: int = 0  # Usage in 28-day rolling window
     plan: str | None = None
-    target_usage_seconds: int = 0  # Target usage from project configuration
+    target_usage_seconds: int = 0  # Target usage from the instance configuration
     consumed_balance_period: int = 0  # Usage since balance period start
     consumed_14day: int = 0  # Usage in last 14 days
     consumed_7day: int = 0  # Usage in last 7 days
@@ -175,7 +170,7 @@ class OptimizationResult:
     """Results from optimization algorithm."""
 
     account: Account
-    projects: list[Project]
+    instance_configs: list[InstanceConfig]
     recommendations: list[OptimizationRecommendation]
 
     @property

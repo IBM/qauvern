@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from qauvern.models import Account, Instance, NetGrant, Project
+from qauvern.models import Account, Instance, InstanceConfig, NetGrant
 
 
 # -------------------------------------------------------------------
@@ -61,13 +61,13 @@ def test_net_grant_end_date_equals_start_raises() -> None:
 
 
 # -------------------------------------------------------------------
-# Project — validation
+# InstanceConfig — validation
 # -------------------------------------------------------------------
 
 
-def test_project_invalid_allocation() -> None:
+def test_instance_config_invalid_allocation() -> None:
     with pytest.raises(ValueError, match="target_usage_seconds must be positive"):
-        Project(
+        InstanceConfig(
             name="Test",
             crn="crn:test:1",
             target_usage_seconds=-1000,
@@ -76,9 +76,9 @@ def test_project_invalid_allocation() -> None:
         )
 
 
-def test_project_invalid_dates() -> None:
+def test_instance_config_invalid_dates() -> None:
     with pytest.raises(ValueError, match="start_date must be before end_date"):
-        Project(
+        InstanceConfig(
             name="Test",
             crn="crn:test:1",
             target_usage_seconds=1000,
@@ -87,9 +87,9 @@ def test_project_invalid_dates() -> None:
         )
 
 
-def test_project_empty_crn() -> None:
+def test_instance_config_empty_crn() -> None:
     with pytest.raises(ValueError, match="crn cannot be empty"):
-        Project(
+        InstanceConfig(
             name="Test",
             crn="",
             target_usage_seconds=1000,

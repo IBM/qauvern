@@ -50,14 +50,14 @@ def _make_instance(
 # ---------------------------------------------------------------------------
 
 
-def test_build_configure_yaml_multiple_projects() -> None:
+def test_build_configure_yaml_multiple_instances() -> None:
     instances = [
         _make_instance(crn="crn:a", name="A"),
         _make_instance(crn="crn:b", name="B"),
         _make_instance(crn="crn:c", name="C"),
     ]
     parsed = yaml.safe_load(build_configure_yaml("acct", instances, "s", "e"))
-    assert [p["name"] for p in parsed["projects"]] == ["Project 1", "Project 2", "Project 3"]
+    assert [p["name"] for p in parsed["projects"]] == ["Instance 1", "Instance 2", "Instance 3"]
     assert [p["crn"] for p in parsed["projects"]] == ["crn:a", "crn:b", "crn:c"]
 
 
@@ -133,9 +133,9 @@ def test_build_configure_yaml_round_trips_through_load_config(tmp_path: Path) ->
     assert cfg.account_id == "acct"
     assert cfg.balance_period["start_date"] == datetime(2026, 1, 1, 0, 0, 0)
     assert cfg.balance_period["end_date"] == datetime(2026, 12, 31, 23, 59, 59)
-    assert len(cfg.projects) == 1
-    assert cfg.projects[0].crn == "crn:test:rt"
-    assert cfg.projects[0].target_usage_seconds == 36000
+    assert len(cfg.instance_configs) == 1
+    assert cfg.instance_configs[0].crn == "crn:test:rt"
+    assert cfg.instance_configs[0].target_usage_seconds == 36000
 
 
 # ---------------------------------------------------------------------------

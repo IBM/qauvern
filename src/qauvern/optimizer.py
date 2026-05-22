@@ -13,7 +13,7 @@
 from datetime import date
 
 from .limit_resolver import LimitResolver
-from .models import Account, Instance, OptimizationResult, Project
+from .models import Account, Instance, InstanceConfig, OptimizationResult
 
 
 class AllocationOptimizer:
@@ -22,7 +22,7 @@ class AllocationOptimizer:
     def __init__(
         self,
         account: Account,
-        projects: list[Project],
+        instance_configs: list[InstanceConfig],
         minimum_allocation_seconds: int = 60,
         today: date | None = None,
     ):
@@ -30,50 +30,37 @@ class AllocationOptimizer:
 
         Args:
             account: Account with instances to optimize
-            projects: List of projects with allocation constraints
+            instance_configs: List of instance configs with allocation constraints
             minimum_allocation_seconds: Minimum allocation to maintain for each instance (default: 60 seconds)
             today: Date to use for limit override resolution (defaults to date.today())
         """
         self.account = account
-        self.projects = projects
+        self.instance_configs = instance_configs
         self.minimum_allocation_seconds = minimum_allocation_seconds
         self.today = today or date.today()
-        self.project_map = self._build_project_map()
+        self._config_by_crn = {config.crn: config for config in instance_configs}
         self._limit_resolver = LimitResolver()
 
-    def _build_project_map(self) -> dict[str, Project]:
-        """Build a mapping of CRN to Project.
+    def _config_for(self, instance: Instance) -> InstanceConfig | None:
+        """Get the instance config for a runtime instance."""
+        return self._config_by_crn.get(instance.crn)
 
-        Note: Each project has exactly one CRN (project == instance).
-        """
-        project_map = {}
-        for project in self.projects:
-            project_map[project.crn] = project
-        return project_map
-
-    def _get_project_for_instance(self, instance: Instance) -> Project | None:
-        """Get the project associated with an instance."""
-        return self.project_map.get(instance.crn)
-
-    def _calculate_project_consumption(self, project: Project) -> int:
-        """Calculate total consumption for a project.
-
-        Note: Each project has exactly one instance (CRN).
-        """
+    def _consumption_for(self, config: InstanceConfig) -> int:
+        """Calculate total consumption for an instance config."""
         for instance in self.account.instances:
-            if instance.crn == project.crn:
+            if instance.crn == config.crn:
                 return instance.consumed_seconds
         return 0
 
-    def _calculate_project_remaining(self, project: Project) -> int | None:
-        """Calculate remaining allocation for a project.
+    def _remaining_for(self, config: InstanceConfig) -> int | None:
+        """Calculate remaining allocation for an instance config.
 
-        Returns None if project has no target_usage_seconds (uncapped).
+        Returns None if the config has no target_usage_seconds (uncapped).
         """
-        if project.target_usage_seconds is None:
+        if config.target_usage_seconds is None:
             return None
-        consumed = self._calculate_project_consumption(project)
-        return max(0, project.target_usage_seconds - consumed)
+        consumed = self._consumption_for(config)
+        return max(0, config.target_usage_seconds - consumed)
 
     def _get_active_instances(self, threshold_seconds: int = 3600) -> list[Instance]:
         """Get instances that have been used recently.
@@ -117,7 +104,7 @@ class AllocationOptimizer:
         """
         result = OptimizationResult(
             account=self.account,
-            projects=self.projects,
+            instance_configs=self.instance_configs,
             recommendations=[],
         )
 
@@ -129,11 +116,11 @@ class AllocationOptimizer:
         active = []  # score > 0
 
         for instance in self.account.instances:
-            project = self._get_project_for_instance(instance)
-            if not project:
+            config = self._config_for(instance)
+            if not config:
                 continue
 
-            # Check if instance has exhausted its project allocation
+            # Check if instance has exhausted its configured allocation
             if instance.exhausted:
                 exhausted.append(instance)
                 continue
@@ -160,7 +147,7 @@ class AllocationOptimizer:
                     instance_crn=instance.crn,
                     current_allocation=instance.allocation_seconds,
                     new_allocation=0,
-                    reason="Instance has exhausted project allocation for accounting period",
+                    reason="Instance has exhausted allocation for accounting period",
                 )
                 exhausted_count += 1
         print(f"  Recommendations for exhausted instances: {exhausted_count}")
@@ -240,13 +227,13 @@ class AllocationOptimizer:
 
                 active_recommendations = 0
                 for instance in active_sorted:
-                    project = self._get_project_for_instance(instance)
-                    if not project:
+                    config = self._config_for(instance)
+                    if not config:
                         continue
 
                     # Calculate how much more this instance could use
-                    project_remaining = self._calculate_project_remaining(project)
-                    if project_remaining is not None and project_remaining <= 0:
+                    config_remaining = self._remaining_for(config)
+                    if config_remaining is not None and config_remaining <= 0:
                         continue
 
                     # Calculate proportional share based on activity score
@@ -257,9 +244,9 @@ class AllocationOptimizer:
                     min_allocation = max(self.minimum_allocation_seconds, instance.consumed_seconds)
                     new_allocation = min_allocation + proportional_share
 
-                    # Cap allocation: use project target if available, otherwise limit_seconds
-                    if project_remaining is not None:
-                        max_allocation = instance.allocation_seconds + project_remaining
+                    # Cap allocation: use config target if available, otherwise limit_seconds
+                    if config_remaining is not None:
+                        max_allocation = instance.allocation_seconds + config_remaining
                         if new_allocation > max_allocation:
                             new_allocation = max_allocation
                     elif instance.limit_seconds is not None:
@@ -298,11 +285,11 @@ class AllocationOptimizer:
 
         # Calculate new limits for each instance using LimitResolver
         for instance in self.account.instances:
-            project = self._get_project_for_instance(instance)
-            if not project:
+            config = self._config_for(instance)
+            if not config:
                 continue
 
-            new_limit = self._limit_resolver.resolve(project, instance, self.today)
+            new_limit = self._limit_resolver.resolve(config, instance, self.today)
 
             if new_limit is not None and new_limit != instance.limit_seconds:
                 existing_rec = next((rec for rec in result.recommendations if rec.instance_crn == instance.crn), None)
@@ -335,18 +322,15 @@ class AllocationOptimizer:
                 f"account target ({self.account.target_usage_seconds}s)"
             )
 
-        # Check that each project's instance doesn't exceed project target
-        # Note: Each project has exactly one instance (CRN)
-        for project in self.projects:
-            if project.target_usage_seconds is None:
+        # Check that each instance config's allocation doesn't exceed its target
+        for config in self.instance_configs:
+            if config.target_usage_seconds is None:
                 continue
-            project_allocated = sum(
-                inst.allocation_seconds for inst in self.account.instances if inst.crn == project.crn
-            )
-            if project_allocated > project.target_usage_seconds:
+            allocated = sum(inst.allocation_seconds for inst in self.account.instances if inst.crn == config.crn)
+            if allocated > config.target_usage_seconds:
                 errors.append(
-                    f"Project '{project.name}' total allocation ({project_allocated}s) "
-                    f"exceeds project target ({project.target_usage_seconds}s)"
+                    f"Instance '{config.name}' total allocation ({allocated}s) "
+                    f"exceeds target ({config.target_usage_seconds}s)"
                 )
 
         return len(errors) == 0, errors

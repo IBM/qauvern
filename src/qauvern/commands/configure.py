@@ -38,7 +38,7 @@ def build_configure_yaml(
         },
         "projects": [
             {
-                "name": f"Project {i}",
+                "name": f"Instance {i}",
                 "crn": inst.crn,
                 "target_usage_seconds": inst.allocation_seconds or 96000,
             }
@@ -50,18 +50,13 @@ def build_configure_yaml(
     out.write("# qauvern configuration\n")
     out.write("# Auto-generated configuration file\n")
     out.write("#\n")
-    out.write("# IMPORTANT: This is a base configuration with all instances\n")
-    out.write("# grouped into a single project. You should customize this by:\n")
-    out.write("#\n")
-    out.write("# 1. Creating separate projects for different teams/purposes\n")
-    out.write("# 2. Assigning instance CRNs to appropriate projects\n")
-    out.write("# 3. Setting appropriate target_usage_seconds for each project\n")
-    out.write("# 4. Adjusting balance period dates as needed\n")
+    out.write("# Customize this file by:\n")
+    out.write("# 1. Renaming each entry to a meaningful name\n")
+    out.write("# 2. Setting an appropriate target_usage_seconds for each entry\n")
+    out.write("# 3. Adjusting balance period dates as needed\n")
     out.write("#\n")
     out.write(f"# Account: {account_id}\n")
     out.write(f"# Instances Found: {len(instances)}\n")
-    out.write("#\n")
-    out.write("# Note: Each project corresponds to exactly one service instance.\n")
     out.write("#\n\n")
 
     yaml.dump(config, out, default_flow_style=False, sort_keys=False)

@@ -14,7 +14,7 @@ from datetime import datetime
 
 import pytest
 
-from qauvern.models import Account, Instance, Project
+from qauvern.models import Account, Instance, InstanceConfig
 from qauvern.optimizer import AllocationOptimizer
 
 
@@ -72,47 +72,47 @@ def optimizer_account() -> Account:
 
 
 @pytest.fixture
-def optimizer_projects() -> list[Project]:
-    project1 = Project(
-        name="Project A",
+def optimizer_instance_configs() -> list[InstanceConfig]:
+    cfg1 = InstanceConfig(
+        name="Instance A",
         crn="crn:test:1",
         target_usage_seconds=1000000,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
-        project_limit_seconds=900000,
+        limit_seconds=900000,
     )
 
-    project2 = Project(
-        name="Project B",
+    cfg2 = InstanceConfig(
+        name="Instance B",
         crn="crn:test:2",
         target_usage_seconds=500000,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
     )
 
-    project3 = Project(
-        name="Project C",
+    cfg3 = InstanceConfig(
+        name="Instance C",
         crn="crn:test:3",
         target_usage_seconds=400000,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
     )
 
-    return [project1, project2, project3]
+    return [cfg1, cfg2, cfg3]
 
 
-def test_optimizer_initialization(optimizer_account: Account, optimizer_projects: list[Project]) -> None:
+def test_optimizer_initialization(optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]) -> None:
     """Test optimizer initialization."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_projects)
+    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
 
     assert optimizer.account == optimizer_account
-    assert len(optimizer.projects) == 3
-    assert len(optimizer.project_map) == 3  # One CRN per project
+    assert len(optimizer.instance_configs) == 3
+    assert len(optimizer._config_by_crn) == 3  # One CRN per cfg
 
 
-def test_get_active_instances(optimizer_account: Account, optimizer_projects: list[Project]) -> None:
+def test_get_active_instances(optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]) -> None:
     """Test identifying active instances."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_projects)
+    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
     active = optimizer._get_active_instances(threshold_seconds=3600)
 
     assert len(active) == 2  # instance1 and instance3
@@ -120,56 +120,60 @@ def test_get_active_instances(optimizer_account: Account, optimizer_projects: li
     assert any(inst.crn == "crn:test:3" for inst in active)
 
 
-def test_get_inactive_instances(optimizer_account: Account, optimizer_projects: list[Project]) -> None:
+def test_get_inactive_instances(optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]) -> None:
     """Test identifying inactive instances."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_projects)
+    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
     inactive = optimizer._get_inactive_instances(threshold_seconds=3600)
 
     assert len(inactive) == 1
     assert inactive[0].crn == "crn:test:2"
 
 
-def test_calculate_project_consumption(optimizer_account: Account, optimizer_projects: list[Project]) -> None:
-    """Test calculating project consumption."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_projects)
+def test_consumption_for_config(optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]) -> None:
+    """Test calculating cfg consumption."""
+    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
 
-    project1_consumption = optimizer._calculate_project_consumption(optimizer_projects[0])
-    assert project1_consumption == 550000  # instance1 (crn:test:1)
+    cfg1_consumption = optimizer._consumption_for(optimizer_instance_configs[0])
+    assert cfg1_consumption == 550000  # instance1 (crn:test:1)
 
-    project2_consumption = optimizer._calculate_project_consumption(optimizer_projects[1])
-    assert project2_consumption == 1000  # instance2 (crn:test:2)
+    cfg2_consumption = optimizer._consumption_for(optimizer_instance_configs[1])
+    assert cfg2_consumption == 1000  # instance2 (crn:test:2)
 
-    project3_consumption = optimizer._calculate_project_consumption(optimizer_projects[2])
-    assert project3_consumption == 150000  # instance3 (crn:test:3)
-
-
-def test_calculate_project_remaining(optimizer_account: Account, optimizer_projects: list[Project]) -> None:
-    """Test calculating project remaining allocation."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_projects)
-
-    project1_remaining = optimizer._calculate_project_remaining(optimizer_projects[0])
-    assert project1_remaining == 450000  # 1000000 - 550000
-
-    project2_remaining = optimizer._calculate_project_remaining(optimizer_projects[1])
-    assert project2_remaining == 499000  # 500000 - 1000
-
-    project3_remaining = optimizer._calculate_project_remaining(optimizer_projects[2])
-    assert project3_remaining == 250000  # 400000 - 150000
+    cfg3_consumption = optimizer._consumption_for(optimizer_instance_configs[2])
+    assert cfg3_consumption == 150000  # instance3 (crn:test:3)
 
 
-def test_analyze_generates_recommendations(optimizer_account: Account, optimizer_projects: list[Project]) -> None:
+def test_remaining_for_config(optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]) -> None:
+    """Test calculating cfg remaining allocation."""
+    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
+
+    cfg1_remaining = optimizer._remaining_for(optimizer_instance_configs[0])
+    assert cfg1_remaining == 450000  # 1000000 - 550000
+
+    cfg2_remaining = optimizer._remaining_for(optimizer_instance_configs[1])
+    assert cfg2_remaining == 499000  # 500000 - 1000
+
+    cfg3_remaining = optimizer._remaining_for(optimizer_instance_configs[2])
+    assert cfg3_remaining == 250000  # 400000 - 150000
+
+
+def test_analyze_generates_recommendations(
+    optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]
+) -> None:
     """Test that analyze generates recommendations."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_projects)
+    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
     result = optimizer.analyze()
 
     assert len(result.recommendations) > 0
     assert result.account == optimizer_account
-    assert result.projects == optimizer_projects
+    assert result.instance_configs == optimizer_instance_configs
 
 
-def test_optimize_generates_recommendations(optimizer_account: Account, optimizer_projects: list[Project]) -> None:
+def test_optimize_generates_recommendations(
+    optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]
+) -> None:
     """Test that optimize generates recommendations with limits."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_projects)
+    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
     result = optimizer.optimize()
 
     assert len(result.recommendations) > 0
@@ -203,15 +207,15 @@ def test_validate_allocations_valid() -> None:
     account.add_instance(instance1)
     account.add_instance(instance2)
 
-    project = Project(
-        name="Test Project",
+    cfg = InstanceConfig(
+        name="Test Instance",
         crn="crn:test:1",
         target_usage_seconds=1500000,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
     )
 
-    optimizer = AllocationOptimizer(account, [project])
+    optimizer = AllocationOptimizer(account, [cfg])
     is_valid, errors = optimizer.validate_allocations()
 
     assert is_valid
@@ -242,15 +246,15 @@ def test_validate_allocations_exceeds_account() -> None:
     account.add_instance(instance1)
     account.add_instance(instance2)
 
-    project = Project(
-        name="Test Project",
+    cfg = InstanceConfig(
+        name="Test Instance",
         crn="crn:test:1",
         target_usage_seconds=1000000,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
     )
 
-    optimizer = AllocationOptimizer(account, [project])
+    optimizer = AllocationOptimizer(account, [cfg])
     is_valid, errors = optimizer.validate_allocations()
 
     assert not is_valid
@@ -258,8 +262,8 @@ def test_validate_allocations_exceeds_account() -> None:
     assert "exceeds account target" in errors[0]
 
 
-def test_validate_allocations_exceeds_project() -> None:
-    """Test validation when allocations exceed project limit."""
+def test_validate_allocations_exceeds_instance_target() -> None:
+    """Test validation when allocations exceed cfg limit."""
     account = Account(
         account_id="test",
         plan_id="test-plan",
@@ -273,7 +277,7 @@ def test_validate_allocations_exceeds_project() -> None:
         consumed_seconds=100000,
     )
     instance2 = Instance(
-        crn="crn:test:1",  # Same CRN as project
+        crn="crn:test:1",  # Same CRN as cfg
         name="Test2",
         allocation_seconds=600000,
         consumed_seconds=100000,
@@ -282,31 +286,31 @@ def test_validate_allocations_exceeds_project() -> None:
     account.add_instance(instance1)
     account.add_instance(instance2)
 
-    project = Project(
-        name="Test Project",
+    cfg = InstanceConfig(
+        name="Test Instance",
         crn="crn:test:1",
         target_usage_seconds=1000000,  # Less than total allocation (1200000)
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
     )
 
-    optimizer = AllocationOptimizer(account, [project])
+    optimizer = AllocationOptimizer(account, [cfg])
     is_valid, errors = optimizer.validate_allocations()
 
     assert not is_valid
     assert len(errors) > 0
-    assert "exceeds project target" in errors[0]
+    assert "exceeds target" in errors[0]
 
 
-def _make_account_and_project(reserve_percent: float) -> tuple[Account, Project]:
-    """Build account+project where reserve is the binding allocation constraint.
+def _make_account_and_config(reserve_percent: float) -> tuple[Account, InstanceConfig]:
+    """Build account+cfg where reserve is the binding allocation constraint.
 
     Fixture arithmetic:
       freed = 200000 - 100000 = 100000  (active instance reduced to 28d floor)
       total raw = 100000 + 500000 = 600000
       with 20% reserve: int(600000 * 0.8) = 480000  -> new_allocation = 100000 + 480000 = 580000
       with  0% reserve: int(600000 * 1.0) = 600000  -> new_allocation = 100000 + 600000 = 700000
-      project_remaining = 2000000 - 100000 = 1900000, far above both, so reserve is binding.
+      remaining = 2000000 - 100000 = 1900000, far above both, so reserve is binding.
     """
     account = Account(
         account_id="test-account",
@@ -316,8 +320,8 @@ def _make_account_and_project(reserve_percent: float) -> tuple[Account, Project]
         available_seconds=500000,
         allocation_reserve_percent=reserve_percent,
     )
-    project = Project(
-        name="Project A",
+    cfg = InstanceConfig(
+        name="Instance A",
         crn="crn:test:reserve:1",
         target_usage_seconds=2000000,
         start_date=datetime(2026, 1, 1),
@@ -335,16 +339,16 @@ def _make_account_and_project(reserve_percent: float) -> tuple[Account, Project]
         target_usage_seconds=2000000,
     )
     account.add_instance(instance)
-    return account, project
+    return account, cfg
 
 
 def test_reserve_reduces_available_allocation() -> None:
     """With 20% reserve, new allocation is measurably lower than with 0% reserve."""
-    account_with_reserve, project = _make_account_and_project(20.0)
-    result_with = AllocationOptimizer(account_with_reserve, [project]).analyze()
+    account_with_reserve, cfg = _make_account_and_config(20.0)
+    result_with = AllocationOptimizer(account_with_reserve, [cfg]).analyze()
 
-    account_no_reserve, project2 = _make_account_and_project(0.0)
-    result_without = AllocationOptimizer(account_no_reserve, [project2]).analyze()
+    account_no_reserve, cfg2 = _make_account_and_config(0.0)
+    result_without = AllocationOptimizer(account_no_reserve, [cfg2]).analyze()
 
     alloc_with = next(r.new_allocation for r in result_with.recommendations if r.instance_crn == "crn:test:reserve:1")
     alloc_without = next(
@@ -355,11 +359,11 @@ def test_reserve_reduces_available_allocation() -> None:
 
 def test_zero_reserve_is_deterministic() -> None:
     """Two runs with 0% reserve on identical fixtures produce identical recommendations."""
-    account_a, project_a = _make_account_and_project(0.0)
-    account_b, project_b = _make_account_and_project(0.0)
+    account_a, config_a = _make_account_and_config(0.0)
+    account_b, config_b = _make_account_and_config(0.0)
 
-    result_a = AllocationOptimizer(account_a, [project_a]).analyze()
-    result_b = AllocationOptimizer(account_b, [project_b]).analyze()
+    result_a = AllocationOptimizer(account_a, [config_a]).analyze()
+    result_b = AllocationOptimizer(account_b, [config_b]).analyze()
 
     recs_a = {r.instance_crn: r.new_allocation for r in result_a.recommendations}
     recs_b = {r.instance_crn: r.new_allocation for r in result_b.recommendations}
@@ -367,7 +371,7 @@ def test_zero_reserve_is_deterministic() -> None:
 
 
 @pytest.fixture
-def lr_account_and_project() -> tuple[Account, Project]:
+def lr_account_and_config() -> tuple[Account, InstanceConfig]:
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
@@ -375,13 +379,13 @@ def lr_account_and_project() -> tuple[Account, Project]:
         consumed_seconds=0,
         available_seconds=200000,
     )
-    project = Project(
-        name="Project A",
+    cfg = InstanceConfig(
+        name="Instance A",
         crn="crn:test:lr:1",
         target_usage_seconds=300000,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
-        project_limit_seconds=350000,
+        limit_seconds=350000,
     )
     instance = Instance(
         crn="crn:test:lr:1",
@@ -395,33 +399,33 @@ def lr_account_and_project() -> tuple[Account, Project]:
         target_usage_seconds=300000,
     )
     account.add_instance(instance)
-    return account, project
+    return account, cfg
 
 
-def test_optimize_uses_project_limit_seconds(lr_account_and_project: tuple[Account, Project]) -> None:
-    """Optimizer sets new_limit from project_limit_seconds via LimitResolver."""
-    account, project = lr_account_and_project
-    optimizer = AllocationOptimizer(account, [project])
+def test_optimize_uses_limit_seconds(lr_account_and_config: tuple[Account, InstanceConfig]) -> None:
+    """Optimizer sets new_limit from limit_seconds via LimitResolver."""
+    account, cfg = lr_account_and_config
+    optimizer = AllocationOptimizer(account, [cfg])
     result = optimizer.optimize()
     limit_recs = [r for r in result.recommendations if r.new_limit is not None]
     assert len(limit_recs) > 0
     assert limit_recs[0].new_limit == 350000
 
 
-def test_optimize_uses_active_grant(lr_account_and_project: tuple[Account, Project]) -> None:
+def test_optimize_uses_active_grant(lr_account_and_config: tuple[Account, InstanceConfig]) -> None:
     """Optimizer sets new_limit from active net grant via LimitResolver."""
     from datetime import date
     from qauvern.models import NetGrant
 
-    account, project = lr_account_and_project
+    account, cfg = lr_account_and_config
     grant = NetGrant(
         start_date=datetime(2026, 4, 15),
         net_grant_seconds=300000,
         end_date=datetime(2026, 5, 13),
     )
-    project.project_limit_seconds = 200000
-    project.net_grants = [grant]
-    optimizer = AllocationOptimizer(account, [project], today=date(2026, 4, 15))
+    cfg.limit_seconds = 200000
+    cfg.net_grants = [grant]
+    optimizer = AllocationOptimizer(account, [cfg], today=date(2026, 4, 15))
     result = optimizer.optimize()
     limit_recs = [r for r in result.recommendations if r.new_limit is not None]
     assert len(limit_recs) > 0
@@ -429,7 +433,7 @@ def test_optimize_uses_active_grant(lr_account_and_project: tuple[Account, Proje
 
 
 def test_no_target_usage_caps_at_limit() -> None:
-    """Optimizer caps allocation at limit_seconds when project has no target."""
+    """Optimizer caps allocation at limit_seconds when cfg has no target."""
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
@@ -450,15 +454,15 @@ def test_no_target_usage_caps_at_limit() -> None:
     )
     account.add_instance(instance)
 
-    project = Project(
-        name="No Target Project",
+    cfg = InstanceConfig(
+        name="No Target Instance",
         crn="crn:test:1",
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
-        project_limit_seconds=200000,
+        limit_seconds=200000,
     )
 
-    optimizer = AllocationOptimizer(account, [project])
+    optimizer = AllocationOptimizer(account, [cfg])
     result = optimizer.analyze()
 
     rec = next((r for r in result.recommendations if r.instance_crn == "crn:test:1"), None)
@@ -468,7 +472,7 @@ def test_no_target_usage_caps_at_limit() -> None:
 
 
 def test_no_target_instance_never_exhausted() -> None:
-    """Instance with no project target is never exhausted."""
+    """Instance with no cfg target is never exhausted."""
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
@@ -487,14 +491,14 @@ def test_no_target_instance_never_exhausted() -> None:
     )
     account.add_instance(instance)
 
-    project = Project(
+    cfg = InstanceConfig(
         name="No Target",
         crn="crn:test:1",
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
     )
 
-    optimizer = AllocationOptimizer(account, [project])
+    optimizer = AllocationOptimizer(account, [cfg])
     result = optimizer.analyze()
 
     # Should NOT be treated as exhausted (no allocation=0 recommendation)
@@ -503,8 +507,8 @@ def test_no_target_instance_never_exhausted() -> None:
         assert rec.new_allocation > 0
 
 
-def test_validate_skips_project_without_target() -> None:
-    """Validation skips projects without target_usage_seconds."""
+def test_validate_skips_config_without_target() -> None:
+    """Validation skips instance configs without target_usage_seconds."""
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
@@ -520,14 +524,14 @@ def test_validate_skips_project_without_target() -> None:
     )
     account.add_instance(instance)
 
-    project = Project(
+    cfg = InstanceConfig(
         name="No Target",
         crn="crn:test:1",
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
     )
 
-    optimizer = AllocationOptimizer(account, [project])
+    optimizer = AllocationOptimizer(account, [cfg])
     is_valid, errors = optimizer.validate_allocations()
-    # Should not error about exceeding project target
+    # Should not error about exceeding cfg target
     assert not any("No Target" in e for e in errors)

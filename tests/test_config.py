@@ -66,8 +66,8 @@ def test_missing_required_field_raises() -> None:
             os.unlink(path)
 
 
-def test_projects_not_a_list_raises() -> None:
-    """Test that 'projects' being a non-list raises ValueError."""
+def test_projects_key_not_a_list_raises() -> None:
+    """Test that the 'projects' YAML key being a non-list raises ValueError."""
     path = _write_config("""
 account_id: "acc-1"
 plan_id: "plan-1"
@@ -103,12 +103,12 @@ projects: []
             os.unlink(path)
 
 
-def test_project_missing_required_field_raises() -> None:
-    """Test that a project missing 'name' or 'crn' raises ValueError."""
+def test_instance_missing_required_field_raises() -> None:
+    """Test that an instance entry missing 'name' or 'crn' raises ValueError."""
     for missing in ["name", "crn"]:
         fields = {"name": "Project A", "crn": "crn:test:1"}
         del fields[missing]
-        project_yaml = "\n".join(f'    {k}: "{v}"' for k, v in fields.items())
+        entry_yaml = "\n".join(f'    {k}: "{v}"' for k, v in fields.items())
         path = _write_config(f"""
 account_id: "acc-1"
 plan_id: "plan-1"
@@ -117,7 +117,7 @@ balance_period:
   end_date: "2026-12-31T23:59:59"
 projects:
   -
-{project_yaml}
+{entry_yaml}
 """)
         try:
             with pytest.raises(ValueError, match=missing):
@@ -233,12 +233,12 @@ projects:
 
 
 # -------------------------------------------------------------------
-# Projects
+# Instance configs
 # -------------------------------------------------------------------
 
 
-def test_project_inherits_balance_period_dates() -> None:
-    """Test that projects without explicit dates inherit from balance_period."""
+def test_instance_inherits_balance_period_dates() -> None:
+    """Test that instance configs without explicit dates inherit from balance_period."""
     path = _write_config("""
 account_id: "acc-1"
 plan_id: "plan-1"
@@ -251,15 +251,15 @@ projects:
 """)
     try:
         parser = load_config(path)
-        project = parser.projects[0]
-        assert project.start_date == dt(2026, 1, 1)
-        assert project.end_date == dt(2026, 12, 31, 23, 59, 59)
+        cfg = parser.instance_configs[0]
+        assert cfg.start_date == dt(2026, 1, 1)
+        assert cfg.end_date == dt(2026, 12, 31, 23, 59, 59)
     finally:
         os.unlink(path)
 
 
-def test_project_date_overrides_balance_period() -> None:
-    """Test that project-level start/end dates override the balance period."""
+def test_instance_date_overrides_balance_period() -> None:
+    """Test that entry-level start/end dates override the balance period."""
     path = _write_config("""
 account_id: "acc-1"
 plan_id: "plan-1"
@@ -274,15 +274,15 @@ projects:
 """)
     try:
         parser = load_config(path)
-        project = parser.projects[0]
-        assert project.start_date == dt(2026, 3, 1)
-        assert project.end_date == dt(2026, 9, 30, 23, 59, 59)
+        cfg = parser.instance_configs[0]
+        assert cfg.start_date == dt(2026, 3, 1)
+        assert cfg.end_date == dt(2026, 9, 30, 23, 59, 59)
     finally:
         os.unlink(path)
 
 
-def test_project_without_target_usage_seconds() -> None:
-    """Test that project without target_usage_seconds parses with None."""
+def test_instance_without_target_usage_seconds() -> None:
+    """Test that entry without target_usage_seconds parses with None."""
     path = _write_config("""
 account_id: "acc-1"
 plan_id: "plan-1"
@@ -296,13 +296,13 @@ projects:
 """)
     try:
         parser = load_config(path)
-        assert parser.projects[0].target_usage_seconds is None
+        assert parser.instance_configs[0].target_usage_seconds is None
     finally:
         os.unlink(path)
 
 
-def test_project_limit_seconds_parsed() -> None:
-    """Test that project_limit_seconds is parsed from config."""
+def test_limit_seconds_parsed() -> None:
+    """Test that project_limit_seconds YAML key parses to limit_seconds."""
     path = _write_config("""
 account_id: "acc-1"
 plan_id: "plan-1"
@@ -317,12 +317,12 @@ projects:
 """)
     try:
         parser = load_config(path)
-        assert parser.projects[0].project_limit_seconds == 50000
+        assert parser.instance_configs[0].limit_seconds == 50000
     finally:
         os.unlink(path)
 
 
-def test_project_limit_below_target_raises() -> None:
+def test_limit_below_target_raises() -> None:
     """Test that project_limit_seconds < target_usage_seconds raises ValueError."""
     path = _write_config("""
 account_id: "acc-1"
@@ -349,7 +349,7 @@ projects:
 
 
 def test_no_net_grants_defaults_to_empty_list() -> None:
-    """Test that project with no net_grants has empty list."""
+    """Test that an entry with no net_grants has empty list."""
     path = _write_config("""
 account_id: "acc-1"
 plan_id: "plan-1"
@@ -363,7 +363,7 @@ projects:
 """)
     try:
         parser = load_config(path)
-        assert parser.projects[0].net_grants == []
+        assert parser.instance_configs[0].net_grants == []
     finally:
         os.unlink(path)
 
@@ -387,8 +387,8 @@ projects:
 """)
     try:
         parser = load_config(path)
-        assert len(parser.projects[0].net_grants) == 1
-        assert parser.projects[0].net_grants[0].net_grant_seconds == 180000
+        assert len(parser.instance_configs[0].net_grants) == 1
+        assert parser.instance_configs[0].net_grants[0].net_grant_seconds == 180000
     finally:
         os.unlink(path)
 
@@ -414,8 +414,8 @@ projects:
 """)
     try:
         parser = load_config(path)
-        assert len(parser.projects[0].net_grants) == 2
-        assert parser.projects[0].net_grants[1].net_grant_seconds == 96000
+        assert len(parser.instance_configs[0].net_grants) == 2
+        assert parser.instance_configs[0].net_grants[1].net_grant_seconds == 96000
     finally:
         os.unlink(path)
 
@@ -464,7 +464,7 @@ projects:
 """)
     try:
         parser = load_config(path)
-        assert parser.projects[0].net_grants[0].end_date == dt(2026, 6, 15)
+        assert parser.instance_configs[0].net_grants[0].end_date == dt(2026, 6, 15)
     finally:
         os.unlink(path)
 
@@ -488,6 +488,6 @@ projects:
 """)
     try:
         parser = load_config(path)
-        assert parser.projects[0].net_grants[0].end_date == dt(2026, 5, 29)
+        assert parser.instance_configs[0].net_grants[0].end_date == dt(2026, 5, 29)
     finally:
         os.unlink(path)
