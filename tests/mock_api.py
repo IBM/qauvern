@@ -170,7 +170,7 @@ class MockIBMQuantumAPIClient:
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Mock creating an instance."""
-        plan_uuid = plan_id_for(plan, staging=True)
+        plan_uuid = plan_id_for(plan)
         crn = f"crn:v1:bluemix:public:quantum-computing:{target}:a/mock-account:{name}::"
         instance = Instance(
             crn=crn,

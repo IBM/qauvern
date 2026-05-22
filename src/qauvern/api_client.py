@@ -184,7 +184,7 @@ class IBMQuantumAPIClient:
 
     def get_account(self, account_id: str, plan: Plan) -> Account:
         """Get account information including allocation for a specific plan."""
-        plan_id = plan_id_for(plan, staging=self.staging)
+        plan_id = plan_id_for(plan)
         url = f"{self.base_url}/v1/accounts/{account_id}"
         data = self._request_json("GET", url, params={"plan_id": plan_id})
 
@@ -386,7 +386,7 @@ class IBMQuantumAPIClient:
             "name": name,
             "target": target,
             "resource_group": resource_group,
-            "resource_plan_id": plan_id_for(plan, staging=self.staging),
+            "resource_plan_id": plan_id_for(plan),
             "resource_id": QUANTUM_COMPUTING_RESOURCE_ID,
         }
 
@@ -460,7 +460,7 @@ class IBMQuantumAPIClient:
     def get_account_with_instances(self, account_id: str, plan: Plan) -> Account:
         """Get account with instances filtered by plan, populated with full data."""
         account = self.get_account(account_id, plan)
-        plan_id = plan_id_for(plan, staging=self.staging)
+        plan_id = plan_id_for(plan)
 
         instances = self.list_instances(account_id)
 

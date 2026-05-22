@@ -447,7 +447,7 @@ def instances(ctx, config: str, api_key: str | None):
     """
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     plan = config_parser.plan
-    plan_uuid = plan_id_for(plan, staging=ctx.obj.get("staging", False))
+    plan_uuid = plan_id_for(plan)
     instance_configs = config_parser.instance_configs
 
     all_crns = [cfg.crn for cfg in instance_configs]
