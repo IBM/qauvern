@@ -348,8 +348,8 @@ projects:
 # -------------------------------------------------------------------
 
 
-def test_no_net_grants_defaults_to_empty_list() -> None:
-    """Test that an entry with no net_grants has empty list."""
+def test_no_net_grants_defaults_to_empty_tuple() -> None:
+    """Test that an entry with no net_grants has empty tuple."""
     path = _write_config("""
 account_id: "acc-1"
 plan_id: "plan-1"
@@ -363,7 +363,7 @@ projects:
 """)
     try:
         parser = load_config(path)
-        assert parser.instance_configs[0].net_grants == []
+        assert parser.instance_configs[0].net_grants == ()
     finally:
         os.unlink(path)
 

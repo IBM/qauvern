@@ -414,6 +414,7 @@ def test_optimize_uses_limit_seconds(lr_account_and_config: tuple[Account, Insta
 
 def test_optimize_uses_active_grant(lr_account_and_config: tuple[Account, InstanceConfig]) -> None:
     """Optimizer sets new_limit from active net grant via LimitResolver."""
+    import dataclasses
     from datetime import date
     from qauvern.models import NetGrant
 
@@ -423,8 +424,7 @@ def test_optimize_uses_active_grant(lr_account_and_config: tuple[Account, Instan
         net_grant_seconds=300000,
         end_date=datetime(2026, 5, 13),
     )
-    cfg.limit_seconds = 200000
-    cfg.net_grants = [grant]
+    cfg = dataclasses.replace(cfg, limit_seconds=200000, net_grants=(grant,))
     optimizer = AllocationOptimizer(account, [cfg], today=date(2026, 4, 15))
     result = optimizer.optimize()
     limit_recs = [r for r in result.recommendations if r.new_limit is not None]

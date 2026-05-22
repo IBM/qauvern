@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 
-@dataclass
+@dataclass(frozen=True)
 class NetGrant:
     """An additive time budget boost above limit_seconds."""
 
@@ -29,7 +29,7 @@ class NetGrant:
             raise ValueError("end_date must be after start_date")
 
 
-@dataclass
+@dataclass(frozen=True)
 class InstanceConfig:
     """Configuration for a single quantum instance, keyed by CRN."""
 
@@ -39,7 +39,7 @@ class InstanceConfig:
     end_date: datetime
     target_usage_seconds: int | None = None
     limit_seconds: int | None = None
-    net_grants: list[NetGrant] = field(default_factory=list)
+    net_grants: tuple[NetGrant, ...] = ()
 
     def __post_init__(self) -> None:
         if self.target_usage_seconds is not None and self.target_usage_seconds <= 0:

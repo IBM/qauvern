@@ -123,7 +123,7 @@ class ConfigParser:
                 start_date=start_date,
                 end_date=end_date,
                 limit_seconds=limit_seconds,
-                net_grants=net_grants,
+                net_grants=tuple(net_grants),
             )
 
             if limit_seconds is not None and target_usage_seconds is not None:

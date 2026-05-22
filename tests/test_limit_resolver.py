@@ -30,7 +30,7 @@ def make_instance_config(
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
         limit_seconds=limit_seconds,
-        net_grants=net_grants or [],
+        net_grants=tuple(net_grants) if net_grants else (),
     )
 
 
