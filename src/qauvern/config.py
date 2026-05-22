@@ -32,14 +32,14 @@ class ConfigParser:
 
     def _validate_config(self) -> None:
         """Validate the configuration structure."""
-        required_fields = ["account_id", "plan_id", "balance_period", "projects"]
+        required_fields = ["account_id", "plan_id", "balance_period", "instances"]
 
         for field in required_fields:
             if field not in self.config_data:
                 raise ValueError(f"Missing required field in config: {field}")
 
-        if not isinstance(self.config_data["projects"], list):
-            raise ValueError("'projects' must be a list")
+        if not isinstance(self.config_data["instances"], list):
+            raise ValueError("'instances' must be a list")
 
         reserve = self.config_data.get("allocation_reserve_percent", 0.0)
         if not (0.0 <= float(reserve) < 100.0):
@@ -82,15 +82,13 @@ class ConfigParser:
         configs: list[InstanceConfig] = []
         period = self.balance_period
 
-        for entry in self.config_data["projects"]:
+        for entry in self.config_data["instances"]:
             for field in ("name", "crn"):
                 if field not in entry:
                     raise ValueError(f"Instance config missing required field: {field}")
 
             start_date = datetime.fromisoformat(entry["start_date"]) if "start_date" in entry else period["start_date"]
             end_date = datetime.fromisoformat(entry["end_date"]) if "end_date" in entry else period["end_date"]
-
-            limit_seconds = entry.get("project_limit_seconds")
 
             net_grants = []
             for grant_data in entry.get("net_grants", []):
@@ -109,6 +107,7 @@ class ConfigParser:
                 )
 
             target_usage_seconds = entry.get("target_usage_seconds")
+            limit_seconds = entry.get("limit_seconds")
 
             config = InstanceConfig(
                 name=entry["name"],
@@ -123,7 +122,7 @@ class ConfigParser:
             if limit_seconds is not None and target_usage_seconds is not None:
                 if limit_seconds < target_usage_seconds:
                     raise ValueError(
-                        f"Instance '{entry['name']}': project_limit_seconds ({limit_seconds}) "
+                        f"Instance '{entry['name']}': limit_seconds ({limit_seconds}) "
                         f"must be >= target_usage_seconds ({target_usage_seconds})"
                     )
             configs.append(config)

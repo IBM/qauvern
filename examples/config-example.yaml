@@ -1,11 +1,6 @@
 # qauvern configuration example
 #
-# This file defines the account, plan, balance period, and projects for
-# optimizing quantum instance allocations.
-#
-# NOTE: Each project corresponds to exactly one service instance (CRN).
-# NOTE: All instances in this config must belong to the specified account and plan.
-# Projects and instances are conceptually the same thing.
+# Note: All instances must belong to the specified account and plan.
 
 # IBM Cloud Account ID
 account_id: "your-account-id-here"
@@ -33,29 +28,27 @@ balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
 
-# Projects - each project has exactly one instance CRN
-projects:
+instances:
   - name: "Quantum Chemistry Research"
-    description: "Drug discovery and molecular simulation"
-    # Service instance CRN for this project
+    # Service instance CRN
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-1::"
-    # Optional: Total allocation target for this project in seconds (balance period).
+    # Optional: Total allocation target for this instance in seconds (balance period).
     # When set, the instance is marked "exhausted" once consumed_balance_period exceeds this value,
     # and the optimizer caps allocation at this target.
     # When omitted, allocation is optimized between minimum_allocation_seconds and limit_seconds.
     # Example: 50 hours = 50 * 3600 = 180000 seconds (~1.875 QAU)
     target_usage_seconds: 180000
-    # Optional: Override balance period for this project
+    # Optional: Override balance period for this instance
     # start_date: "2026-01-01T00:00:00"
     # end_date: "2026-06-30T23:59:59"
 
     # Optional: Base limit for this instance. Must be >= target_usage_seconds (if set).
     # When set, the optimizer applies this limit on every run.
-    # project_limit_seconds: 216000  # 60 hours
+    # limit_seconds: 216000  # 60 hours
 
-    # Optional: Grant additional time above project_limit_seconds.
+    # Optional: Grant additional time above limit_seconds.
     # The effective limit decays as pre-grant usage rolls out of the rolling window.
-    # Multiple grants stack. Limit snaps back to project_limit_seconds after end_date.
+    # Multiple grants stack. Limit snaps back to limit_seconds after end_date.
     # end_date is optional; defaults to start_date + 28 days if omitted.
     # net_grants:
     #   - start_date: "2026-05-01T00:00:00"
@@ -65,17 +58,14 @@ projects:
     #     net_grant_seconds: 180000  # 50 extra hours until July 31
 
   - name: "Quantum Machine Learning"
-    description: "ML algorithm development and training"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-2::"
     target_usage_seconds: 108000  # 30 hours (~0.625 QAU)
 
   - name: "Quantum Optimization"
-    description: "Supply chain and logistics optimization"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-3::"
     target_usage_seconds: 72000  # 20 hours (~0.417 QAU)
 
   - name: "Educational Projects"
-    description: "Student research and learning"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-4::"
     target_usage_seconds: 36000  # 10 hours (~0.208 QAU)
 

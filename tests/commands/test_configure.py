@@ -57,20 +57,20 @@ def test_build_configure_yaml_multiple_instances() -> None:
         _make_instance(crn="crn:c", name=""),
     ]
     parsed = yaml.safe_load(build_configure_yaml("acct", instances, "s", "e"))
-    assert [p["name"] for p in parsed["projects"]] == ["A", "B", "Instance 3"]
-    assert [p["crn"] for p in parsed["projects"]] == ["crn:a", "crn:b", "crn:c"]
+    assert [p["name"] for p in parsed["instances"]] == ["A", "B", "Instance 3"]
+    assert [p["crn"] for p in parsed["instances"]] == ["crn:a", "crn:b", "crn:c"]
 
 
 def test_build_configure_yaml_uses_allocation_for_target() -> None:
     instances = [_make_instance(allocation_seconds=12345)]
     parsed = yaml.safe_load(build_configure_yaml("acct", instances, "s", "e"))
-    assert parsed["projects"][0]["target_usage_seconds"] == 12345
+    assert parsed["instances"][0]["target_usage_seconds"] == 12345
 
 
 def test_build_configure_yaml_defaults_target_when_allocation_is_zero() -> None:
     instances = [_make_instance(allocation_seconds=0)]
     parsed = yaml.safe_load(build_configure_yaml("acct", instances, "s", "e"))
-    assert parsed["projects"][0]["target_usage_seconds"] == 96000
+    assert parsed["instances"][0]["target_usage_seconds"] == 96000
 
 
 def test_build_configure_yaml_round_trips_through_ConfigParser(tmp_path: Path) -> None:
@@ -82,8 +82,8 @@ def test_build_configure_yaml_round_trips_through_ConfigParser(tmp_path: Path) -
 
     parsed = yaml.safe_load(text)
     parsed["plan_id"] = "91b2c828-2952-4f05-aed8-bedf92c6c480"  # internal plan
-    parsed["projects"][0]["start_date"] = "2026-01-01T00:00:00"
-    parsed["projects"][0]["end_date"] = "2026-12-31T23:59:59"
+    parsed["instances"][0]["start_date"] = "2026-01-01T00:00:00"
+    parsed["instances"][0]["end_date"] = "2026-12-31T23:59:59"
 
     path = tmp_path / "config.yaml"
     path.write_text(yaml.dump(parsed))
@@ -174,8 +174,8 @@ def test_configure_happy_path(runner: CliRunner, tmp_path: Path) -> None:
 
     parsed = yaml.safe_load(output.read_text())
     assert parsed["account_id"] == "acct-1"
-    assert len(parsed["projects"]) == 1
-    assert parsed["projects"][0]["crn"] == "crn:test:i-1"
+    assert len(parsed["instances"]) == 1
+    assert parsed["instances"][0]["crn"] == "crn:test:i-1"
 
     assert "Configuration file created" in result.output
     assert "My Instance" in result.output

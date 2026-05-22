@@ -30,7 +30,7 @@ def build_configure_yaml(
             "start_date": balance_start,
             "end_date": balance_end,
         },
-        "projects": [
+        "instances": [
             {
                 "name": inst.name or f"Instance {i}",
                 "crn": inst.crn,
