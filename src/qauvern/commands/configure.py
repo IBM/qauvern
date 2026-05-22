@@ -24,12 +24,6 @@ def build_configure_yaml(
     balance_start: str,
     balance_end: str,
 ) -> str:
-    """Build the full contents of an auto-generated configuration YAML file.
-
-    The output includes a header comment block describing how to customize the
-    file, the YAML body itself, and a footer block listing details of every
-    instance found in the account.
-    """
     config = {
         "account_id": account_id,
         "balance_period": {
@@ -38,7 +32,7 @@ def build_configure_yaml(
         },
         "projects": [
             {
-                "name": f"Instance {i}",
+                "name": inst.name or f"Instance {i}",
                 "crn": inst.crn,
                 "target_usage_seconds": inst.allocation_seconds or 96000,
             }
@@ -47,33 +41,8 @@ def build_configure_yaml(
     }
 
     out = io.StringIO()
-    out.write("# qauvern configuration\n")
-    out.write("# Auto-generated configuration file\n")
-    out.write("#\n")
-    out.write("# Customize this file by:\n")
-    out.write("# 1. Renaming each entry to a meaningful name\n")
-    out.write("# 2. Setting an appropriate target_usage_seconds for each entry\n")
-    out.write("# 3. Adjusting balance period dates as needed\n")
-    out.write("#\n")
-    out.write(f"# Account: {account_id}\n")
-    out.write(f"# Instances Found: {len(instances)}\n")
-    out.write("#\n\n")
-
+    out.write("# Auto-generated configuration file\n\n")
     yaml.dump(config, out, default_flow_style=False, sort_keys=False)
-
-    out.write("\n# Instance Details:\n")
-    out.write("# The following instances were found in your account:\n")
-    out.write("#\n")
-    for inst in instances:
-        out.write(f"# - {inst.name or 'Unnamed'}\n")
-        out.write(f"#   CRN: {inst.crn}\n")
-        out.write(f"#   Allocation: {format_seconds(inst.allocation_seconds)}\n")
-        out.write(f"#   Consumed: {format_seconds(inst.consumed_seconds)}\n")
-        if inst.limit_seconds:
-            out.write(f"#   Limit: {format_seconds(inst.limit_seconds)}\n")
-        out.write(f"#   Fairness: {inst.fairness:.2f}\n")
-        out.write("#\n")
-
     return out.getvalue()
 
 

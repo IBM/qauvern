@@ -54,10 +54,10 @@ def test_build_configure_yaml_multiple_instances() -> None:
     instances = [
         _make_instance(crn="crn:a", name="A"),
         _make_instance(crn="crn:b", name="B"),
-        _make_instance(crn="crn:c", name="C"),
+        _make_instance(crn="crn:c", name=""),
     ]
     parsed = yaml.safe_load(build_configure_yaml("acct", instances, "s", "e"))
-    assert [p["name"] for p in parsed["projects"]] == ["Instance 1", "Instance 2", "Instance 3"]
+    assert [p["name"] for p in parsed["projects"]] == ["A", "B", "Instance 3"]
     assert [p["crn"] for p in parsed["projects"]] == ["crn:a", "crn:b", "crn:c"]
 
 
@@ -71,47 +71,6 @@ def test_build_configure_yaml_defaults_target_when_allocation_is_zero() -> None:
     instances = [_make_instance(allocation_seconds=0)]
     parsed = yaml.safe_load(build_configure_yaml("acct", instances, "s", "e"))
     assert parsed["projects"][0]["target_usage_seconds"] == 96000
-
-
-def test_build_configure_yaml_header() -> None:
-    instances = [_make_instance(), _make_instance(crn="crn:test:i-2")]
-    text = build_configure_yaml("acct-XYZ", instances, "s", "e")
-    assert "# Account: acct-XYZ" in text
-    assert "# Instances Found: 2" in text
-
-
-def test_build_configure_yaml_footer_lists_each_instance() -> None:
-    instances = [
-        _make_instance(
-            crn="crn:foo",
-            name="Foo",
-            allocation_seconds=3600,
-            consumed_seconds=1800,
-            limit_seconds=7200,
-        ),
-        _make_instance(crn="crn:bar", name="Bar", allocation_seconds=0, consumed_seconds=0),
-    ]
-    text = build_configure_yaml("acct", instances, "s", "e")
-
-    footer = text.split("# Instance Details:")[1]
-
-    foo_block = footer.split("# - Foo")[1].split("# -")[0]
-    assert "#   CRN: crn:foo" in foo_block
-    assert "#   Allocation: 1.0h" in foo_block
-    assert "#   Consumed: 1800s" in foo_block
-    assert "#   Limit: 2.0h" in foo_block
-
-    bar_block = footer.split("# - Bar")[1]
-    assert "#   CRN: crn:bar" in bar_block
-    assert "Limit:" not in bar_block  # no limit line when limit_seconds is None
-
-
-def test_build_configure_yaml_footer_falls_back_to_unnamed() -> None:
-    instances = [_make_instance(name="", crn="crn:noname")]
-    text = build_configure_yaml("acct", instances, "s", "e")
-    footer = text.split("# Instance Details:")[1]
-    assert "# - Unnamed" in footer
-    assert "#   CRN: crn:noname" in footer
 
 
 def test_build_configure_yaml_round_trips_through_ConfigParser(tmp_path: Path) -> None:
