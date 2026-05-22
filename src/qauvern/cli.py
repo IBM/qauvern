@@ -24,7 +24,7 @@ from .config import ConfigParser
 from .formatting import format_fairness, format_seconds
 from .models import Account, Instance, InstanceConfig, OptimizationRecommendation
 from .optimizer import AllocationOptimizer
-from .plan import Plan, plan_from_name, plan_id_for, plan_label
+from .plan import Plan, plan_from_name, plan_id_for
 
 
 def enrich_instances_with_usage_data(
@@ -169,7 +169,6 @@ def format_instance_table(
         instance_configs: Optional list of InstanceConfig objects (needed for target columns)
         columns: List of column names to display. Available columns:
             - name: Instance name
-            - plan: Plan name
             - target: Target usage seconds
             - target_pct: Percentage of target consumed
             - period: Balance period consumption
@@ -192,7 +191,7 @@ def format_instance_table(
         Tuple of (table_data, headers) ready for tabulate()
     """
     if columns is None:
-        columns = ["name", "plan", "allocation", "consumed", "utilization", "limit", "fairness"]
+        columns = ["name", "allocation", "consumed", "utilization", "limit", "fairness"]
 
     # Build config map if instance_configs provided
     config_map = {}
@@ -203,7 +202,6 @@ def format_instance_table(
     # Column header mapping
     header_map = {
         "name": "Instance",
-        "plan": "Plan",
         "target": "Target",
         "target_pct": "Target%",
         "period": "Period",
@@ -234,8 +232,6 @@ def format_instance_table(
         for col in columns:
             if col == "name":
                 row.append(instance.name[:35] if len(instance.name) > 35 else instance.name)
-            elif col == "plan":
-                row.append(plan_label(instance.plan))
             elif col == "target":
                 if config and config.target_usage_seconds is not None:
                     row.append(format_seconds(config.target_usage_seconds))
@@ -432,7 +428,7 @@ def show(ctx, config: str, api_key: str | None):
     click.echo("INSTANCE USAGE SUMMARY")
     click.echo("=" * 80)
 
-    columns = ["name", "plan", "allocation", "consumed", "utilization", "limit", "fairness"]
+    columns = ["name", "allocation", "consumed", "utilization", "limit", "fairness"]
     table_data, headers = format_instance_table(account.instances, columns=columns)
 
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
@@ -502,7 +498,7 @@ def instances(ctx, config: str, api_key: str | None):
     # Sort by fairness
     sorted_instances = sorted(instances_data, key=lambda x: x.fairness, reverse=True)
 
-    columns = ["name", "plan", "allocation", "consumed", "utilization", "limit", "fairness"]
+    columns = ["name", "allocation", "consumed", "utilization", "limit", "fairness"]
     table_data, headers = format_instance_table(sorted_instances, columns=columns)
 
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))

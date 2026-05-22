@@ -54,22 +54,6 @@ def plan_from_id(plan_id: str, *, staging: bool) -> Plan | None:
     return None
 
 
-def plan_label(plan_id: str | None) -> str:
-    """Display label for a raw plan UUID, falling back to a truncated UUID.
-
-    Tries both staging and prod tables since the caller may not know the
-    environment a UUID came from (e.g. when rendering instance rows in a
-    table). Used for display only.
-    """
-    if not plan_id:
-        return "Unknown"
-    for staging in (False, True):
-        plan = plan_from_id(plan_id, staging=staging)
-        if plan is not None:
-            return plan.value
-    return plan_id[:8] if len(plan_id) >= 8 else plan_id
-
-
 def plan_from_name(name: str) -> Plan:
     """Parse a user-supplied plan name (case-insensitive) into a Plan.
 
