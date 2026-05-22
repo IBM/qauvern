@@ -5,12 +5,15 @@ All notable changes to qauvern will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0] - 2026-05-xx
+## [0.3.0] - 2026-05-22
 
 ### Changed
 
 - In the configuration file, `projects` was renamed to `instances` and `project_limit_seconds` to `limit_seconds`. To fix, either manually update your config file keys or run `qauvern configure` to generate a new config file. (This change was to make the program simpler for users; projects and instances were the same thing.)
 - `qauvern configure` now sets the name of `instances` to your actual instance's name, rather than values like `Project 1`. You do not need to update your config file, but it may be clearer to regenerate it with `qauvern configure`.
+- Plans were reworked.
+   - In config files, `plan_id` was replaced with `plan`, which should be set to `premium`, `internal`, or `paygo` rather than a UUID.
+   - `qauvern configure` now requires the `--plan` argument.
 
 ## [0.2.3] - 2026-05-15
 
