@@ -66,7 +66,7 @@ The program operates on YAML configuration files where you define your account a
 ```yaml
 # config.yaml
 account_id: "your-ibm-cloud-account-id"
-plan_id: "91b2c828-2952-4f05-aed8-bedf92c6c480"  # Standard plan
+plan: "premium"  # one of: internal, premium, paygo
 
 # Minimum allocation to maintain for each instance (optional, default: 60 seconds)
 minimum_allocation_seconds: 60
@@ -130,17 +130,18 @@ Or pass it directly with the `--api-key` flag to any command.
 Generate a base configuration file from an existing IBM Cloud account:
 
 ```bash
-qauvern configure --account-id your-account-id --output config.yaml
+qauvern configure --account-id your-account-id --plan premium --output config.yaml
 ```
 
 This command will:
 1. Connect to the IBM Quantum API
-2. List all instances in the specified account
+2. List instances in the specified account that belong to the given plan
 3. Generate a base YAML configuration
 4. Display a summary of found instances
 
 Options:
 - `--account-id, -a`: IBM Cloud account ID (required)
+- `--plan, -p`: Plan name — `internal`, `premium`, or `paygo` (required)
 - `--api-key, -k`: IBM Cloud API key (or use `IBMCLOUD_API_KEY` env var)
 - `--output, -o`: Output file path (default: `config.yaml`)
 - `--balance-start`: Balance period start date (ISO format)
@@ -206,14 +207,14 @@ Provision a new IBM Quantum service instance:
 qauvern create my-instance \
   --target us-east \
   --resource-group your-resource-group-id \
-  --plan internal
+  --plan premium
 ```
 
 Options:
 - `NAME` (positional, required): Name for the new instance
 - `--target, -t`: Deployment region (required, e.g., `us-east`, `eu-de`)
 - `--resource-group, -g`: IBM Cloud resource group ID (required)
-- `--plan, -p`: Plan name (`internal`, `premium`, `paygo`) or plan UUID (required)
+- `--plan, -p`: Plan name — `internal`, `premium`, or `paygo` (required)
 - `--allocation, -a`: Initial allocation (e.g., `96000`, `10h`, `2.5d`, `1qau`)
 - `--limit, -l`: Instance limit, set after creation (e.g., `10h`, `1qau`)
 - `--tag`: Tags to apply (repeatable)
@@ -247,7 +248,7 @@ The optimizer targets low fairness values (< 0.5) to ensure instances receive sc
 
 ```bash
 # 1. Generate initial configuration from your account
-qauvern configure --account-id your-account-id --output config.yaml
+qauvern configure --account-id your-account-id --plan premium --output config.yaml
 
 # 2. Edit config.yaml to edit instance allocations
 

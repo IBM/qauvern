@@ -16,16 +16,19 @@ import yaml
 
 from ..formatting import format_fairness, format_seconds
 from ..models import Instance
+from ..plan import Plan
 
 
 def build_configure_yaml(
     account_id: str,
+    plan: Plan,
     instances: list[Instance],
     balance_start: str,
     balance_end: str,
 ) -> str:
     config = {
         "account_id": account_id,
+        "plan": plan.value,
         "balance_period": {
             "start_date": balance_start,
             "end_date": balance_end,

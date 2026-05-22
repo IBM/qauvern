@@ -17,6 +17,7 @@ from pathlib import Path
 import yaml
 
 from .models import InstanceConfig, NetGrant
+from .plan import Plan, plan_from_name
 
 
 class ConfigParser:
@@ -32,7 +33,7 @@ class ConfigParser:
 
     def _validate_config(self) -> None:
         """Validate the configuration structure."""
-        required_fields = ["account_id", "plan_id", "balance_period", "instances"]
+        required_fields = ["account_id", "plan", "balance_period", "instances"]
 
         for field in required_fields:
             if field not in self.config_data:
@@ -49,16 +50,17 @@ class ConfigParser:
         if "start_date" not in balance_period or "end_date" not in balance_period:
             raise ValueError("balance_period must contain start_date and end_date")
 
-        # Eagerly parse instance_configs to surface validation errors at load time.
+        # Eagerly parse to surface validation errors at load time.
+        self.plan
         self.instance_configs
 
     @property
     def account_id(self) -> str:
         return self.config_data["account_id"]
 
-    @property
-    def plan_id(self) -> str:
-        return self.config_data["plan_id"]
+    @cached_property
+    def plan(self) -> Plan:
+        return plan_from_name(self.config_data["plan"])
 
     @property
     def minimum_allocation_seconds(self) -> int:

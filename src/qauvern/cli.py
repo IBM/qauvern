@@ -18,12 +18,13 @@ from pathlib import Path
 import click
 from tabulate import tabulate
 
-from .api_client import IBMQuantumAPIClient, get_plan_id, get_plan_name
+from .api_client import IBMQuantumAPIClient
 from .commands.configure import build_configure_yaml, build_instance_summary_table
 from .config import ConfigParser
 from .formatting import format_fairness, format_seconds
 from .models import Account, Instance, InstanceConfig, OptimizationRecommendation
 from .optimizer import AllocationOptimizer
+from .plan import Plan, plan_from_name, plan_id_for, plan_label
 
 
 def enrich_instances_with_usage_data(
@@ -234,7 +235,7 @@ def format_instance_table(
             if col == "name":
                 row.append(instance.name[:35] if len(instance.name) > 35 else instance.name)
             elif col == "plan":
-                row.append(get_plan_name(instance.plan))
+                row.append(plan_label(instance.plan))
             elif col == "target":
                 if config and config.target_usage_seconds is not None:
                     row.append(format_seconds(config.target_usage_seconds))
@@ -337,6 +338,20 @@ api_key_option = click.option(
 )
 
 
+def _parse_plan(_ctx: click.Context, _param: click.Parameter, value: str | None) -> Plan | None:
+    return plan_from_name(value) if value else None
+
+
+plan_option = click.option(
+    "--plan",
+    "-p",
+    type=click.Choice([p.value for p in Plan], case_sensitive=False),
+    required=True,
+    callback=_parse_plan,
+    help="Plan name: " + ", ".join(p.value for p in Plan),
+)
+
+
 def _build_client(ctx: click.Context, api_key: str | None) -> IBMQuantumAPIClient:
     staging = ctx.obj.get("staging", False)
     return IBMQuantumAPIClient(api_key=api_key, staging=staging)
@@ -393,18 +408,16 @@ def show(ctx, config: str, api_key: str | None):
     """Show current account and instance allocations for a specific plan."""
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     account_id = config_parser.account_id
-    plan_id = config_parser.plan_id
+    plan = config_parser.plan
 
-    # Get account with instances filtered by plan
-    click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
-    account = client.get_account_with_instances(account_id, plan_id)
+    click.echo(f"Fetching account information for plan {plan.value}...")
+    account = client.get_account_with_instances(account_id, plan)
 
-    # Display account summary
     click.echo("\n" + "=" * 80)
     click.echo("ACCOUNT SUMMARY")
     click.echo("=" * 80)
     click.echo(f"Account ID: {account.account_id}")
-    click.echo(f"Plan: {get_plan_name(account.plan_id)}")
+    click.echo(f"Plan: {plan.value}")
     click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
     click.echo(f"Consumed: {format_seconds(account.consumed_seconds)}")
     click.echo(f"Available: {format_seconds(account.available_seconds)}")
@@ -437,24 +450,21 @@ def instances(ctx, config: str, api_key: str | None):
     configuration file that match the specified plan, without requiring admin privileges.
     """
     config_parser, client = _load_config_and_client(ctx, config, api_key)
-    plan_id = config_parser.plan_id
+    plan = config_parser.plan
+    plan_uuid = plan_id_for(plan, staging=ctx.obj.get("staging", False))
     instance_configs = config_parser.instance_configs
 
-    # Collect all CRNs from instance configs (one CRN per config)
     all_crns = [cfg.crn for cfg in instance_configs]
 
-    click.echo(f"Fetching usage information for {len(all_crns)} instances (plan: {get_plan_name(plan_id)})...")
+    click.echo(f"Fetching usage information for {len(all_crns)} instances (plan: {plan.value})...")
 
-    # Fetch instance information
     instances_data = []
 
-    # Fetch each instance with 28-day usage data and filter by plan
     for crn in all_crns:
         try:
             instance = client.get_instance(crn)
 
-            # Filter by plan_id - only include instances matching the configured plan
-            if instance.plan != plan_id:
+            if instance.plan != plan_uuid:
                 continue
 
             # Fetch the friendly name from Resource Controller
@@ -525,12 +535,11 @@ def analyze(ctx, config: str, api_key: str | None):
     """Analyze allocations and show optimization recommendations."""
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     account_id = config_parser.account_id
-    plan_id = config_parser.plan_id
+    plan = config_parser.plan
     instance_configs = config_parser.instance_configs
 
-    # Get account with instances filtered by plan
-    click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
-    account = client.get_account_with_instances(account_id, plan_id)
+    click.echo(f"Fetching account information for plan {plan.value}...")
+    account = client.get_account_with_instances(account_id, plan)
 
     # Enrich instances with target usage and detailed usage data
     click.echo("Fetching usage data for different time periods...")
@@ -559,7 +568,7 @@ def analyze(ctx, config: str, api_key: str | None):
     click.echo("\n" + "=" * 80)
     click.echo("ACCOUNT PLAN ALLOCATION SUMMARY")
     click.echo("=" * 80)
-    click.echo(f"Plan: {get_plan_name(plan_id)}")
+    click.echo(f"Plan: {plan.value}")
     click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
 
     # Calculate target usage percentage for balance period
@@ -635,12 +644,11 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     """Optimize instance allocations and apply changes for a specific plan."""
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     account_id = config_parser.account_id
-    plan_id = config_parser.plan_id
+    plan = config_parser.plan
     instance_configs = config_parser.instance_configs
 
-    # Get account with instances filtered by plan
-    click.echo(f"Fetching account information for plan {get_plan_name(plan_id)}...")
-    account = client.get_account_with_instances(account_id, plan_id)
+    click.echo(f"Fetching account information for plan {plan.value}...")
+    account = client.get_account_with_instances(account_id, plan)
 
     # Enrich instances with target usage (no detailed usage needed for optimize)
     enrich_instances_with_usage_data(account, instance_configs, client, account_id, fetch_detailed_usage=True)
@@ -755,6 +763,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     required=True,
     help="IBM Cloud account ID to configure",
 )
+@plan_option
 @api_key_option
 @click.option(
     "--output",
@@ -778,6 +787,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
 def configure(
     ctx,
     account_id: str,
+    plan: Plan,
     api_key: str | None,
     output: str,
     balance_start: str,
@@ -785,15 +795,15 @@ def configure(
 ):
     """Generate a configuration file from an existing account.
 
-    This command queries the IBM Quantum API to list all instances in the
-    specified account and generates a base YAML configuration file that can
-    be customized.
+    Queries the IBM Quantum API to list instances in the specified account
+    that belong to the given plan, then generates a YAML configuration file.
     """
-    click.echo(f"Connecting to IBM Quantum API for account {account_id}...")
+    click.echo(f"Connecting to IBM Quantum API for account {account_id} (plan: {plan.value})...")
     client = _build_client(ctx, api_key)
 
     click.echo("Fetching instances...")
-    instances = client.list_instances(account_id)
+    account = client.get_account_with_instances(account_id, plan)
+    instances = account.instances
 
     if not instances:
         click.echo("⚠ No instances found in this account.", err=True)
@@ -803,7 +813,7 @@ def configure(
     click.echo("\nGenerating configuration file...")
 
     output_path = Path(output)
-    output_path.write_text(build_configure_yaml(account_id, instances, balance_start, balance_end))
+    output_path.write_text(build_configure_yaml(account_id, plan, instances, balance_start, balance_end))
 
     click.echo(f"\n✓ Configuration file created: {output_path}")
     click.echo("\nNext steps:")
@@ -833,12 +843,7 @@ def configure(
     required=True,
     help="IBM Cloud resource group ID",
 )
-@click.option(
-    "--plan",
-    "-p",
-    required=True,
-    help="Plan name (internal, premium, paygo) or plan UUID",
-)
+@plan_option
 @api_key_option
 @click.option(
     "--allocation",
@@ -864,7 +869,7 @@ def create(
     name: str,
     target: str,
     resource_group: str,
-    plan: str,
+    plan: Plan,
     api_key: str | None,
     allocation: str | None,
     limit: str | None,
@@ -874,8 +879,6 @@ def create(
 
     NAME is the name for the new instance.
     """
-    plan_id = get_plan_id(plan)
-
     allocation_seconds = None
     if allocation is not None:
         allocation_seconds = parse_seconds(allocation)
@@ -890,7 +893,7 @@ def create(
 
     client = _build_client(ctx, api_key)
 
-    click.echo(f"Creating instance '{name}' in {target} with plan {get_plan_name(plan_id)}...")
+    click.echo(f"Creating instance '{name}' in {target} with plan {plan.value}...")
     if allocation_seconds is not None:
         click.echo(f"  Initial allocation: {format_seconds(allocation_seconds)}")
 
@@ -899,7 +902,7 @@ def create(
         name=name,
         target=target,
         resource_group=resource_group,
-        resource_plan_id=plan_id,
+        plan=plan,
         allocation_seconds=allocation_seconds,
         tags=tags,
     )
@@ -913,7 +916,7 @@ def create(
     click.echo(f"  CRN:    {instance_crn}")
     click.echo(f"  State:  {instance_state}")
     click.echo(f"  Region: {target}")
-    click.echo(f"  Plan:   {get_plan_name(plan_id)}")
+    click.echo(f"  Plan:   {plan.value}")
     if allocation_seconds is not None:
         click.echo(f"  Allocation: {format_seconds(allocation_seconds)}")
 
