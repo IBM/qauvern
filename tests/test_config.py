@@ -17,7 +17,7 @@ from datetime import datetime as dt
 import pytest
 import yaml
 
-from qauvern.config import load_config
+from qauvern.config import ConfigParser
 
 
 # -------------------------------------------------------------------
@@ -45,7 +45,7 @@ def _to_yaml(data: dict) -> str:
 def test_file_not_found_raises() -> None:
     """Test that loading a nonexistent file raises FileNotFoundError."""
     with pytest.raises(FileNotFoundError, match="Configuration file not found"):
-        load_config("/nonexistent/path/config.yaml")
+        ConfigParser("/nonexistent/path/config.yaml")
 
 
 def test_missing_required_field_raises() -> None:
@@ -61,7 +61,7 @@ def test_missing_required_field_raises() -> None:
         path = _write_config(_to_yaml(config))
         try:
             with pytest.raises(ValueError, match=field):
-                load_config(path)
+                ConfigParser(path)
         finally:
             os.unlink(path)
 
@@ -78,7 +78,7 @@ projects: "not-a-list"
 """)
     try:
         with pytest.raises(ValueError, match="projects"):
-            load_config(path)
+            ConfigParser(path)
     finally:
         os.unlink(path)
 
@@ -98,7 +98,7 @@ projects: []
 """)
         try:
             with pytest.raises(ValueError, match="balance_period"):
-                load_config(path)
+                ConfigParser(path)
         finally:
             os.unlink(path)
 
@@ -121,7 +121,7 @@ projects:
 """)
         try:
             with pytest.raises(ValueError, match=missing):
-                load_config(path)
+                ConfigParser(path)
         finally:
             os.unlink(path)
 
@@ -144,7 +144,7 @@ projects:
     crn: "crn:test:1"
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert parser.minimum_allocation_seconds == 60
     finally:
         os.unlink(path)
@@ -164,7 +164,7 @@ projects:
     crn: "crn:test:1"
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert parser.minimum_allocation_seconds == 300
     finally:
         os.unlink(path)
@@ -184,7 +184,7 @@ projects:
     target_usage_seconds: 30000
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert parser.allocation_reserve_percent == 0.0
     finally:
         os.unlink(path)
@@ -205,7 +205,7 @@ projects:
     target_usage_seconds: 30000
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert parser.allocation_reserve_percent == 20.0
     finally:
         os.unlink(path)
@@ -227,7 +227,7 @@ projects:
 """)
     try:
         with pytest.raises(ValueError, match="allocation_reserve_percent"):
-            load_config(path)
+            ConfigParser(path)
     finally:
         os.unlink(path)
 
@@ -250,7 +250,7 @@ projects:
     crn: "crn:test:1"
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         cfg = parser.instance_configs[0]
         assert cfg.start_date == dt(2026, 1, 1)
         assert cfg.end_date == dt(2026, 12, 31, 23, 59, 59)
@@ -273,7 +273,7 @@ projects:
     end_date: "2026-09-30T23:59:59"
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         cfg = parser.instance_configs[0]
         assert cfg.start_date == dt(2026, 3, 1)
         assert cfg.end_date == dt(2026, 9, 30, 23, 59, 59)
@@ -295,7 +295,7 @@ projects:
     project_limit_seconds: 50000
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert parser.instance_configs[0].target_usage_seconds is None
     finally:
         os.unlink(path)
@@ -316,7 +316,7 @@ projects:
     project_limit_seconds: 50000
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert parser.instance_configs[0].limit_seconds == 50000
     finally:
         os.unlink(path)
@@ -338,7 +338,7 @@ projects:
 """)
     try:
         with pytest.raises(ValueError, match="project_limit_seconds"):
-            load_config(path)
+            ConfigParser(path)
     finally:
         os.unlink(path)
 
@@ -362,7 +362,7 @@ projects:
     target_usage_seconds: 30000
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert parser.instance_configs[0].net_grants == ()
     finally:
         os.unlink(path)
@@ -386,7 +386,7 @@ projects:
         net_grant_seconds: 180000
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert len(parser.instance_configs[0].net_grants) == 1
         assert parser.instance_configs[0].net_grants[0].net_grant_seconds == 180000
     finally:
@@ -413,7 +413,7 @@ projects:
         net_grant_seconds: 96000
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert len(parser.instance_configs[0].net_grants) == 2
         assert parser.instance_configs[0].net_grants[1].net_grant_seconds == 96000
     finally:
@@ -439,7 +439,7 @@ projects:
 """)
     try:
         with pytest.raises(ValueError, match="net_grant_seconds"):
-            load_config(path)
+            ConfigParser(path)
     finally:
         os.unlink(path)
 
@@ -463,7 +463,7 @@ projects:
         net_grant_seconds: 180000
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert parser.instance_configs[0].net_grants[0].end_date == dt(2026, 6, 15)
     finally:
         os.unlink(path)
@@ -487,7 +487,7 @@ projects:
         net_grant_seconds: 180000
 """)
     try:
-        parser = load_config(path)
+        parser = ConfigParser(path)
         assert parser.instance_configs[0].net_grants[0].end_date == dt(2026, 5, 29)
     finally:
         os.unlink(path)

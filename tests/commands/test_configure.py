@@ -19,7 +19,7 @@ from click.testing import CliRunner, Result
 
 from qauvern.cli import main
 from qauvern.commands.configure import build_configure_yaml, build_instance_summary_table
-from qauvern.config import load_config
+from qauvern.config import ConfigParser
 from qauvern.models import Instance
 from tests.mock_api import MockIBMQuantumAPIClient
 
@@ -114,7 +114,7 @@ def test_build_configure_yaml_footer_falls_back_to_unnamed() -> None:
     assert "#   CRN: crn:noname" in footer
 
 
-def test_build_configure_yaml_round_trips_through_load_config(tmp_path: Path) -> None:
+def test_build_configure_yaml_round_trips_through_ConfigParser(tmp_path: Path) -> None:
     """The auto-generated YAML, plus the fields a user must add by hand, loads cleanly."""
     from datetime import datetime
 
@@ -129,7 +129,7 @@ def test_build_configure_yaml_round_trips_through_load_config(tmp_path: Path) ->
     path = tmp_path / "config.yaml"
     path.write_text(yaml.dump(parsed))
 
-    cfg = load_config(str(path))
+    cfg = ConfigParser(str(path))
     assert cfg.account_id == "acct"
     assert cfg.balance_period["start_date"] == datetime(2026, 1, 1, 0, 0, 0)
     assert cfg.balance_period["end_date"] == datetime(2026, 12, 31, 23, 59, 59)
