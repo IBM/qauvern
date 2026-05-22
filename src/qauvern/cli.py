@@ -447,11 +447,6 @@ def instances(ctx, config: str, api_key: str | None):
 
     # Fetch instance information
     instances_data = []
-    project_map = {}
-
-    # Build project map (one CRN per project)
-    for project in projects:
-        project_map[project.crn] = project.name
 
     # Fetch each instance with 28-day usage data and filter by plan
     for crn in all_crns:
