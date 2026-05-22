@@ -8,29 +8,29 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Resolves the effective limit for a project instance given net grants and rolloff."""
+"""Resolves the effective limit for an instance given net grants and rolloff."""
 
 from datetime import date, timedelta
 
-from .models import Instance, Project
+from .models import Instance, InstanceConfig
 
 
 class LimitResolver:
-    """Resolves the effective instance limit from project config and runtime state.
+    """Resolves the effective instance limit from instance config and runtime state.
 
-    Net grants are additive boosts above project_limit_seconds valid for 28 days
-    from start_date. As pre-grant usage days scroll out of the rolling 28-day
-    window, the effective limit decreases by that day's usage (rolloff). This
-    ensures headroom decays as old usage leaves the window.
+    Net grants are additive boosts above ``InstanceConfig.limit_seconds`` valid for
+    28 days from start_date. As pre-grant usage days scroll out of the rolling
+    28-day window, the effective limit decreases by that day's usage (rolloff).
+    This ensures headroom decays as old usage leaves the window.
     """
 
-    def resolve(self, project: Project, instance: Instance, today: date) -> int | None:
+    def resolve(self, instance_config: InstanceConfig, instance: Instance, today: date) -> int | None:
         """Return the effective limit in seconds for the given instance today.
 
         Resolution order:
         1. Exhausted instance -> 1
         2. Active net grants with rolloff -> base + sum(each grant's contribution)
-        3. Base limit only -> project_limit_seconds
+        3. Base limit only -> instance_config.limit_seconds
         4. No limit -> None
 
         Grant contribution = max(0, net_grant_seconds - rolloff)
@@ -41,15 +41,15 @@ class LimitResolver:
             return 1
 
         daily_usage: dict[date, int] = instance.daily_usage
-        base_limit = project.project_limit_seconds
+        base_limit = instance_config.limit_seconds
 
-        if not project.net_grants:
+        if not instance_config.net_grants:
             return base_limit
 
         total_grant_contribution = 0
         any_active = False
 
-        for grant in project.net_grants:
+        for grant in instance_config.net_grants:
             grant_start = grant.start_date.date()
             grant_end = grant.end_date.date()
 

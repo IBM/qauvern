@@ -16,7 +16,7 @@ from pathlib import Path
 
 import yaml
 
-from .models import NetGrant, Project
+from .models import InstanceConfig, NetGrant
 
 
 class ConfigParser:
@@ -55,8 +55,8 @@ class ConfigParser:
         if "start_date" not in balance_period or "end_date" not in balance_period:
             raise ValueError("balance_period must contain start_date and end_date")
 
-        # Validate project constraints eagerly.
-        self.projects
+        # Eagerly parse instance_configs to surface validation errors at load time.
+        self.instance_configs
 
     @property
     def account_id(self) -> str:
@@ -83,63 +83,58 @@ class ConfigParser:
         }
 
     @cached_property
-    def projects(self) -> list[Project]:
-        """Parse and return the list of projects.
-
-        Note: Each project corresponds to exactly one service instance (CRN).
-        """
-        projects = []
+    def instance_configs(self) -> list[InstanceConfig]:
+        """Parse and return the list of instance configs."""
+        configs: list[InstanceConfig] = []
         period = self.balance_period
 
-        for proj_data in self.config_data["projects"]:
-            required = ["name", "crn"]
-            for field in required:
-                if field not in proj_data:
-                    raise ValueError(f"Project missing required field: {field}")
+        for entry in self.config_data["projects"]:
+            for field in ("name", "crn"):
+                if field not in entry:
+                    raise ValueError(f"Instance config missing required field: {field}")
 
-            start_date = (
-                datetime.fromisoformat(proj_data["start_date"]) if "start_date" in proj_data else period["start_date"]
-            )
-            end_date = datetime.fromisoformat(proj_data["end_date"]) if "end_date" in proj_data else period["end_date"]
+            start_date = datetime.fromisoformat(entry["start_date"]) if "start_date" in entry else period["start_date"]
+            end_date = datetime.fromisoformat(entry["end_date"]) if "end_date" in entry else period["end_date"]
 
-            project_limit_seconds = proj_data.get("project_limit_seconds")
+            limit_seconds = entry.get("project_limit_seconds")
 
             net_grants = []
-            for grant_data in proj_data.get("net_grants", []):
+            for grant_data in entry.get("net_grants", []):
                 grant_start = datetime.fromisoformat(grant_data["start_date"])
                 grant_end = (
                     datetime.fromisoformat(grant_data["end_date"])
                     if "end_date" in grant_data
                     else grant_start + timedelta(days=28)
                 )
-                grant = NetGrant(
-                    start_date=grant_start,
-                    net_grant_seconds=grant_data["net_grant_seconds"],
-                    end_date=grant_end,
+                net_grants.append(
+                    NetGrant(
+                        start_date=grant_start,
+                        net_grant_seconds=grant_data["net_grant_seconds"],
+                        end_date=grant_end,
+                    )
                 )
-                net_grants.append(grant)
 
-            target_usage_seconds = proj_data.get("target_usage_seconds")
+            target_usage_seconds = entry.get("target_usage_seconds")
 
-            project = Project(
-                name=proj_data["name"],
-                crn=proj_data["crn"],
+            config = InstanceConfig(
+                name=entry["name"],
+                crn=entry["crn"],
                 target_usage_seconds=target_usage_seconds,
                 start_date=start_date,
                 end_date=end_date,
-                project_limit_seconds=project_limit_seconds,
+                limit_seconds=limit_seconds,
                 net_grants=net_grants,
             )
 
-            if project_limit_seconds is not None and target_usage_seconds is not None:
-                if project_limit_seconds < target_usage_seconds:
+            if limit_seconds is not None and target_usage_seconds is not None:
+                if limit_seconds < target_usage_seconds:
                     raise ValueError(
-                        f"Project '{proj_data['name']}': project_limit_seconds ({project_limit_seconds}) "
+                        f"Instance '{entry['name']}': project_limit_seconds ({limit_seconds}) "
                         f"must be >= target_usage_seconds ({target_usage_seconds})"
                     )
-            projects.append(project)
+            configs.append(config)
 
-        return projects
+        return configs
 
 
 def load_config(config_path: str) -> ConfigParser:

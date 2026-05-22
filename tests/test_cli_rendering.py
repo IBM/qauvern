@@ -15,7 +15,7 @@ from datetime import datetime
 from qauvern.models import (
     Account,
     Instance,
-    Project,
+    InstanceConfig,
     OptimizationResult,
     OptimizationRecommendation,
 )
@@ -103,9 +103,9 @@ def instance2() -> Instance:
 
 
 @pytest.fixture
-def project1(instance1: Instance) -> Project:
-    return Project(
-        name="Project 1",
+def cfg1(instance1: Instance) -> InstanceConfig:
+    return InstanceConfig(
+        name="Instance 1",
         crn=instance1.crn,
         target_usage_seconds=5000,
         start_date=datetime(2026, 1, 1),
@@ -114,9 +114,9 @@ def project1(instance1: Instance) -> Project:
 
 
 @pytest.fixture
-def project2(instance2: Instance) -> Project:
-    return Project(
-        name="Project 2",
+def cfg2(instance2: Instance) -> InstanceConfig:
+    return InstanceConfig(
+        name="Instance 2",
         crn=instance2.crn,
         target_usage_seconds=10000,
         start_date=datetime(2026, 1, 1),
@@ -158,13 +158,15 @@ def test_format_basic_columns(instance1: Instance, instance2: Instance) -> None:
     assert "Consumed" in headers
 
 
-def test_format_with_projects(instance1: Instance, instance2: Instance, project1: Project, project2: Project) -> None:
-    """Test formatting with project information."""
+def test_format_with_instance_configs(
+    instance1: Instance, instance2: Instance, cfg1: InstanceConfig, cfg2: InstanceConfig
+) -> None:
+    """Test formatting with instance config information."""
     instances = [instance1, instance2]
-    projects = [project1, project2]
+    instance_configs = [cfg1, cfg2]
     columns = ["name", "target", "target_pct"]
 
-    table_data, headers = format_instance_table(instances, projects=projects, columns=columns)
+    table_data, headers = format_instance_table(instances, instance_configs=instance_configs, columns=columns)
 
     assert len(table_data) == 2
     assert "Target" in headers
@@ -200,14 +202,14 @@ def test_format_with_recommendations(
 
 
 def test_format_all_time_periods(
-    instance1: Instance, instance2: Instance, project1: Project, project2: Project
+    instance1: Instance, instance2: Instance, cfg1: InstanceConfig, cfg2: InstanceConfig
 ) -> None:
     """Test formatting with all time period columns."""
     instances = [instance1, instance2]
-    projects = [project1, project2]
+    instance_configs = [cfg1, cfg2]
     columns = ["name", "period", "28d", "14d", "7d", "3d", "24h"]
 
-    table_data, headers = format_instance_table(instances, projects=projects, columns=columns)
+    table_data, headers = format_instance_table(instances, instance_configs=instance_configs, columns=columns)
 
     assert len(table_data) == 2
     assert "Period" in headers
@@ -321,10 +323,10 @@ def opt_result_account() -> Account:
 
 
 @pytest.fixture
-def opt_result_projects() -> list[Project]:
+def opt_result_instance_configs() -> list[InstanceConfig]:
     return [
-        Project(
-            name="Project 1",
+        InstanceConfig(
+            name="Instance 1",
             crn="crn:test:1",
             target_usage_seconds=50000,
             start_date=datetime(2026, 1, 1),
@@ -333,11 +335,13 @@ def opt_result_projects() -> list[Project]:
     ]
 
 
-def test_result_reductions_property(opt_result_account: Account, opt_result_projects: list[Project]) -> None:
+def test_result_reductions_property(
+    opt_result_account: Account, opt_result_instance_configs: list[InstanceConfig]
+) -> None:
     """Test that reductions property filters correctly."""
     result = OptimizationResult(
         account=opt_result_account,
-        projects=opt_result_projects,
+        instance_configs=opt_result_instance_configs,
         recommendations=[
             OptimizationRecommendation(
                 instance_crn="crn:1",
@@ -365,11 +369,13 @@ def test_result_reductions_property(opt_result_account: Account, opt_result_proj
     assert all(rec.change < 0 for rec in reductions)
 
 
-def test_result_additions_property(opt_result_account: Account, opt_result_projects: list[Project]) -> None:
+def test_result_additions_property(
+    opt_result_account: Account, opt_result_instance_configs: list[InstanceConfig]
+) -> None:
     """Test that additions property filters correctly."""
     result = OptimizationResult(
         account=opt_result_account,
-        projects=opt_result_projects,
+        instance_configs=opt_result_instance_configs,
         recommendations=[
             OptimizationRecommendation(
                 instance_crn="crn:1",
@@ -397,11 +403,13 @@ def test_result_additions_property(opt_result_account: Account, opt_result_proje
     assert all(rec.change > 0 for rec in additions)
 
 
-def test_result_no_change_recommendations(opt_result_account: Account, opt_result_projects: list[Project]) -> None:
+def test_result_no_change_recommendations(
+    opt_result_account: Account, opt_result_instance_configs: list[InstanceConfig]
+) -> None:
     """Test result with no-change recommendations."""
     result = OptimizationResult(
         account=opt_result_account,
-        projects=opt_result_projects,
+        instance_configs=opt_result_instance_configs,
         recommendations=[
             OptimizationRecommendation(
                 instance_crn="crn:1",
