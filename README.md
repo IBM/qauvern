@@ -1,6 +1,6 @@
 # qauvern — IBM Quantum Load Balancer
 
-A Python CLI tool for optimizing quantum instance allocations across projects to maximize utilization of IBM Quantum resources.
+A Python CLI tool for optimizing quantum allocations across instances to maximize utilization of IBM Quantum resources.
 
 ## Overview
 
@@ -61,7 +61,7 @@ qauvern --help
 
 ## Configuration
 
-Create a YAML configuration file defining your account, projects, and instances:
+The program operates on YAML configuration files where you define your account and instances, such as:
 
 ```yaml
 # config.yaml
@@ -78,15 +78,15 @@ balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
 
-projects:
+instances:
   - name: "Quantum Chemistry Research"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-1::"
     target_usage_seconds: 108000  # 30 hours (0.625 QAU) — optional
 
     # Optional: Hard limit applied on every optimize run
-    # project_limit_seconds: 216000
+    # limit_seconds: 216000
 
-    # Optional: Temporary time bonus above project_limit_seconds.
+    # Optional: Temporary time bonus above limit_seconds.
     # end_date is optional; defaults to start_date + 28 days if omitted.
     # net_grants:
     #   - start_date: "2026-05-01T00:00:00"
@@ -98,10 +98,10 @@ projects:
   - name: "Quantum Machine Learning"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-2::"
     # No target_usage_seconds — allocation optimized between minimum and limit
-    project_limit_seconds: 72000
+    limit_seconds: 72000
 ```
 
-See [`examples/config-example.yaml`](examples/config-example.yaml) for a complete example.
+See [`examples/config-example.yaml`](examples/config-example.yaml) for a complete example. Use [`qauvern configure`](#configure-generate-configuration) to generate your initial file.
 
 ## Usage
 
@@ -136,7 +136,7 @@ qauvern configure --account-id your-account-id --output config.yaml
 This command will:
 1. Connect to the IBM Quantum API
 2. List all instances in the specified account
-3. Generate a base YAML configuration file with one project per instance
+3. Generate a base YAML configuration
 4. Display a summary of found instances
 
 Options:
@@ -146,7 +146,7 @@ Options:
 - `--balance-start`: Balance period start date (ISO format)
 - `--balance-end`: Balance period end date (ISO format)
 
-After generating the configuration, edit the file to set appropriate project names. Optionally set `target_usage_seconds` to enable balance-period tracking and exhaustion behavior; when omitted, allocation is optimized between `minimum_allocation_seconds` and `project_limit_seconds`.
+After generating the configuration, optionally set `target_usage_seconds` to enable balance-period tracking and exhaustion behavior; when omitted, allocation is optimized between `minimum_allocation_seconds` and `limit_seconds`.
 
 #### Show Current Allocations
 
@@ -237,7 +237,7 @@ The `--staging` flag is a global option and applies to all commands.
 1. **Classify** instances as active or inactive based on recent consumption
 2. **Reclaim** allocation from inactive instances (down to the configured minimum)
 3. **Redistribute** freed allocation to active instances weighted by fairness
-4. **Enforce limits** using `project_limit_seconds` and any active `net_grants`
+4. **Enforce limits** using `limit_seconds` and any active `net_grants`
 
 The optimizer targets low fairness values (< 0.5) to ensure instances receive scheduling priority from IBM Quantum's fair-share system. See the `net_grants` field in [Configuration](#configuration) for details on how grant rolloff works.
 
@@ -249,7 +249,7 @@ The optimizer targets low fairness values (< 0.5) to ensure instances receive sc
 # 1. Generate initial configuration from your account
 qauvern configure --account-id your-account-id --output config.yaml
 
-# 2. Edit config.yaml to organize instances into projects
+# 2. Edit config.yaml to edit instance allocations
 
 # 3. Check current status
 qauvern show --config config.yaml

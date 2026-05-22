@@ -5,7 +5,7 @@
 * QAU - Quantum Allocation Unit. 1 QAU represents 1600 minutes allocated to use on the IBM Quantum fleet during our 28 day rolling window
 * Rolling window - a backward looking 28 days of usage. The window rolls forward continuously. As clients use minutes in the quantum system, their available minutes for consumption decrease.
 * Account - all quantum access is based on an IBM Cloud account. IBM admins set the account level allocation based on the contracted QAUs that the client has provided
-* [Project/Instance](https://quantum.cloud.ibm.com/docs/en/guides/instances) - **Projects and instances are conceptually the same thing.** Each project corresponds to exactly one service instance (identified by a unique CRN). A client will create one or more quantum service instances and set an allocation in seconds to configure the time that the instance should consume during the 28 day rolling window.
+* [Instance](https://quantum.cloud.ibm.com/docs/en/guides/instances) - A client will create one or more quantum service instances and set an allocation in seconds to configure the time that the instance should consume during the 28 day rolling window.
 * [Limits](https://quantum.cloud.ibm.com/docs/en/guides/allocation-limits) - in addition to allocations on instances, admins can optionally set limits on the instance, which provide a hard cap on the amount of time that the instance can consume.
 * [Allocations](https://quantum.cloud.ibm.com/docs/en/guides/allocation-limits) - the amount of time that an instance is targetted to consume during the 28 day rolling window. When setting allocations on instances, sum of all the allocations must be less than or equal to the account level allocation.
 * [Fair share scheduler](https://quantum.cloud.ibm.com/docs/en/guides/fair-share-scheduler) - the way the IBM Quantum system determines which jobs should go next. This is optimized to meet contractual constraints. When we are ready to run a new job, we pick the instance with the lowest fairness value.
@@ -21,7 +21,7 @@ For clients that have a large number of instances, the easy thing to do is alloc
 
 ### Declarative Input File
 
-The admin of an account should have a way to declare intent of projects over the lifespan of a year. That file should specify the time period that it is attempting to balance across, as well as list of projects. **Each project has exactly one CRN (service instance)** and a total allocation for the duration of the project. This should be in yaml.
+The admin of an account should have a way to declare intent of instances over the lifespan of a year. That file should specify the time period that it is attempting to balance across, as well as list of instances. Each instance a total allocation for the duration of the project. This should be in yaml.
 
 ### Load balancing
 
@@ -31,7 +31,7 @@ Given the input file, qauvern should be able to compute the optimal allocation o
 
 qauvern should be able to query the API to get the current allocation of instances, and the historical usage of instances. It should be able to update the allocation of instances to the API. For instances that are not being actively used, it can set minimal allocation to them, and give more allocation to instances being heavily used, so those instances can progress further.
 
-Each project should have a maximum total consumption. The limit on the instance should be set as the maximum total consumption minus any consumption that has already been used.
+Each instance should have a maximum total consumption. The limit on the instance should be set as the maximum total consumption minus any consumption that has already been used.
 
 ### API calls
 
@@ -181,13 +181,13 @@ Some clients manage consumption primarily via limits, rather than saturating all
 
 Holds back a percentage of account allocation from rebalancing. The reserved amount stays unallocated and is not distributed to any instance. Defaults to 0 (existing behavior). Must be in `[0, 100)`. Configured in the YAML at the top level; injected into `Account.allocation_reserve_percent` before the optimizer runs.
 
-### `project_limit_seconds` (project level)
+### `limit_seconds` (instance level)
 
 Sets a base usage limit on the instance. Must be `>= target_usage_seconds`. When set, the optimizer applies this limit on every run via `LimitResolver`. If absent, the optimizer falls back to the existing target-based limit logic.
 
-### `net_grants` (project level)
+### `net_grants` (instance level)
 
-A list of additive time-budget boosts above `project_limit_seconds`. Each grant has `start_date`, `net_grant_seconds`, and an optional `end_date` (defaults to `start_date + 28 days`). A grant is active when `start_date <= today < end_date`; once expired, the effective limit reverts to `project_limit_seconds`. Multiple active grants stack.
+A list of additive time-budget boosts above `limit_seconds`. Each grant has `start_date`, `net_grant_seconds`, and an optional `end_date` (defaults to `start_date + 28 days`). A grant is active when `start_date <= today < end_date`; once expired, the effective limit reverts to `limit_seconds`. Multiple active grants stack.
 
 Note that the rolloff math used to compute each grant's contribution (see LimitResolver) is anchored on the 28-day rolling window from `start_date` regardless of `end_date` — for grants longer than 28 days, the contribution plateaus once all pre-grant usage has exited the window.
 
@@ -196,8 +196,8 @@ Note that the rolloff math used to compute each grant's contribution (see LimitR
 `src/qauvern/limit_resolver.py` resolves the effective limit per instance before the optimizer builds recommendations. Resolution order (first match wins):
 
 1. Exhausted instance → `1`
-2. Active net grants → `project_limit_seconds + sum(grant contributions)`
-3. Base limit only → `project_limit_seconds`
+2. Active net grants → `limit_seconds + sum(grant contributions)`
+3. Base limit only → `limit_seconds`
 4. No limit configured → `None`
 
 **Grant contribution** = `max(0, net_grant_seconds - rolloff)`, where rolloff is the sum of per-day usage that was inside the rolling window at grant start but has since exited. Multiple active grants are summed.

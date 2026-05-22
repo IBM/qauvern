@@ -54,9 +54,9 @@ def test_missing_required_field_raises() -> None:
         "account_id": "acc-1",
         "plan_id": "plan-1",
         "balance_period": {"start_date": "2026-01-01T00:00:00", "end_date": "2026-12-31T23:59:59"},
-        "projects": [],
+        "instances": [],
     }
-    for field in ["account_id", "plan_id", "balance_period", "projects"]:
+    for field in ["account_id", "plan_id", "balance_period", "instances"]:
         config = {k: v for k, v in base.items() if k != field}
         path = _write_config(_to_yaml(config))
         try:
@@ -66,18 +66,18 @@ def test_missing_required_field_raises() -> None:
             os.unlink(path)
 
 
-def test_projects_key_not_a_list_raises() -> None:
-    """Test that the 'projects' YAML key being a non-list raises ValueError."""
+def test_instances_key_not_a_list_raises() -> None:
+    """Test that the 'instances' YAML key being a non-list raises ValueError."""
     path = _write_config("""
 account_id: "acc-1"
 plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects: "not-a-list"
+instances: "not-a-list"
 """)
     try:
-        with pytest.raises(ValueError, match="projects"):
+        with pytest.raises(ValueError, match="instances"):
             ConfigParser(path)
     finally:
         os.unlink(path)
@@ -94,7 +94,7 @@ account_id: "acc-1"
 plan_id: "plan-1"
 balance_period:
 {period_yaml}
-projects: []
+instances: []
 """)
         try:
             with pytest.raises(ValueError, match="balance_period"):
@@ -115,7 +115,7 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   -
 {entry_yaml}
 """)
@@ -139,7 +139,7 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
 """)
@@ -159,7 +159,7 @@ minimum_allocation_seconds: 300
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
 """)
@@ -178,7 +178,7 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
@@ -199,7 +199,7 @@ allocation_reserve_percent: 20
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
@@ -220,7 +220,7 @@ allocation_reserve_percent: 100
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
@@ -245,7 +245,7 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
 """)
@@ -266,7 +266,7 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     start_date: "2026-03-01T00:00:00"
@@ -289,10 +289,10 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
-    project_limit_seconds: 50000
+    limit_seconds: 50000
 """)
     try:
         parser = ConfigParser(path)
@@ -302,18 +302,18 @@ projects:
 
 
 def test_limit_seconds_parsed() -> None:
-    """Test that project_limit_seconds YAML key parses to limit_seconds."""
+    """Test that limit_seconds YAML key parses to limit_seconds."""
     path = _write_config("""
 account_id: "acc-1"
 plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
-    project_limit_seconds: 50000
+    limit_seconds: 50000
 """)
     try:
         parser = ConfigParser(path)
@@ -323,21 +323,21 @@ projects:
 
 
 def test_limit_below_target_raises() -> None:
-    """Test that project_limit_seconds < target_usage_seconds raises ValueError."""
+    """Test that limit_seconds < target_usage_seconds raises ValueError."""
     path = _write_config("""
 account_id: "acc-1"
 plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 50000
-    project_limit_seconds: 30000
+    limit_seconds: 30000
 """)
     try:
-        with pytest.raises(ValueError, match="project_limit_seconds"):
+        with pytest.raises(ValueError, match="limit_seconds"):
             ConfigParser(path)
     finally:
         os.unlink(path)
@@ -356,7 +356,7 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
@@ -376,11 +376,11 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
-    project_limit_seconds: 50000
+    limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00"
         net_grant_seconds: 180000
@@ -401,11 +401,11 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
-    project_limit_seconds: 50000
+    limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00"
         net_grant_seconds: 180000
@@ -428,11 +428,11 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
-    project_limit_seconds: 50000
+    limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00"
         net_grant_seconds: 0
@@ -452,11 +452,11 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
-    project_limit_seconds: 50000
+    limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00"
         end_date: "2026-06-15T00:00:00"
@@ -477,11 +477,11 @@ plan_id: "plan-1"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
-projects:
+instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
-    project_limit_seconds: 50000
+    limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00"
         net_grant_seconds: 180000

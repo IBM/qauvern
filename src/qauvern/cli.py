@@ -807,7 +807,7 @@ def configure(
 
     click.echo(f"\n✓ Configuration file created: {output_path}")
     click.echo("\nNext steps:")
-    click.echo(f"1. Edit {output_path} to customize instance names and allocations")
+    click.echo(f"1. Edit {output_path} to customize instance allocations")
     click.echo("2. Run 'qauvern analyze' to see optimization recommendations")
     click.echo("3. Run 'qauvern optimize' to apply optimizations")
 
