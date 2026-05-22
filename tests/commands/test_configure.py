@@ -79,8 +79,9 @@ def test_build_configure_yaml_emits_plan_name() -> None:
     assert parsed["plan"] == "paygo"
 
 
-def test_configure_yaml_round_trips_with_no_human_edits(tmp_path: Path) -> None:
-    """The auto-generated YAML loads cleanly with no manual edits required."""
+def test_configure_yaml_round_trips(tmp_path: Path) -> None:
+    """The auto-generated YAML loads cleanly with no manual edits, and still
+    loads after a user customizes it."""
     from datetime import datetime
 
     instances = [_make_instance(crn="crn:test:rt", allocation_seconds=36000)]
@@ -89,6 +90,7 @@ def test_configure_yaml_round_trips_with_no_human_edits(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
     path.write_text(text)
 
+    # First: the unedited generator output parses with all expected values.
     cfg = ConfigParser(str(path))
     assert cfg.account_id == "acct"
     assert cfg.plan == Plan.INTERNAL
@@ -98,23 +100,17 @@ def test_configure_yaml_round_trips_with_no_human_edits(tmp_path: Path) -> None:
     assert cfg.instance_configs[0].crn == "crn:test:rt"
     assert cfg.instance_configs[0].target_usage_seconds == 36000
 
-
-def test_configure_yaml_still_loads_after_human_edits(tmp_path: Path) -> None:
-    """The auto-generated YAML still loads after a user customizes it."""
-    from datetime import datetime
-
-    instances = [_make_instance(crn="crn:test:rt", allocation_seconds=36000)]
-    text = build_configure_yaml("acct", Plan.PREMIUM, instances, "2026-01-01T00:00:00", "2026-12-31T23:59:59")
-
+    # Then: simulate the user editing the file (changing plan, tweaking the
+    # instance, adding net_grants, setting a custom minimum) and confirm it
+    # still parses with the new values.
     parsed = yaml.safe_load(text)
+    parsed["plan"] = "premium"
+    parsed["minimum_allocation_seconds"] = 120
     parsed["instances"][0]["target_usage_seconds"] = 50000
     parsed["instances"][0]["limit_seconds"] = 80000
     parsed["instances"][0]["net_grants"] = [
         {"start_date": "2026-05-01T00:00:00", "net_grant_seconds": 180000},
     ]
-    parsed["minimum_allocation_seconds"] = 120
-
-    path = tmp_path / "config.yaml"
     path.write_text(yaml.dump(parsed))
 
     cfg = ConfigParser(str(path))

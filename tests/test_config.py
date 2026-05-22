@@ -131,6 +131,25 @@ instances:
 # -------------------------------------------------------------------
 
 
+def test_invalid_plan_raises() -> None:
+    """Test that an unrecognized plan name raises ValueError listing known plans."""
+    path = _write_config("""
+account_id: "acc-1"
+plan: "flex"
+balance_period:
+  start_date: "2026-01-01T00:00:00"
+  end_date: "2026-12-31T23:59:59"
+instances:
+  - name: "Project A"
+    crn: "crn:test:1"
+""")
+    try:
+        with pytest.raises(ValueError, match="Unknown plan 'flex'"):
+            ConfigParser(path)
+    finally:
+        os.unlink(path)
+
+
 def test_minimum_allocation_seconds_defaults_to_60() -> None:
     """Test that minimum_allocation_seconds defaults to 60 when absent."""
     path = _write_config("""
