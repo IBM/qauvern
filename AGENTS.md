@@ -10,18 +10,13 @@ Requires [Just](https://just.systems/man/en/) and [uv](https://docs.astral.sh/uv
 
 ## Running Tests and Linting
 
-Always run both before committing:
+Use `just test` to run tests and `just lint` to run linters/typecheckers. Run both to verify changes.
 
-```bash
-just lint
-just test
-```
+Use `just fmt` to autoformat.
 
-To auto-format:
+## Test the CLI
 
-```bash
-just fmt
-```
+Use `just run` to start the CLI, such as `just run --help`.
 
 ## Testing Rules
 

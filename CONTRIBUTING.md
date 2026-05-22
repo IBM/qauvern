@@ -68,6 +68,14 @@ just fmt
 just lint
 ```
 
+## Run the CLI
+
+This will run the qauvern CLI:
+
+```bash
+just run --help
+```
+
 ## Releasing
 
 Releases are automated via GitHub Actions. To release a new version:
