@@ -20,7 +20,7 @@ from tabulate import tabulate
 
 from .api_client import IBMQuantumAPIClient, get_plan_id, get_plan_name
 from .commands.configure import build_configure_yaml, build_instance_summary_table
-from .config import ConfigParser, load_config
+from .config import ConfigParser
 from .formatting import format_fairness, format_seconds
 from .models import Account, Instance, InstanceConfig, OptimizationRecommendation
 from .optimizer import AllocationOptimizer
@@ -345,7 +345,7 @@ def _build_client(ctx: click.Context, api_key: str | None) -> IBMQuantumAPIClien
 def _load_config_and_client(
     ctx: click.Context, config: str, api_key: str | None
 ) -> tuple[ConfigParser, IBMQuantumAPIClient]:
-    config_parser = load_config(config)
+    config_parser = ConfigParser(config)
     client = _build_client(ctx, api_key)
     return config_parser, client
 

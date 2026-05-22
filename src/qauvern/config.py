@@ -24,16 +24,10 @@ class ConfigParser:
 
     def __init__(self, config_path: str):
         self.config_path = Path(config_path)
-        self.config_data: dict = {}
-
-    def load(self) -> None:
-        """Load and parse the configuration file."""
         if not self.config_path.exists():
             raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
-
         with open(self.config_path) as f:
-            self.config_data = yaml.safe_load(f)
-
+            self.config_data: dict = yaml.safe_load(f)
         self._validate_config()
 
     def _validate_config(self) -> None:
@@ -135,17 +129,3 @@ class ConfigParser:
             configs.append(config)
 
         return configs
-
-
-def load_config(config_path: str) -> ConfigParser:
-    """Load and return a configuration parser.
-
-    Args:
-        config_path: Path to the YAML configuration file
-
-    Returns:
-        Loaded ConfigParser instance
-    """
-    parser = ConfigParser(config_path)
-    parser.load()
-    return parser
