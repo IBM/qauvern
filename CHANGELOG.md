@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `qauvern configure` now sets the `target_usage_seconds` for each instance with the existing allocation, whereas before it used the default of 96000 (1 QAU).
+- `qauvern configure` now sets the `target_usage_seconds` and `limit_seconds` for each instance based on its current settings.
 
 ## [0.2.3] - 2026-05-15
 
