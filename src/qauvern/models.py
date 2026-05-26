@@ -10,6 +10,7 @@
 
 """Data models for qauvern."""
 
+from functools import cached_property
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
@@ -124,37 +125,37 @@ class Instance:
         return False
 
 
-@dataclass
-class Account:
-    """Represents an IBM Cloud account with quantum allocation.
-
-    Note: Allocations are at the Account + Plan level.
-    This Account object represents allocation for a specific plan within the account.
-    """
+@dataclass(frozen=True)
+class AccountAllocation:
+    """Plan-level allocation data from the API (no instances)."""
 
     account_id: str
     plan_id: str
     target_usage_seconds: int
-    consumed_seconds: int = 0
-    available_seconds: int = 0  # From API's unallocated_usage_seconds
-    limit_seconds: int | None = None  # From API's usage_limit_seconds
-    instances: list[Instance] = field(default_factory=list)
-    allocation_reserve_percent: float = 0.0
+    available_seconds: int
+    limit_seconds: int | None
 
-    def __post_init__(self) -> None:
-        if not (0.0 <= self.allocation_reserve_percent < 100.0):
-            raise ValueError("allocation_reserve_percent must be in range [0, 100)")
+
+@dataclass(frozen=True)
+class Account:
+    """IBM Cloud account with instances for a specific plan."""
+
+    account_id: str
+    plan_id: str
+    target_usage_seconds: int
+    available_seconds: int
+    limit_seconds: int | None
+    instances: tuple[Instance, ...]
+
+    @cached_property
+    def consumed_seconds(self) -> int:
+        return sum(i.consumed_seconds for i in self.instances)
 
     @property
     def utilization(self) -> float:
-        """Calculate utilization percentage."""
         if self.target_usage_seconds > 0:
             return (self.consumed_seconds / self.target_usage_seconds) * 100
         return 0.0
-
-    def add_instance(self, instance: Instance) -> None:
-        """Add an instance to the account."""
-        self.instances.append(instance)
 
 
 @dataclass
