@@ -398,22 +398,6 @@ class IBMQuantumAPIClient:
 
         return self._request_json("POST", url, json=payload)
 
-    def get_instance_name_from_crn(self, instance_crn: str) -> str:
-        """Get the friendly name of an instance from its CRN using Resource Controller API.
-
-        Args:
-            instance_crn: The CRN of the service instance
-
-        Returns:
-            The friendly name of the instance, or empty string if not found
-        """
-        url = f"{self.resource_controller_url}/v2/resource_instances/{quote(instance_crn, safe='')}"
-        try:
-            data = self._request_json("GET", url)
-            return data.get("name", "")
-        except Exception:
-            return ""
-
     def list_instances(self, account_id: str, plan: Plan) -> list[InstanceIdentifier]:
         url = f"{self.resource_controller_url}/v2/resource_instances"
         params: dict[str, Any] = {

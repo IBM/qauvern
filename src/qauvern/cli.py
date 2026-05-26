@@ -448,28 +448,24 @@ def instances(ctx, config: str, api_key: str | None):
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     plan = config_parser.plan
     plan_uuid = plan_id_for(plan)
-    instance_configs = config_parser.instance_configs
 
-    all_crns = [cfg.crn for cfg in instance_configs]
-
-    click.echo(f"Fetching usage information for {len(all_crns)} instances (plan: {plan.value})...")
+    click.echo(
+        f"Fetching usage information for {len(config_parser.instance_configs)} instances (plan: {plan.value})..."
+    )
 
     instances_data = []
-
-    for crn in all_crns:
+    for instance_config in config_parser.instance_configs:
         try:
-            instance = client.get_instance(crn)
+            instance = client.get_instance(instance_config.crn)
+            instance.name = instance_config.name
 
             if instance.plan != plan_uuid:
                 continue
 
-            # Fetch the friendly name from Resource Controller
-            instance.name = client.get_instance_name_from_crn(crn)
-
             # Fetch 28-day usage data using /v1/instances/usage endpoint
             # This endpoint does not require admin privileges
             try:
-                instance.consumed_seconds = client.get_instance_usage_28d(crn)
+                instance.consumed_seconds = client.get_instance_usage_28d(instance_config.crn)
             except ValueError as usage_error:
                 # Show detailed error for JSON parsing issues
                 click.echo(f"Warning: Could not fetch usage for {instance.name}:", err=True)
@@ -484,7 +480,7 @@ def instances(ctx, config: str, api_key: str | None):
 
             instances_data.append(instance)
         except Exception as e:
-            click.echo(f"Warning: Could not fetch instance {crn}: {e}", err=True)
+            click.echo(f"Warning: Could not fetch instance {instance_config.crn}: {e}", err=True)
 
     if not instances_data:
         click.echo("No instances found or accessible.", err=True)
