@@ -11,7 +11,6 @@
 """Data models for qauvern."""
 
 from functools import cached_property
-
 from dataclasses import dataclass, field
 from datetime import date, datetime
 

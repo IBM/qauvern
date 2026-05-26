@@ -24,19 +24,19 @@ def optimizer_account() -> Account:
         crn="crn:test:1",
         name="Active Instance",
         allocation_seconds=600000,
-        consumed_seconds=550000,
+        consumed_seconds=550000,  # High usage in 28d
         consumed_14day=400000,
         consumed_7day=300000,
         consumed_3day=150000,
-        consumed_24h=50000,
+        consumed_24h=50000,  # Active in last 24h
         limit_seconds=800000,
     )
     instance2 = Instance(
         crn="crn:test:2",
         name="Inactive Instance",
         allocation_seconds=400000,
-        consumed_seconds=1000,
-        consumed_14day=0,
+        consumed_seconds=1000,  # Very low usage
+        consumed_14day=0,  # No recent activity
         consumed_7day=0,
         consumed_3day=0,
         consumed_24h=0,
@@ -46,18 +46,18 @@ def optimizer_account() -> Account:
         crn="crn:test:3",
         name="Medium Instance",
         allocation_seconds=300000,
-        consumed_seconds=150000,
+        consumed_seconds=150000,  # Medium usage
         consumed_14day=100000,
         consumed_7day=50000,
         consumed_3day=20000,
-        consumed_24h=0,
+        consumed_24h=0,  # Not active in last 24h
         limit_seconds=400000,
     )
     return Account(
         account_id="test-account",
         plan_id="test-plan",
         target_usage_seconds=2000000,
-        available_seconds=700000,
+        available_seconds=700000,  # 2000000 - 1300000 (total allocated)
         limit_seconds=None,
         instances=(instance1, instance2, instance3),
     )
