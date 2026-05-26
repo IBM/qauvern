@@ -21,7 +21,7 @@ from tabulate import tabulate
 from .api_client import IBMQuantumAPIClient
 from .commands.configure import build_configure_yaml, build_instance_summary_table
 from .config import ConfigParser
-from .formatting import format_fairness, format_seconds
+from .formatting import format_fairness, format_limit, format_seconds
 from .models import Account, Instance, InstanceConfig, OptimizationRecommendation
 from .optimizer import AllocationOptimizer
 from .plan import Plan, plan_from_name, plan_id_for
@@ -107,7 +107,7 @@ def format_limit_display(
     """Format a limit value with optional grant and debt annotations."""
     if limit_seconds is None:
         return "-"
-    base = format_seconds(limit_seconds)
+    base = format_limit(limit_seconds)
     annotation = ""
     if has_grant:
         annotation += " (+grant)"

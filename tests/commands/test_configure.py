@@ -142,7 +142,7 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
 
 def test_summary_table_headers() -> None:
     _rows, headers = build_instance_summary_table([_make_instance()])
-    assert headers == ["Instance Name", "Allocation", "Consumed", "Fairness"]
+    assert headers == ["Instance Name", "Allocation", "Limit", "Consumed", "Fairness"]
 
 
 def test_summary_table_preserves_order_and_count() -> None:
@@ -165,7 +165,7 @@ def test_summary_table_truncates_long_names() -> None:
 def test_summary_table_uses_format_seconds() -> None:
     rows, _ = build_instance_summary_table([_make_instance(allocation_seconds=36000, consumed_seconds=18000)])
     assert rows[0][1] == "10.0h"
-    assert rows[0][2] == "5.0h"
+    assert rows[0][3] == "5.0h"
 
 
 # ---------------------------------------------------------------------------
