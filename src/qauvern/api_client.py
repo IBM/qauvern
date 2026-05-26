@@ -223,7 +223,6 @@ class IBMQuantumAPIClient:
                 int(float(data.get("instance_limit_seconds", 0))) if data.get("instance_limit_seconds") else None
             ),
             consumed_seconds=0,  # Will be populated by get_instance_usage
-            plan=data.get("plan_id", ""),
         )
 
     def get_instance_usage_28d(self, instance_crn: str) -> int:
@@ -440,7 +439,6 @@ class IBMQuantumAPIClient:
                         name=identifier.name,
                         allocation_seconds=full.allocation_seconds,
                         limit_seconds=full.limit_seconds,
-                        plan=full.plan,
                         consumed_seconds=consumed,
                     )
                 )

@@ -68,7 +68,6 @@ class Instance:
     allocation_seconds: int
     limit_seconds: int | None = None
     consumed_seconds: int = 0  # Usage in 28-day rolling window
-    plan: str | None = None
     target_usage_seconds: int = 0  # Target usage from the instance configuration
     consumed_balance_period: int = 0  # Usage since balance period start
     consumed_14day: int = 0  # Usage in last 14 days

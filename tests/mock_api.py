@@ -176,8 +176,6 @@ class MockIBMQuantumAPIClient:
         allocation_seconds: int | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Mock creating an instance."""
-        plan_uuid = plan_id_for(plan)
         crn = f"crn:v1:bluemix:public:quantum-computing:{target}:a/mock-account:{name}::"
         instance = Instance(
             crn=crn,
@@ -185,7 +183,6 @@ class MockIBMQuantumAPIClient:
             allocation_seconds=allocation_seconds or 0,
             limit_seconds=None,
             consumed_seconds=0,
-            plan=plan_uuid,
         )
         self.instances[crn] = instance
         return {
@@ -193,7 +190,7 @@ class MockIBMQuantumAPIClient:
             "name": name,
             "state": "active",
             "region_id": target,
-            "resource_plan_id": plan_uuid,
+            "resource_plan_id": plan_id_for(plan),
         }
 
 
