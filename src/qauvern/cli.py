@@ -798,7 +798,7 @@ def configure(
     client = _build_client(ctx, api_key)
 
     click.echo("Fetching instances...")
-    instances = client.list_instances(account_id, plan)
+    instances = client.get_account_with_instances(account_id, plan).instances
 
     if not instances:
         click.echo("⚠ No instances found in this account.", err=True)

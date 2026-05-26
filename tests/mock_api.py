@@ -13,7 +13,7 @@
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from qauvern.models import Account, Instance
+from qauvern.models import Account, Instance, InstanceIdentifier
 from qauvern.plan import Plan, plan_id_for
 
 
@@ -145,7 +145,7 @@ class MockIBMQuantumAPIClient:
         self.instances[instance_crn].limit_seconds = limit_seconds
         return True
 
-    def list_instances(self, account_id: str, plan: Plan | None = None) -> list[Instance]:
+    def list_instances(self, account_id: str, plan: Plan | None = None) -> list[InstanceIdentifier]:
         """List mock instances for an account.
 
         `plan` is accepted to match the real client signature; the mock does
@@ -154,7 +154,7 @@ class MockIBMQuantumAPIClient:
         if account_id not in self.accounts:
             raise ValueError(f"Account {account_id} not found")
 
-        return self.accounts[account_id].instances
+        return [InstanceIdentifier(crn=inst.crn, name=inst.name) for inst in self.accounts[account_id].instances]
 
     def get_account_with_instances(self, account_id: str, plan: Plan | None = None) -> Account:
         """Get mock account with all instances populated.
