@@ -74,6 +74,18 @@ def test_build_configure_yaml_defaults_target_when_allocation_is_zero() -> None:
     assert parsed["instances"][0]["target_usage_seconds"] == 96000
 
 
+def test_build_configure_yaml_includes_limit_seconds_when_set() -> None:
+    instances = [_make_instance(limit_seconds=50000)]
+    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances, "s", "e"))
+    assert parsed["instances"][0]["limit_seconds"] == 50000
+
+
+def test_build_configure_yaml_omits_limit_seconds_when_none() -> None:
+    instances = [_make_instance(limit_seconds=None)]
+    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances, "s", "e"))
+    assert "limit_seconds" not in parsed["instances"][0]
+
+
 def test_build_configure_yaml_emits_plan_name() -> None:
     parsed = yaml.safe_load(build_configure_yaml("acct", Plan.PAYGO, [_make_instance()], "s", "e"))
     assert parsed["plan"] == "paygo"
@@ -178,6 +190,7 @@ def test_configure_happy_path(runner: CliRunner, tmp_path: Path) -> None:
         crn="crn:test:i-1",
         name="My Instance",
         allocation_seconds=36000,
+        limit_seconds=72000,
         account_id="acct-1",
     )
 
@@ -204,7 +217,10 @@ def test_configure_happy_path(runner: CliRunner, tmp_path: Path) -> None:
     assert parsed["account_id"] == "acct-1"
     assert parsed["plan"] == "internal"
     assert len(parsed["instances"]) == 1
-    assert parsed["instances"][0]["crn"] == "crn:test:i-1"
+    instance = parsed["instances"][0]
+    assert instance["crn"] == "crn:test:i-1"
+    assert instance["target_usage_seconds"] == 36000
+    assert instance["limit_seconds"] == 72000
 
     assert "Configuration file created" in result.output
     assert "My Instance" in result.output
