@@ -634,11 +634,13 @@ def analyze(ctx, config: str, api_key: str | None):
     is_flag=True,
     help="Show what would be changed without making actual changes",
 )
-@click.confirmation_option(prompt="Are you sure you want to optimize allocations?")
 @click.pass_context
 @handle_errors
 def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     """Optimize instance allocations and apply changes for a specific plan."""
+    if not dry_run:
+        click.confirm("Are you sure you want to optimize allocations?", abort=True)
+
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     account_id = config_parser.account_id
     plan = config_parser.plan
