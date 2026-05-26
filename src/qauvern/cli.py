@@ -13,7 +13,7 @@
 import functools
 import sys
 from collections.abc import Sequence
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import click
@@ -32,25 +32,9 @@ def enrich_instances_with_usage_data(
     account: Account,
     instance_configs: list[InstanceConfig],
     client: IBMQuantumAPIClient,
-    account_id: str,
-    fetch_detailed_usage: bool = False,
 ) -> None:
-    """Enrich account instances with target usage and optionally detailed usage data.
-
-    Args:
-        account: Account object with instances to enrich
-        instance_configs: List of instance configs with configuration
-        client: API client for fetching usage data
-        account_id: Account ID for analytics authentication
-        fetch_detailed_usage: If True, fetch detailed usage for multiple time periods
-    """
     for instance in account.instances:
-        # Find the config for this instance
-        config = None
-        for cfg in instance_configs:
-            if cfg.crn == instance.crn:
-                config = cfg
-                break
+        config = next((cfg for cfg in instance_configs if cfg.crn == instance.crn), None)
 
         # Set target_usage_seconds from instance config
         if config and config.target_usage_seconds:
@@ -58,52 +42,46 @@ def enrich_instances_with_usage_data(
         else:
             instance.target_usage_seconds = 0
 
-        # Optionally fetch detailed usage data
-        if fetch_detailed_usage:
-            try:
-                # Usage since balance period start (if config found)
-                if config and config.start_date:
-                    from datetime import datetime
-
-                    instance.consumed_balance_period = client.get_instance_usage_seconds(
-                        instance.crn, config.start_date, datetime.now(), account_id
-                    )
-                else:
-                    instance.consumed_balance_period = 0
-
-                # Get detailed usage for multiple time periods
-                detailed_usage = client.get_detailed_usage(instance.crn, account_id)
-                instance.consumed_14day = detailed_usage["consumed_14day"]
-                instance.consumed_7day = detailed_usage["consumed_7day"]
-                instance.consumed_3day = detailed_usage["consumed_3day"]
-                instance.consumed_24h = detailed_usage["consumed_24h"]
-
-                # Fetch per-day usage for net grant rolloff calculation (60-day lookback)
-                from datetime import date as _date, timedelta as _timedelta
-
-                today_date = _date.today()
-                daily_start = today_date - _timedelta(days=60)
-                try:
-                    instance.daily_usage = client.get_daily_usage(instance.crn, account_id, daily_start, today_date)
-                except Exception as daily_e:
-                    click.echo(f"Warning: Could not fetch daily usage for {instance.name}: {daily_e}", err=True)
-                    instance.daily_usage = {}
-
-            except Exception as e:
-                click.echo(f"Warning: Could not fetch usage data for {instance.name}: {e}", err=True)
+        try:
+            # Usage since balance period start (if config found)
+            if config and config.start_date:
+                instance.consumed_balance_period = client.get_instance_usage_seconds(
+                    instance.crn, config.start_date, datetime.now(), account.account_id
+                )
+            else:
                 instance.consumed_balance_period = 0
-                instance.consumed_14day = 0
-                instance.consumed_7day = 0
-                instance.consumed_3day = 0
-                instance.consumed_24h = 0
+
+            # Get detailed usage for multiple time periods
+            detailed_usage = client.get_detailed_usage(instance.crn, account.account_id)
+            instance.consumed_14day = detailed_usage["consumed_14day"]
+            instance.consumed_7day = detailed_usage["consumed_7day"]
+            instance.consumed_3day = detailed_usage["consumed_3day"]
+            instance.consumed_24h = detailed_usage["consumed_24h"]
+
+            # Fetch per-day usage for net grant rolloff calculation (60-day lookback)
+
+            today_date = date.today()
+            daily_start = today_date - timedelta(days=60)
+            try:
+                instance.daily_usage = client.get_daily_usage(instance.crn, account.account_id, daily_start, today_date)
+            except Exception as daily_e:
+                click.echo(f"Warning: Could not fetch daily usage for {instance.name}: {daily_e}", err=True)
                 instance.daily_usage = {}
+
+        except Exception as e:
+            click.echo(f"Warning: Could not fetch usage data for {instance.name}: {e}", err=True)
+            instance.consumed_balance_period = 0
+            instance.consumed_14day = 0
+            instance.consumed_7day = 0
+            instance.consumed_3day = 0
+            instance.consumed_24h = 0
+            instance.daily_usage = {}
 
 
 def format_limit_display(
     limit_seconds: int | None,
     has_grant: bool = False,
     in_debt: bool = False,
-    has_override: bool = False,  # kept for backwards compatibility
 ) -> str:
     """Format a limit value with optional grant and debt annotations."""
     if limit_seconds is None:
@@ -536,7 +514,7 @@ def analyze(ctx, config: str, api_key: str | None):
 
     # Enrich instances with target usage and detailed usage data
     click.echo("Fetching usage data for different time periods...")
-    enrich_instances_with_usage_data(account, instance_configs, client, account_id, fetch_detailed_usage=True)
+    enrich_instances_with_usage_data(account, instance_configs, client)
 
     # Get minimum allocation from config
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
@@ -650,7 +628,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     account = client.get_account_with_instances(account_id, plan)
 
     # Enrich instances with target usage (no detailed usage needed for optimize)
-    enrich_instances_with_usage_data(account, instance_configs, client, account_id, fetch_detailed_usage=True)
+    enrich_instances_with_usage_data(account, instance_configs, client)
 
     # Get minimum allocation from config
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
