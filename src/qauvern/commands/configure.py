@@ -14,7 +14,7 @@ import io
 
 import yaml
 
-from ..formatting import format_fairness, format_seconds
+from ..formatting import format_fairness, format_limit, format_seconds
 from ..models import Instance
 from ..plan import Plan
 
@@ -54,11 +54,12 @@ def build_instance_summary_table(
     instances: list[Instance],
 ) -> tuple[list[list[str]], list[str]]:
     """Build the rows and headers for the post-configure instance summary."""
-    headers = ["Instance Name", "Allocation", "Consumed", "Fairness"]
+    headers = ["Instance Name", "Allocation", "Limit", "Consumed", "Fairness"]
     rows = [
         [
             inst.name[:40],
             format_seconds(inst.allocation_seconds),
+            format_limit(inst.limit_seconds),
             format_seconds(inst.consumed_seconds),
             format_fairness(inst.fairness),
         ]

@@ -26,6 +26,13 @@ def format_seconds(seconds: int) -> str:
         return f"{days:.1f}d"
 
 
+def format_limit(limit_seconds: int | None) -> str:
+    """Format a limit value, returning '-' when unset."""
+    if limit_seconds is None:
+        return "-"
+    return format_seconds(limit_seconds)
+
+
 def format_fairness(fairness: float) -> str:
     """Format fairness value with color indicators."""
     if fairness < 0.5:
