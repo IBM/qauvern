@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
-from .models import Account, Instance
+from .models import Account, Instance, InstanceIdentifier
 from .plan import Plan, plan_id_for
 
 QUANTUM_COMPUTING_RESOURCE_ID = "b6049020-80f4-11eb-a0f7-e35ec9b4054f"
@@ -414,16 +414,7 @@ class IBMQuantumAPIClient:
         except Exception:
             return ""
 
-    def list_instances(self, account_id: str, plan: Plan) -> list[Instance]:
-        """List quantum computing instances for an account, filtered by plan.
-
-        Args:
-            account_id: The IBM Cloud account ID
-            plan: The plan to filter instances by
-
-        Returns:
-            List of Instance objects with CRN and name populated
-        """
+    def list_instances(self, account_id: str, plan: Plan) -> list[InstanceIdentifier]:
         url = f"{self.resource_controller_url}/v2/resource_instances"
         params: dict[str, Any] = {
             "resource_id": QUANTUM_COMPUTING_RESOURCE_ID,
@@ -438,15 +429,7 @@ class IBMQuantumAPIClient:
                 crn = resource.get("id")
                 name = resource.get("name", "")
                 if crn:
-                    instances.append(
-                        Instance(
-                            crn=crn,
-                            name=name,
-                            allocation_seconds=0,
-                            limit_seconds=None,
-                            consumed_seconds=0,
-                        )
-                    )
+                    instances.append(InstanceIdentifier(crn=crn, name=name))
 
             next_url = data.get("next_url")
             if not next_url:
@@ -467,24 +450,22 @@ class IBMQuantumAPIClient:
 
         total_consumed = 0
 
-        for instance in instances:
+        for identifier in instances:
             try:
-                # Get full instance data from regional Quantum API
-                full_instance = self.get_instance(instance.crn)
-                instance.allocation_seconds = full_instance.allocation_seconds
-                instance.limit_seconds = full_instance.limit_seconds
-                instance.plan = full_instance.plan
-
-                # Get usage data
-                instance.consumed_seconds = self.get_rolling_window_seconds(instance.crn, account_id)
-
-                # Add to consumed total
-                total_consumed += instance.consumed_seconds
-
+                full = self.get_instance(identifier.crn)
+                consumed = self.get_rolling_window_seconds(identifier.crn, account_id)
+                instance = Instance(
+                    crn=identifier.crn,
+                    name=identifier.name,
+                    allocation_seconds=full.allocation_seconds,
+                    limit_seconds=full.limit_seconds,
+                    plan=full.plan,
+                    consumed_seconds=consumed,
+                )
+                total_consumed += consumed
                 account.add_instance(instance)
             except Exception as e:
-                # If we can't fetch full data, skip this instance
-                print(f"Warning: Could not fetch full data for instance {instance.name}: {e}")
+                print(f"Warning: Could not fetch full data for instance `{identifier.name}`, so skipping: {e}")
 
         # Update account consumed from sum of instance usage
         account.consumed_seconds = total_consumed

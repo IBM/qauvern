@@ -50,6 +50,14 @@ class InstanceConfig:
             raise ValueError("crn cannot be empty")
 
 
+@dataclass(frozen=True)
+class InstanceIdentifier:
+    """Minimal identity record from the Resource Controller API."""
+
+    crn: str
+    name: str
+
+
 @dataclass
 class Instance:
     """Represents a quantum service instance."""
