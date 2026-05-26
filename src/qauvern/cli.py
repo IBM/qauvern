@@ -28,6 +28,15 @@ from .optimizer import AllocationOptimizer
 from .plan import Plan, plan_from_name, plan_id_for
 
 
+def _apply_config_names(account: Account, instance_configs: list[InstanceConfig]) -> None:
+    """Override each instance's name with the user-curated name from the config."""
+    config_by_crn = {cfg.crn: cfg for cfg in instance_configs}
+    for inst in account.instances:
+        cfg = config_by_crn.get(inst.crn)
+        if cfg is not None:
+            inst.name = cfg.name
+
+
 def enrich_instances_with_usage_data(
     account: Account,
     instance_configs: list[InstanceConfig],
@@ -384,9 +393,11 @@ def show(ctx, config: str, api_key: str | None):
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     account_id = config_parser.account_id
     plan = config_parser.plan
+    instance_configs = config_parser.instance_configs
 
     click.echo(f"Fetching account information for plan {plan.value}...")
-    account = client.get_account_with_instances(account_id, plan)
+    account = client.get_account_with_instances(account_id, plan, [c.crn for c in instance_configs])
+    _apply_config_names(account, instance_configs)
 
     click.echo("\n" + "=" * 80)
     click.echo("ACCOUNT SUMMARY")
@@ -510,7 +521,8 @@ def analyze(ctx, config: str, api_key: str | None):
     instance_configs = config_parser.instance_configs
 
     click.echo(f"Fetching account information for plan {plan.value}...")
-    account = client.get_account_with_instances(account_id, plan)
+    account = client.get_account_with_instances(account_id, plan, [c.crn for c in instance_configs])
+    _apply_config_names(account, instance_configs)
 
     # Enrich instances with target usage and detailed usage data
     click.echo("Fetching usage data for different time periods...")
@@ -529,8 +541,8 @@ def analyze(ctx, config: str, api_key: str | None):
     )
     result = optimizer.optimize()
 
-    # Validate current allocations
-    is_valid, errors = optimizer.validate_allocations()
+    # Validate the proposed post-rebalance state
+    is_valid, errors = optimizer.validate_allocations(result=result)
 
     if not is_valid:
         click.echo("\n" + "=" * 80)
@@ -625,7 +637,8 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     instance_configs = config_parser.instance_configs
 
     click.echo(f"Fetching account information for plan {plan.value}...")
-    account = client.get_account_with_instances(account_id, plan)
+    account = client.get_account_with_instances(account_id, plan, [c.crn for c in instance_configs])
+    _apply_config_names(account, instance_configs)
 
     # Enrich instances with target usage (no detailed usage needed for optimize)
     enrich_instances_with_usage_data(account, instance_configs, client)
@@ -642,6 +655,13 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
     )
     result = optimizer.optimize()
+
+    is_valid, errors = optimizer.validate_allocations(result=result)
+    if not is_valid:
+        click.echo("\nVALIDATION ERRORS", err=True)
+        for err in errors:
+            click.echo(f"❌ {err}", err=True)
+        raise click.ClickException("Validation failed; refusing to apply changes.")
 
     if not result.recommendations:
         click.echo("✓ No optimization needed. Allocations are already optimal.")
@@ -783,7 +803,9 @@ def configure(
     client = _build_client(ctx, api_key)
 
     click.echo("Fetching instances...")
-    instances = client.get_account_with_instances(account_id, plan).instances
+    identifiers = client.list_instances(account_id, plan)
+    account = client.get_account_with_instances(account_id, plan, [i.crn for i in identifiers])
+    instances = account.instances
 
     if not instances:
         click.echo("⚠ No instances found in this account.", err=True)

@@ -11,6 +11,7 @@
 """API client for IBM Quantum and Resource Controller services."""
 
 import os
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
@@ -425,19 +426,28 @@ class IBMQuantumAPIClient:
 
         return instances
 
-    def get_account_with_instances(self, account_id: str, plan: Plan) -> Account:
-        """Get account with instances filtered by plan, populated with full data."""
+    def get_account_with_instances(
+        self,
+        account_id: str,
+        plan: Plan,
+        instance_crns: Iterable[str],
+    ) -> Account:
+        """Get account allocation plus the specified instances, populated with full data.
+
+        Callers supply the CRNs to populate. For the "every instance on the
+        account/plan" path, call `list_instances` first and pass its CRNs in
+        (see `configure`). Most commands pull CRNs from the user's config file.
+        """
         alloc = self.get_account(account_id, plan)
-        identifiers = self.list_instances(account_id, plan)
         instances = []
-        for identifier in identifiers:
+        for crn in instance_crns:
             try:
-                full = self.get_instance(identifier.crn)
-                consumed = self.get_rolling_window_seconds(identifier.crn, account_id)
+                full = self.get_instance(crn)
+                consumed = self.get_rolling_window_seconds(crn, account_id)
                 instances.append(
                     Instance(
-                        crn=identifier.crn,
-                        name=identifier.name,
+                        crn=crn,
+                        name=full.name,
                         allocation_seconds=full.allocation_seconds,
                         limit_seconds=full.limit_seconds,
                         plan=full.plan,
@@ -445,7 +455,7 @@ class IBMQuantumAPIClient:
                     )
                 )
             except Exception as e:
-                print(f"Warning: Could not fetch full data for instance `{identifier.name}`, so skipping: {e}")
+                print(f"Warning: Could not fetch full data for instance `{crn}`, so skipping: {e}")
         return Account(
             account_id=alloc.account_id,
             plan_id=alloc.plan_id,

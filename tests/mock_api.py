@@ -10,6 +10,7 @@
 
 """Mock API client for testing."""
 
+from collections.abc import Iterable
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -37,13 +38,15 @@ class MockIBMQuantumAPIClient:
         self.usage_data: dict[str, dict] = {}
         self.daily_usage_data: dict[str, dict[date, int]] = {}
 
-    def _build_account(self, account_id: str) -> Account:
+    def _build_account(self, account_id: str, instance_crns: Iterable[str] | None = None) -> Account:
         if account_id not in self._account_params:
             raise ValueError(f"Account {account_id} not found in mock data")
         params = self._account_params[account_id]
-        instances = tuple(
-            self.instances[crn] for crn in self._account_instances.get(account_id, []) if crn in self.instances
-        )
+        if instance_crns is None:
+            crns = self._account_instances.get(account_id, [])
+        else:
+            crns = list(instance_crns)
+        instances = tuple(self.instances[crn] for crn in crns if crn in self.instances)
         return Account(account_id=account_id, plan_id="test-plan", limit_seconds=None, instances=instances, **params)
 
     def setup_account(
@@ -159,13 +162,20 @@ class MockIBMQuantumAPIClient:
             if crn in self.instances
         ]
 
-    def get_account_with_instances(self, account_id: str, plan: Plan | None = None) -> Account:
-        """Get mock account with all instances populated.
+    def get_account_with_instances(
+        self,
+        account_id: str,
+        plan: Plan | None = None,
+        instance_crns: Iterable[str] | None = None,
+    ) -> Account:
+        """Get mock account populated with the specified instances.
 
         `plan` is accepted to match the real client signature; the mock does
         not filter by plan since each test scenario sets up instances directly.
+        When `instance_crns` is None, every instance registered on the account
+        is included (legacy behavior used by tests that predate the filter).
         """
-        return self._build_account(account_id)
+        return self._build_account(account_id, instance_crns)
 
     def create_instance(
         self,

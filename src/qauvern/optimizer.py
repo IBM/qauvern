@@ -309,27 +309,42 @@ class AllocationOptimizer:
 
         return result
 
-    def validate_allocations(self) -> tuple[bool, list[str]]:
-        """Validate that current allocations are within constraints.
+    def validate_allocations(
+        self,
+        result: OptimizationResult | None = None,
+    ) -> tuple[bool, list[str]]:
+        """Validate allocations against account cap and per-instance config targets.
+
+        If `result` is provided, each recommendation's `new_allocation`
+        is substituted for the matching instance's current allocation
+        before validating. This makes the same method usable to validate
+        either the input state or the proposed post-rebalance state.
+
+        Allocation held by instances NOT in `self.account.instances` is
+        included via `Account.unconfigured_allocation_seconds`, so the
+        cap check stays correct when only a subset of instances are loaded.
 
         Returns:
             Tuple of (is_valid, list of error messages)
         """
         errors = []
 
-        # Check that sum of allocations doesn't exceed account target
-        total_allocated = sum(inst.allocation_seconds for inst in self.account.instances)
+        effective = {inst.crn: inst.allocation_seconds for inst in self.account.instances}
+        if result is not None:
+            for rec in result.recommendations:
+                effective[rec.instance_crn] = rec.new_allocation
+
+        total_allocated = sum(effective.values()) + self.account.unconfigured_allocation_seconds
         if total_allocated > self.account.target_usage_seconds:
             errors.append(
                 f"Total instance allocations ({total_allocated}s) exceeds "
                 f"account target ({self.account.target_usage_seconds}s)"
             )
 
-        # Check that each instance config's allocation doesn't exceed its target
         for config in self.instance_configs:
             if config.target_usage_seconds is None:
                 continue
-            allocated = sum(inst.allocation_seconds for inst in self.account.instances if inst.crn == config.crn)
+            allocated = effective.get(config.crn, 0)
             if allocated > config.target_usage_seconds:
                 errors.append(
                     f"Instance '{config.name}' total allocation ({allocated}s) "

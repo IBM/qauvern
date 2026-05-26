@@ -151,6 +151,18 @@ class Account:
     def consumed_seconds(self) -> int:
         return sum(i.consumed_seconds for i in self.instances)
 
+    @cached_property
+    def unconfigured_allocation_seconds(self) -> int:
+        """Allocation held by instances not present in `self.instances`.
+
+        Derived as `target − available − sum(loaded instance allocations)`.
+        Lets the optimizer validate against the account-wide cap when only
+        a subset of instances are loaded; yields 0 when every instance is
+        present.
+        """
+        configured = sum(i.allocation_seconds for i in self.instances)
+        return self.target_usage_seconds - self.available_seconds - configured
+
     @property
     def utilization(self) -> float:
         if self.target_usage_seconds > 0:
