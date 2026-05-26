@@ -24,6 +24,7 @@ class AllocationOptimizer:
         account: Account,
         instance_configs: list[InstanceConfig],
         minimum_allocation_seconds: int = 60,
+        allocation_reserve_percent: float = 0.0,
         today: date | None = None,
     ):
         """Initialize the optimizer.
@@ -32,11 +33,13 @@ class AllocationOptimizer:
             account: Account with instances to optimize
             instance_configs: List of instance configs with allocation constraints
             minimum_allocation_seconds: Minimum allocation to maintain for each instance (default: 60 seconds)
+            allocation_reserve_percent: Fraction of available seconds to hold back from redistribution
             today: Date to use for limit override resolution (defaults to date.today())
         """
         self.account = account
         self.instance_configs = instance_configs
         self.minimum_allocation_seconds = minimum_allocation_seconds
+        self.allocation_reserve_percent = allocation_reserve_percent
         self.today = today or date.today()
         self._config_by_crn = {config.crn: config for config in instance_configs}
         self._limit_resolver = LimitResolver()
@@ -202,7 +205,7 @@ class AllocationOptimizer:
         # Step 5: Calculate total allocation to distribute
         # Use ALL available allocation (freed + account available)
         print("\n=== Step 5: Calculating Total Available Allocation ===")
-        reserve_factor = 1.0 - (self.account.allocation_reserve_percent / 100.0)
+        reserve_factor = 1.0 - (self.allocation_reserve_percent / 100.0)
         total_to_allocate = int((freed_allocation + self.account.available_seconds) * reserve_factor)
         print(f"  Freed from inactive: {freed_allocation - active_freed}s")
         print(f"  Freed from active (temporary reduction): {active_freed}s")

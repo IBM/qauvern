@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
-from .models import Account, Instance, InstanceIdentifier
+from .models import Account, AccountAllocation, Instance, InstanceIdentifier
 from .plan import Plan, plan_id_for
 
 QUANTUM_COMPUTING_RESOURCE_ID = "b6049020-80f4-11eb-a0f7-e35ec9b4054f"
@@ -182,8 +182,8 @@ class IBMQuantumAPIClient:
             )
             raise Exception(details) from e
 
-    def get_account(self, account_id: str, plan: Plan) -> Account:
-        """Get account information including allocation for a specific plan."""
+    def get_account(self, account_id: str, plan: Plan) -> AccountAllocation:
+        """Get account allocation for a specific plan."""
         plan_id = plan_id_for(plan)
         url = f"{self.base_url}/v1/accounts/{account_id}"
         data = self._request_json("GET", url, params={"plan_id": plan_id})
@@ -193,11 +193,10 @@ class IBMQuantumAPIClient:
             raise ValueError(f"No plan found for plan {plan.value} (plan_id {plan_id})")
 
         api_plan = plans[0]
-        return Account(
+        return AccountAllocation(
             account_id=account_id,
             plan_id=plan_id,
             target_usage_seconds=api_plan.get("usage_allocation_seconds", 0),
-            consumed_seconds=0,  # Will be calculated from instances
             available_seconds=api_plan.get("unallocated_usage_seconds", 0),
             limit_seconds=api_plan.get("usage_limit_seconds"),
         )
@@ -428,30 +427,30 @@ class IBMQuantumAPIClient:
 
     def get_account_with_instances(self, account_id: str, plan: Plan) -> Account:
         """Get account with instances filtered by plan, populated with full data."""
-        account = self.get_account(account_id, plan)
-
-        instances = self.list_instances(account_id, plan)
-
-        total_consumed = 0
-
-        for identifier in instances:
+        alloc = self.get_account(account_id, plan)
+        identifiers = self.list_instances(account_id, plan)
+        instances = []
+        for identifier in identifiers:
             try:
                 full = self.get_instance(identifier.crn)
                 consumed = self.get_rolling_window_seconds(identifier.crn, account_id)
-                instance = Instance(
-                    crn=identifier.crn,
-                    name=identifier.name,
-                    allocation_seconds=full.allocation_seconds,
-                    limit_seconds=full.limit_seconds,
-                    plan=full.plan,
-                    consumed_seconds=consumed,
+                instances.append(
+                    Instance(
+                        crn=identifier.crn,
+                        name=identifier.name,
+                        allocation_seconds=full.allocation_seconds,
+                        limit_seconds=full.limit_seconds,
+                        plan=full.plan,
+                        consumed_seconds=consumed,
+                    )
                 )
-                total_consumed += consumed
-                account.add_instance(instance)
             except Exception as e:
                 print(f"Warning: Could not fetch full data for instance `{identifier.name}`, so skipping: {e}")
-
-        # Update account consumed from sum of instance usage
-        account.consumed_seconds = total_consumed
-
-        return account
+        return Account(
+            account_id=alloc.account_id,
+            plan_id=alloc.plan_id,
+            target_usage_seconds=alloc.target_usage_seconds,
+            available_seconds=alloc.available_seconds,
+            limit_seconds=alloc.limit_seconds,
+            instances=tuple(instances),
+        )

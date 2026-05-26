@@ -162,20 +162,23 @@ def test_exhausted_over_target() -> None:
 
 
 def test_account_utilization() -> None:
+    instance = Instance(crn="crn:test:1", name="Test", allocation_seconds=1000000, consumed_seconds=250000)
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
         target_usage_seconds=1000000,
-        consumed_seconds=250000,
+        instances=(instance,),
     )
     assert account.utilization == 25.0
 
 
-def test_account_reserve_out_of_range_raises() -> None:
-    with pytest.raises(ValueError, match="allocation_reserve_percent"):
-        Account(
-            account_id="test",
-            plan_id="test-plan",
-            target_usage_seconds=1000000,
-            allocation_reserve_percent=100.0,
-        )
+def test_account_consumed_seconds_is_sum_of_instances() -> None:
+    i1 = Instance(crn="crn:test:1", name="A", allocation_seconds=500000, consumed_seconds=100000)
+    i2 = Instance(crn="crn:test:2", name="B", allocation_seconds=500000, consumed_seconds=150000)
+    account = Account(
+        account_id="test-account",
+        plan_id="test-plan",
+        target_usage_seconds=1000000,
+        instances=(i1, i2),
+    )
+    assert account.consumed_seconds == 250000

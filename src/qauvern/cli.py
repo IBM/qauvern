@@ -12,6 +12,7 @@
 
 import functools
 import sys
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
@@ -157,7 +158,7 @@ def parse_seconds(value: str) -> int:
 
 
 def format_instance_table(
-    instances: list[Instance],
+    instances: Sequence[Instance],
     instance_configs: list[InstanceConfig] | None = None,
     columns: list[str] | None = None,
     rec_map: dict[str, "OptimizationRecommendation"] | None = None,
@@ -417,8 +418,8 @@ def show(ctx, config: str, api_key: str | None):
     click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
     click.echo(f"Consumed: {format_seconds(account.consumed_seconds)}")
     click.echo(f"Available: {format_seconds(account.available_seconds)}")
-    if account.allocation_reserve_percent > 0:
-        click.echo(format_reserve_summary(account.available_seconds, account.allocation_reserve_percent))
+    if config_parser.allocation_reserve_percent > 0:
+        click.echo(format_reserve_summary(account.available_seconds, config_parser.allocation_reserve_percent))
     limit_display = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
     click.echo(f"Limit: {limit_display}")
     click.echo(f"Utilization: {account.utilization:.1f}%")
@@ -541,9 +542,13 @@ def analyze(ctx, config: str, api_key: str | None):
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
 
     # Run optimization analysis
-    account.allocation_reserve_percent = config_parser.allocation_reserve_percent
     click.echo("Analyzing allocations...")
-    optimizer = AllocationOptimizer(account, instance_configs, minimum_allocation_seconds)
+    optimizer = AllocationOptimizer(
+        account,
+        instance_configs,
+        minimum_allocation_seconds,
+        allocation_reserve_percent=config_parser.allocation_reserve_percent,
+    )
     result = optimizer.optimize()
 
     # Validate current allocations
@@ -575,8 +580,8 @@ def analyze(ctx, config: str, api_key: str | None):
     )
     click.echo(f"Consumed (28-day): {format_seconds(account.consumed_seconds)}")
     click.echo(f"Available: {format_seconds(account.available_seconds)}")
-    if account.allocation_reserve_percent > 0:
-        click.echo(format_reserve_summary(account.available_seconds, account.allocation_reserve_percent))
+    if config_parser.allocation_reserve_percent > 0:
+        click.echo(format_reserve_summary(account.available_seconds, config_parser.allocation_reserve_percent))
     limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
     click.echo(f"Limit: {limit_str}")
 
@@ -649,9 +654,13 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
 
     # Run optimization
-    account.allocation_reserve_percent = config_parser.allocation_reserve_percent
     click.echo("Computing optimal allocations...")
-    optimizer = AllocationOptimizer(account, instance_configs, minimum_allocation_seconds)
+    optimizer = AllocationOptimizer(
+        account,
+        instance_configs,
+        minimum_allocation_seconds,
+        allocation_reserve_percent=config_parser.allocation_reserve_percent,
+    )
     result = optimizer.optimize()
 
     if not result.recommendations:

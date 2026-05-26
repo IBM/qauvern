@@ -317,7 +317,6 @@ def opt_result_account() -> Account:
         account_id="test-account",
         plan_id="test-plan",
         target_usage_seconds=100000,
-        consumed_seconds=50000,
         available_seconds=50000,
     )
 

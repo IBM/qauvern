@@ -31,29 +31,35 @@ class MockIBMQuantumAPIClient:
         self.iam_token = iam_token or "mock-iam-token"
         self.base_url = base_url or "https://mock.quantum.cloud.ibm.com"
 
-        # Mock data storage
-        self.accounts: dict[str, Account] = {}
+        self._account_params: dict[str, dict] = {}
+        self._account_instances: dict[str, list[str]] = {}
         self.instances: dict[str, Instance] = {}
         self.usage_data: dict[str, dict] = {}
         self.daily_usage_data: dict[str, dict[date, int]] = {}
+
+    def _build_account(self, account_id: str) -> Account:
+        if account_id not in self._account_params:
+            raise ValueError(f"Account {account_id} not found in mock data")
+        params = self._account_params[account_id]
+        instances = tuple(
+            self.instances[crn] for crn in self._account_instances.get(account_id, []) if crn in self.instances
+        )
+        return Account(account_id=account_id, plan_id="test-plan", instances=instances, **params)
 
     def setup_account(
         self,
         account_id: str,
         target_usage_seconds: int,
-        consumed_seconds: int = 0,
+        consumed_seconds: int = 0,  # ignored — consumed is now derived from instances
         available_seconds: int = 0,
     ) -> Account:
         """Setup a mock account for testing."""
-        account = Account(
-            plan_id="test-plan",
-            account_id=account_id,
-            target_usage_seconds=target_usage_seconds,
-            consumed_seconds=consumed_seconds,
-            available_seconds=available_seconds,
-        )
-        self.accounts[account_id] = account
-        return account
+        self._account_params[account_id] = {
+            "target_usage_seconds": target_usage_seconds,
+            "available_seconds": available_seconds,
+        }
+        self._account_instances.setdefault(account_id, [])
+        return self._build_account(account_id)
 
     def setup_instance(
         self,
@@ -73,11 +79,8 @@ class MockIBMQuantumAPIClient:
             consumed_seconds=consumed_seconds,
         )
         self.instances[crn] = instance
-
-        # Add to account if specified
-        if account_id and account_id in self.accounts:
-            self.accounts[account_id].add_instance(instance)
-
+        if account_id:
+            self._account_instances.setdefault(account_id, []).append(crn)
         return instance
 
     def setup_usage(self, instance_crn: str, start_date: datetime, end_date: datetime, consumed_seconds: int) -> None:
@@ -101,9 +104,7 @@ class MockIBMQuantumAPIClient:
 
     def get_account(self, account_id: str) -> Account:
         """Get mock account information."""
-        if account_id not in self.accounts:
-            raise ValueError(f"Account {account_id} not found in mock data")
-        return self.accounts[account_id]
+        return self._build_account(account_id)
 
     def get_instance(self, instance_crn: str) -> Instance:
         """Get mock instance configuration."""
@@ -151,10 +152,13 @@ class MockIBMQuantumAPIClient:
         `plan` is accepted to match the real client signature; the mock does
         not filter by plan since each test scenario sets up instances directly.
         """
-        if account_id not in self.accounts:
+        if account_id not in self._account_params:
             raise ValueError(f"Account {account_id} not found")
-
-        return [InstanceIdentifier(crn=inst.crn, name=inst.name) for inst in self.accounts[account_id].instances]
+        return [
+            InstanceIdentifier(crn=crn, name=self.instances[crn].name)
+            for crn in self._account_instances.get(account_id, [])
+            if crn in self.instances
+        ]
 
     def get_account_with_instances(self, account_id: str, plan: Plan | None = None) -> Account:
         """Get mock account with all instances populated.
@@ -162,7 +166,7 @@ class MockIBMQuantumAPIClient:
         `plan` is accepted to match the real client signature; the mock does
         not filter by plan since each test scenario sets up instances directly.
         """
-        return self.get_account(account_id)
+        return self._build_account(account_id)
 
     def create_instance(
         self,
