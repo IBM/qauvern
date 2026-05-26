@@ -440,14 +440,6 @@ def test_limit_no_override() -> None:
     assert result == format_seconds(30000)
 
 
-def test_limit_with_override_annotated() -> None:
-    """Backwards-compat: has_override param still accepted (no-op now)."""
-    from qauvern.cli import format_limit_display
-
-    result = format_limit_display(30000, has_override=True)
-    assert format_seconds(30000) in result
-
-
 def test_limit_with_grant_annotated() -> None:
     """Limit with active grant includes (+grant) annotation."""
     from qauvern.cli import format_limit_display
