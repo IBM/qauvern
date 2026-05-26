@@ -16,8 +16,8 @@ import click
 import pytest
 from click.testing import CliRunner, Result
 
-from qauvern.api_client import get_plan_id
 from qauvern.cli import main, parse_seconds
+from qauvern.plan import Plan
 from tests.mock_api import MockIBMQuantumAPIClient
 
 
@@ -75,41 +75,6 @@ def test_empty_suffix_raises() -> None:
         parse_seconds("h")
 
 
-def test_friendly_name_internal() -> None:
-    result = get_plan_id("internal")
-    assert result == "91b2c828-2952-4f05-aed8-bedf92c6c480"
-
-
-def test_friendly_name_premium() -> None:
-    result = get_plan_id("premium")
-    assert result == "7f666d17-7893-47d8-b9e5-e8b5c0b5c5c5"
-
-
-def test_friendly_name_paygo() -> None:
-    result = get_plan_id("paygo")
-    assert result == "5304b575-3cff-4455-90dc-ae4367762093"
-
-
-def test_get_plan_id_case_insensitive() -> None:
-    assert get_plan_id("PREMIUM") == get_plan_id("premium")
-    assert get_plan_id("Internal") == get_plan_id("internal")
-
-
-def test_raw_uuid_passthrough() -> None:
-    uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-    assert get_plan_id(uuid) == uuid
-
-
-def test_unknown_name_raises() -> None:
-    with pytest.raises(ValueError, match="Unknown plan"):
-        get_plan_id("nonexistent")
-
-
-def test_invalid_uuid_raises() -> None:
-    with pytest.raises(ValueError, match="Unknown plan"):
-        get_plan_id("not-a-uuid")
-
-
 @pytest.fixture
 def mock_client() -> MockIBMQuantumAPIClient:
     return MockIBMQuantumAPIClient()
@@ -120,7 +85,7 @@ def test_basic_creation(mock_client: MockIBMQuantumAPIClient) -> None:
         name="test-instance",
         target="us-east",
         resource_group="rg-123",
-        resource_plan_id="plan-123",
+        plan=Plan.PREMIUM,
     )
     assert result["name"] == "test-instance"
     assert result["state"] == "active"
@@ -133,7 +98,7 @@ def test_creation_with_allocation(mock_client: MockIBMQuantumAPIClient) -> None:
         name="test-instance",
         target="eu-de",
         resource_group="rg-123",
-        resource_plan_id="plan-123",
+        plan=Plan.PREMIUM,
         allocation_seconds=96000,
     )
     crn = result["id"]
@@ -145,7 +110,7 @@ def test_instance_stored_in_mock(mock_client: MockIBMQuantumAPIClient) -> None:
         name="stored-instance",
         target="us-east",
         resource_group="rg-123",
-        resource_plan_id="plan-123",
+        plan=Plan.PREMIUM,
     )
     crn = result["id"]
     assert crn in mock_client.instances
@@ -294,25 +259,6 @@ def test_create_with_tags(runner: CliRunner, create_mock_client: MockIBMQuantumA
     assert "created successfully" in result.output
 
 
-def test_create_with_raw_plan_uuid(runner: CliRunner, create_mock_client: MockIBMQuantumAPIClient) -> None:
-    result = _invoke(
-        runner,
-        create_mock_client,
-        [
-            "my-instance",
-            "--target",
-            "us-east",
-            "--plan",
-            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-            "--resource-group",
-            "rg-123",
-            "--api-key",
-            "test-key",
-        ],
-    )
-    assert result.exit_code == 0
-
-
 def test_create_missing_required_option(runner: CliRunner, create_mock_client: MockIBMQuantumAPIClient) -> None:
     result = _invoke(
         runner,
@@ -345,7 +291,7 @@ def test_create_invalid_plan_name(runner: CliRunner, create_mock_client: MockIBM
         ],
     )
     assert result.exit_code != 0
-    assert "Unknown plan" in result.output
+    assert "Invalid value" in result.output or "bogus" in result.output
 
 
 def test_create_api_failure(runner: CliRunner, create_mock_client: MockIBMQuantumAPIClient) -> None:

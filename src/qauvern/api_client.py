@@ -11,7 +11,6 @@
 """API client for IBM Quantum and Resource Controller services."""
 
 import os
-import re
 from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
@@ -19,59 +18,9 @@ from urllib.parse import parse_qs, quote, urlparse
 import requests
 
 from .models import Account, Instance
-
-# Known plan ID to name mappings
-# These are common IBM Quantum service plans
-PLAN_NAMES = {
-    # In staging
-    "91b2c828-2952-4f05-aed8-bedf92c6c480": "Internal",
-    "7f666d17-7893-47d8-b9e5-e8b5c0b5c5c5": "Premium",
-    "5304b575-3cff-4455-90dc-ae4367762093": "Paygo",
-}
-
-PLAN_IDS_BY_NAME = {name.lower(): plan_id for plan_id, name in PLAN_NAMES.items()}
+from .plan import Plan, plan_id_for
 
 QUANTUM_COMPUTING_RESOURCE_ID = "b6049020-80f4-11eb-a0f7-e35ec9b4054f"
-
-
-def get_plan_name(plan_id: str | None) -> str:
-    """Get friendly plan name from plan ID.
-
-    Args:
-        plan_id: The plan UUID (can be None)
-
-    Returns:
-        Friendly plan name if known, otherwise truncated plan ID
-    """
-    if not plan_id:
-        return "Unknown"
-
-    # Check if we have a friendly name for this plan
-    if plan_id in PLAN_NAMES:
-        return PLAN_NAMES[plan_id]
-
-    # Return first 8 characters of UUID for unknown plans
-    return plan_id[:8] if len(plan_id) >= 8 else plan_id
-
-
-def get_plan_id(plan_name_or_id: str) -> str:
-    """Resolve a plan name or UUID to a plan UUID.
-
-    Accepts either a friendly name (internal, premium, paygo) or a raw UUID.
-    """
-    lower = plan_name_or_id.lower()
-    if lower in PLAN_IDS_BY_NAME:
-        return PLAN_IDS_BY_NAME[lower]
-
-    if re.match(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-        plan_name_or_id,
-        re.IGNORECASE,
-    ):
-        return plan_name_or_id
-
-    known = ", ".join(PLAN_IDS_BY_NAME.keys())
-    raise ValueError(f"Unknown plan '{plan_name_or_id}'. Known plans: {known}. Or pass a raw plan UUID.")
 
 
 class IBMQuantumAPIClient:
@@ -233,32 +182,24 @@ class IBMQuantumAPIClient:
             )
             raise Exception(details) from e
 
-    def get_account(self, account_id: str, plan_id: str) -> Account:
-        """Get account information including allocation for a specific plan.
-
-        Args:
-            account_id: The IBM Cloud account ID
-            plan_id: The plan ID to get allocation for
-
-        Returns:
-            Account object with allocation information for the specified plan
-        """
+    def get_account(self, account_id: str, plan: Plan) -> Account:
+        """Get account information including allocation for a specific plan."""
+        plan_id = plan_id_for(plan)
         url = f"{self.base_url}/v1/accounts/{account_id}"
         data = self._request_json("GET", url, params={"plan_id": plan_id})
 
-        # API returns plans array, extract the first (and only) plan
         plans = data.get("plans", [])
         if not plans:
-            raise ValueError(f"No plan found for plan_id {plan_id}")
+            raise ValueError(f"No plan found for plan {plan.value} (plan_id {plan_id})")
 
-        plan = plans[0]
+        api_plan = plans[0]
         return Account(
             account_id=account_id,
             plan_id=plan_id,
-            target_usage_seconds=plan.get("usage_allocation_seconds", 0),
+            target_usage_seconds=api_plan.get("usage_allocation_seconds", 0),
             consumed_seconds=0,  # Will be calculated from instances
-            available_seconds=plan.get("unallocated_usage_seconds", 0),
-            limit_seconds=plan.get("usage_limit_seconds"),
+            available_seconds=api_plan.get("unallocated_usage_seconds", 0),
+            limit_seconds=api_plan.get("usage_limit_seconds"),
         )
 
     def get_instance(self, instance_crn: str) -> Instance:
@@ -435,29 +376,17 @@ class IBMQuantumAPIClient:
         name: str,
         target: str,
         resource_group: str,
-        resource_plan_id: str,
+        plan: Plan,
         allocation_seconds: int | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Create a new IBM Quantum service instance via Resource Controller API.
-
-        Args:
-            name: Instance name
-            target: Deployment region (e.g., "us-east", "eu-de")
-            resource_group: Resource group ID
-            resource_plan_id: Plan UUID
-            allocation_seconds: Optional initial allocation in seconds
-            tags: Optional list of tags
-
-        Returns:
-            Dict with the created instance data from the API response.
-        """
+        """Create a new IBM Quantum service instance via Resource Controller API."""
         url = f"{self.resource_controller_url}/v2/resource_instances"
         payload: dict[str, Any] = {
             "name": name,
             "target": target,
             "resource_group": resource_group,
-            "resource_plan_id": resource_plan_id,
+            "resource_plan_id": plan_id_for(plan),
             "resource_id": QUANTUM_COMPUTING_RESOURCE_ID,
         }
 
@@ -485,11 +414,12 @@ class IBMQuantumAPIClient:
         except Exception:
             return ""
 
-    def list_instances(self, account_id: str) -> list[Instance]:
-        """List all quantum computing instances for an account using Resource Controller API.
+    def list_instances(self, account_id: str, plan: Plan) -> list[Instance]:
+        """List quantum computing instances for an account, filtered by plan.
 
         Args:
             account_id: The IBM Cloud account ID
+            plan: The plan to filter instances by
 
         Returns:
             List of Instance objects with CRN and name populated
@@ -498,6 +428,7 @@ class IBMQuantumAPIClient:
         params: dict[str, Any] = {
             "resource_id": QUANTUM_COMPUTING_RESOURCE_ID,
             "account_id": account_id,
+            "resource_plan_id": plan_id_for(plan),
         }
 
         instances = []
@@ -528,39 +459,21 @@ class IBMQuantumAPIClient:
 
         return instances
 
-    def get_account_with_instances(self, account_id: str, plan_id: str) -> Account:
-        """Get account with instances filtered by plan, populated with full data.
+    def get_account_with_instances(self, account_id: str, plan: Plan) -> Account:
+        """Get account with instances filtered by plan, populated with full data."""
+        account = self.get_account(account_id, plan)
 
-        Args:
-            account_id: The IBM Cloud account ID
-            plan_id: The plan ID to filter instances by
+        instances = self.list_instances(account_id, plan)
 
-        Returns:
-            Account object with instances list populated with full allocation, usage, and plan data
-            Only includes instances that match the specified plan_id
-            Account-level allocation comes from API, consumed is calculated from matching instances
-        """
-        # Get account allocation from API (this is the account/plan allocation)
-        account = self.get_account(account_id, plan_id)
-
-        instances = self.list_instances(account_id)
-
-        # Fetch full instance data for each instance (allocation, usage, plan)
-        # and filter by plan_id
         total_consumed = 0
 
         for instance in instances:
             try:
                 # Get full instance data from regional Quantum API
                 full_instance = self.get_instance(instance.crn)
-                # Update the instance with full data
                 instance.allocation_seconds = full_instance.allocation_seconds
                 instance.limit_seconds = full_instance.limit_seconds
                 instance.plan = full_instance.plan
-
-                # Only include instances that match the specified plan_id
-                if instance.plan != plan_id:
-                    continue
 
                 # Get usage data
                 instance.consumed_seconds = self.get_rolling_window_seconds(instance.crn, account_id)

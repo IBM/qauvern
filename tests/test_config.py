@@ -52,11 +52,11 @@ def test_missing_required_field_raises() -> None:
     """Test that each missing top-level required field raises ValueError."""
     base = {
         "account_id": "acc-1",
-        "plan_id": "plan-1",
+        "plan": "internal",
         "balance_period": {"start_date": "2026-01-01T00:00:00", "end_date": "2026-12-31T23:59:59"},
         "instances": [],
     }
-    for field in ["account_id", "plan_id", "balance_period", "instances"]:
+    for field in ["account_id", "plan", "balance_period", "instances"]:
         config = {k: v for k, v in base.items() if k != field}
         path = _write_config(_to_yaml(config))
         try:
@@ -70,7 +70,7 @@ def test_instances_key_not_a_list_raises() -> None:
     """Test that the 'instances' YAML key being a non-list raises ValueError."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -91,7 +91,7 @@ def test_balance_period_missing_dates_raises() -> None:
         period_yaml = "\n".join(f'  {k}: "{v}"' for k, v in dates.items())
         path = _write_config(f"""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
 {period_yaml}
 instances: []
@@ -111,7 +111,7 @@ def test_instance_missing_required_field_raises() -> None:
         entry_yaml = "\n".join(f'    {k}: "{v}"' for k, v in fields.items())
         path = _write_config(f"""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -131,11 +131,30 @@ instances:
 # -------------------------------------------------------------------
 
 
+def test_invalid_plan_raises() -> None:
+    """Test that an unrecognized plan name raises ValueError listing known plans."""
+    path = _write_config("""
+account_id: "acc-1"
+plan: "flex"
+balance_period:
+  start_date: "2026-01-01T00:00:00"
+  end_date: "2026-12-31T23:59:59"
+instances:
+  - name: "Project A"
+    crn: "crn:test:1"
+""")
+    try:
+        with pytest.raises(ValueError, match="Unknown plan 'flex'"):
+            ConfigParser(path)
+    finally:
+        os.unlink(path)
+
+
 def test_minimum_allocation_seconds_defaults_to_60() -> None:
     """Test that minimum_allocation_seconds defaults to 60 when absent."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -154,7 +173,7 @@ def test_minimum_allocation_seconds_parsed() -> None:
     """Test that explicit minimum_allocation_seconds is parsed from config."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 minimum_allocation_seconds: 300
 balance_period:
   start_date: "2026-01-01T00:00:00"
@@ -174,7 +193,7 @@ def test_allocation_reserve_percent_defaults_to_zero() -> None:
     """Test that allocation_reserve_percent defaults to 0.0 when absent."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -194,7 +213,7 @@ def test_allocation_reserve_percent_parsed() -> None:
     """Test that allocation_reserve_percent is parsed from config."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 allocation_reserve_percent: 20
 balance_period:
   start_date: "2026-01-01T00:00:00"
@@ -215,7 +234,7 @@ def test_reserve_percent_out_of_range_raises() -> None:
     """Test that allocation_reserve_percent >= 100 raises ValueError."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 allocation_reserve_percent: 100
 balance_period:
   start_date: "2026-01-01T00:00:00"
@@ -241,7 +260,7 @@ def test_instance_inherits_balance_period_dates() -> None:
     """Test that instance configs without explicit dates inherit from balance_period."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -262,7 +281,7 @@ def test_instance_date_overrides_balance_period() -> None:
     """Test that entry-level start/end dates override the balance period."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -285,7 +304,7 @@ def test_instance_without_target_usage_seconds() -> None:
     """Test that entry without target_usage_seconds parses with None."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -305,7 +324,7 @@ def test_limit_seconds_parsed() -> None:
     """Test that limit_seconds YAML key parses to limit_seconds."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -326,7 +345,7 @@ def test_limit_below_target_raises() -> None:
     """Test that limit_seconds < target_usage_seconds raises ValueError."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -352,7 +371,7 @@ def test_no_net_grants_defaults_to_empty_tuple() -> None:
     """Test that an entry with no net_grants has empty tuple."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -372,7 +391,7 @@ def test_net_grant_parsed() -> None:
     """Test that net_grants are parsed from config."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -397,7 +416,7 @@ def test_multiple_net_grants_parsed() -> None:
     """Test that multiple net_grants are parsed."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -424,7 +443,7 @@ def test_net_grant_zero_seconds_raises() -> None:
     """Test that net_grant_seconds <= 0 raises ValueError."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -448,7 +467,7 @@ def test_net_grant_end_date_parsed() -> None:
     """Test that explicit end_date is parsed from config."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"
@@ -473,7 +492,7 @@ def test_net_grant_no_end_date_defaults_28_days() -> None:
     """Test that missing end_date defaults to start_date + 28 days."""
     path = _write_config("""
 account_id: "acc-1"
-plan_id: "plan-1"
+plan: "internal"
 balance_period:
   start_date: "2026-01-01T00:00:00"
   end_date: "2026-12-31T23:59:59"

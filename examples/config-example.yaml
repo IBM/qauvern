@@ -5,12 +5,9 @@
 # IBM Cloud Account ID
 account_id: "your-account-id-here"
 
-# Plan ID - all instances in this config must use this plan
-# Common plan IDs:
-#   - 91b2c828-2952-4f05-aed8-bedf92c6c480 (Standard/Internal)
-#   - 7f666d17-7893-47d8-b9e5-... (Premium)
-#   - 5304b575-3cff-4455-9c5e-... (Lite)
-plan_id: "your-plan-id-here"
+# Plan - all instances in this config must belong to this plan.
+# One of: internal, premium, paygo.
+plan: "premium"
 
 # Minimum allocation in seconds to maintain for each instance (optional)
 # Default: 60 seconds (1 minute)

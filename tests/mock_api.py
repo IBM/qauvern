@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from qauvern.models import Account, Instance
+from qauvern.plan import Plan, plan_id_for
 
 
 class MockIBMQuantumAPIClient:
@@ -144,15 +145,23 @@ class MockIBMQuantumAPIClient:
         self.instances[instance_crn].limit_seconds = limit_seconds
         return True
 
-    def list_instances(self, account_id: str) -> list[Instance]:
-        """List all mock instances for an account."""
+    def list_instances(self, account_id: str, plan: Plan | None = None) -> list[Instance]:
+        """List mock instances for an account.
+
+        `plan` is accepted to match the real client signature; the mock does
+        not filter by plan since each test scenario sets up instances directly.
+        """
         if account_id not in self.accounts:
             raise ValueError(f"Account {account_id} not found")
 
         return self.accounts[account_id].instances
 
-    def get_account_with_instances(self, account_id: str) -> Account:
-        """Get mock account with all instances populated."""
+    def get_account_with_instances(self, account_id: str, plan: Plan | None = None) -> Account:
+        """Get mock account with all instances populated.
+
+        `plan` is accepted to match the real client signature; the mock does
+        not filter by plan since each test scenario sets up instances directly.
+        """
         return self.get_account(account_id)
 
     def create_instance(
@@ -160,11 +169,12 @@ class MockIBMQuantumAPIClient:
         name: str,
         target: str,
         resource_group: str,
-        resource_plan_id: str,
+        plan: Plan,
         allocation_seconds: int | None = None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Mock creating an instance."""
+        plan_uuid = plan_id_for(plan)
         crn = f"crn:v1:bluemix:public:quantum-computing:{target}:a/mock-account:{name}::"
         instance = Instance(
             crn=crn,
@@ -172,7 +182,7 @@ class MockIBMQuantumAPIClient:
             allocation_seconds=allocation_seconds or 0,
             limit_seconds=None,
             consumed_seconds=0,
-            plan=resource_plan_id,
+            plan=plan_uuid,
         )
         self.instances[crn] = instance
         return {
@@ -180,7 +190,7 @@ class MockIBMQuantumAPIClient:
             "name": name,
             "state": "active",
             "region_id": target,
-            "resource_plan_id": resource_plan_id,
+            "resource_plan_id": plan_uuid,
         }
 
 
