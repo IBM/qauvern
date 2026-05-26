@@ -50,7 +50,6 @@ class MockIBMQuantumAPIClient:
         self,
         account_id: str,
         target_usage_seconds: int,
-        consumed_seconds: int = 0,  # ignored — consumed is now derived from instances
         available_seconds: int = 0,
     ) -> Account:
         """Setup a mock account for testing."""
@@ -207,7 +206,7 @@ def create_test_scenario_basic() -> MockIBMQuantumAPIClient:
     client = MockIBMQuantumAPIClient()
 
     # Setup account with 30 QAU = 30 * 1600 * 60 = 2,880,000 seconds
-    client.setup_account(account_id="test-account-123", target_usage_seconds=2880000, consumed_seconds=500000)
+    client.setup_account(account_id="test-account-123", target_usage_seconds=2880000)
 
     # Setup instances
     client.setup_instance(
@@ -258,7 +257,7 @@ def create_test_scenario_overallocated() -> MockIBMQuantumAPIClient:
     client = MockIBMQuantumAPIClient()
 
     # Setup account with 10 QAU = 960,000 seconds
-    client.setup_account(account_id="test-account-456", target_usage_seconds=960000, consumed_seconds=200000)
+    client.setup_account(account_id="test-account-456", target_usage_seconds=960000)
 
     # Setup instances with total allocation exceeding account
     client.setup_instance(
