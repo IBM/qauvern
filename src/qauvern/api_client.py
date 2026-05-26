@@ -414,11 +414,12 @@ class IBMQuantumAPIClient:
         except Exception:
             return ""
 
-    def list_instances(self, account_id: str) -> list[Instance]:
-        """List all quantum computing instances for an account using Resource Controller API.
+    def list_instances(self, account_id: str, plan: Plan) -> list[Instance]:
+        """List quantum computing instances for an account, filtered by plan.
 
         Args:
             account_id: The IBM Cloud account ID
+            plan: The plan to filter instances by
 
         Returns:
             List of Instance objects with CRN and name populated
@@ -427,6 +428,7 @@ class IBMQuantumAPIClient:
         params: dict[str, Any] = {
             "resource_id": QUANTUM_COMPUTING_RESOURCE_ID,
             "account_id": account_id,
+            "resource_plan_id": plan_id_for(plan),
         }
 
         instances = []
@@ -460,9 +462,8 @@ class IBMQuantumAPIClient:
     def get_account_with_instances(self, account_id: str, plan: Plan) -> Account:
         """Get account with instances filtered by plan, populated with full data."""
         account = self.get_account(account_id, plan)
-        plan_id = plan_id_for(plan)
 
-        instances = self.list_instances(account_id)
+        instances = self.list_instances(account_id, plan)
 
         total_consumed = 0
 
@@ -473,9 +474,6 @@ class IBMQuantumAPIClient:
                 instance.allocation_seconds = full_instance.allocation_seconds
                 instance.limit_seconds = full_instance.limit_seconds
                 instance.plan = full_instance.plan
-
-                if instance.plan != plan_id:
-                    continue
 
                 # Get usage data
                 instance.consumed_seconds = self.get_rolling_window_seconds(instance.crn, account_id)

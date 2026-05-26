@@ -145,8 +145,12 @@ class MockIBMQuantumAPIClient:
         self.instances[instance_crn].limit_seconds = limit_seconds
         return True
 
-    def list_instances(self, account_id: str) -> list[Instance]:
-        """List all mock instances for an account."""
+    def list_instances(self, account_id: str, plan: Plan | None = None) -> list[Instance]:
+        """List mock instances for an account.
+
+        `plan` is accepted to match the real client signature; the mock does
+        not filter by plan since each test scenario sets up instances directly.
+        """
         if account_id not in self.accounts:
             raise ValueError(f"Account {account_id} not found")
 
