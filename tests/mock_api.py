@@ -44,7 +44,7 @@ class MockIBMQuantumAPIClient:
         instances = tuple(
             self.instances[crn] for crn in self._account_instances.get(account_id, []) if crn in self.instances
         )
-        return Account(account_id=account_id, plan_id="test-plan", instances=instances, **params)
+        return Account(account_id=account_id, plan_id="test-plan", limit_seconds=None, instances=instances, **params)
 
     def setup_account(
         self,

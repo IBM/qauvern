@@ -318,6 +318,8 @@ def opt_result_account() -> Account:
         plan_id="test-plan",
         target_usage_seconds=100000,
         available_seconds=50000,
+        limit_seconds=None,
+        instances=(),
     )
 
 

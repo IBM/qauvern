@@ -58,6 +58,7 @@ def optimizer_account() -> Account:
         plan_id="test-plan",
         target_usage_seconds=2000000,
         available_seconds=700000,
+        limit_seconds=None,
         instances=(instance1, instance2, instance3),
     )
 
@@ -182,6 +183,8 @@ def test_validate_allocations_valid() -> None:
         account_id="test",
         plan_id="test-plan",
         target_usage_seconds=2000000,
+        available_seconds=0,
+        limit_seconds=None,
         instances=(instance1, instance2),
     )
 
@@ -208,6 +211,8 @@ def test_validate_allocations_exceeds_account() -> None:
         account_id="test",
         plan_id="test-plan",
         target_usage_seconds=500000,  # Too small
+        available_seconds=0,
+        limit_seconds=None,
         instances=(instance1, instance2),
     )
 
@@ -235,6 +240,8 @@ def test_validate_allocations_exceeds_instance_target() -> None:
         account_id="test",
         plan_id="test-plan",
         target_usage_seconds=2000000,
+        available_seconds=0,
+        limit_seconds=None,
         instances=(instance1, instance2),
     )
 
@@ -280,6 +287,7 @@ def _make_account_and_config() -> tuple[Account, InstanceConfig]:
         plan_id="test-plan",
         target_usage_seconds=5000000,
         available_seconds=500000,
+        limit_seconds=None,
         instances=(instance,),
     )
     cfg = InstanceConfig(
@@ -335,6 +343,7 @@ def lr_account_and_config() -> tuple[Account, InstanceConfig]:
         plan_id="test-plan",
         target_usage_seconds=1000000,
         available_seconds=200000,
+        limit_seconds=None,
         instances=(instance,),
     )
     cfg = InstanceConfig(
@@ -396,6 +405,7 @@ def test_no_target_usage_caps_at_limit() -> None:
         plan_id="test-plan",
         target_usage_seconds=2000000,
         available_seconds=500000,
+        limit_seconds=None,
         instances=(instance,),
     )
 
@@ -432,6 +442,7 @@ def test_no_target_instance_never_exhausted() -> None:
         plan_id="test-plan",
         target_usage_seconds=2000000,
         available_seconds=0,
+        limit_seconds=None,
         instances=(instance,),
     )
 
@@ -459,6 +470,7 @@ def test_validate_skips_config_without_target() -> None:
         plan_id="test-plan",
         target_usage_seconds=2000000,
         available_seconds=2000000,
+        limit_seconds=None,
         instances=(instance,),
     )
 

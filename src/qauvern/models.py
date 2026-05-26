@@ -134,7 +134,7 @@ class AccountAllocation:
     plan_id: str
     target_usage_seconds: int
     available_seconds: int
-    limit_seconds: int | None = None
+    limit_seconds: int | None
 
 
 @dataclass(frozen=True)
@@ -144,9 +144,9 @@ class Account:
     account_id: str
     plan_id: str
     target_usage_seconds: int
-    available_seconds: int = 0
-    limit_seconds: int | None = None
-    instances: tuple[Instance, ...] = ()
+    available_seconds: int
+    limit_seconds: int | None
+    instances: tuple[Instance, ...]
 
     @cached_property
     def consumed_seconds(self) -> int:

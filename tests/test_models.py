@@ -167,6 +167,8 @@ def test_account_utilization() -> None:
         account_id="test-account",
         plan_id="test-plan",
         target_usage_seconds=1000000,
+        available_seconds=0,
+        limit_seconds=None,
         instances=(instance,),
     )
     assert account.utilization == 25.0
@@ -179,6 +181,8 @@ def test_account_consumed_seconds_is_sum_of_instances() -> None:
         account_id="test-account",
         plan_id="test-plan",
         target_usage_seconds=1000000,
+        available_seconds=0,
+        limit_seconds=None,
         instances=(i1, i2),
     )
     assert account.consumed_seconds == 250000
