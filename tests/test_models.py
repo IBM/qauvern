@@ -22,19 +22,7 @@ from qauvern.models import Account, Instance, InstanceConfig, InstanceDetailedUs
 # Helpers
 # -------------------------------------------------------------------
 
-_USAGE_FIELD_NAMES = {"consumed_14day", "consumed_7day", "consumed_3day", "consumed_24h", "daily_usage"}
-
-
 def _instance(**kwargs: Any) -> Instance:
-    usage_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in _USAGE_FIELD_NAMES}
-    if "detailed_usage" not in kwargs:
-        kwargs["detailed_usage"] = InstanceDetailedUsage(
-            consumed_14day=usage_kwargs.get("consumed_14day", 0),
-            consumed_7day=usage_kwargs.get("consumed_7day", 0),
-            consumed_3day=usage_kwargs.get("consumed_3day", 0),
-            consumed_24h=usage_kwargs.get("consumed_24h", 0),
-            daily_usage=usage_kwargs.get("daily_usage", {}),
-        )
     return Instance(crn="crn:test:1", name="Test", allocation_seconds=100000, **kwargs)
 
 
@@ -150,18 +138,22 @@ def test_instance_fairness_zero_allocation() -> None:
 
 
 def test_activity_score_zero_when_no_usage() -> None:
-    assert _instance().activity_score == 0.0
+    usage = InstanceDetailedUsage(consumed_14day=0, consumed_7day=0, consumed_3day=0, consumed_24h=0, daily_usage={})
+    assert _instance(detailed_usage=usage).activity_score == 0.0
 
 
 def test_activity_score_single_bucket() -> None:
     """24h usage contributes consumed_24h * bias^5 (= 32x)."""
-    assert _instance(consumed_24h=100).activity_score == 100 * (2.0**5)
+    usage = InstanceDetailedUsage(consumed_14day=0, consumed_7day=0, consumed_3day=0, consumed_24h=100, daily_usage={})
+    assert _instance(detailed_usage=usage).activity_score == 100 * (2.0**5)
 
 
 def test_activity_score_recent_outweighs_old() -> None:
     """Same per-day rate in 24h window scores higher than in 28d window."""
-    recent = _instance(consumed_24h=100)
-    old = _instance(consumed_seconds=100 * 28)  # same average daily rate over 28d
+    zero_usage = InstanceDetailedUsage(consumed_14day=0, consumed_7day=0, consumed_3day=0, consumed_24h=0, daily_usage={})
+    recent_usage = InstanceDetailedUsage(consumed_14day=0, consumed_7day=0, consumed_3day=0, consumed_24h=100, daily_usage={})
+    recent = _instance(detailed_usage=recent_usage)
+    old = _instance(consumed_seconds=100 * 28, detailed_usage=zero_usage)  # same average daily rate over 28d
     assert recent.activity_score > old.activity_score
 
 
