@@ -13,11 +13,13 @@
 import pytest
 from datetime import datetime
 from qauvern.models import (
-    Account,
     Instance,
     InstanceConfig,
+    InstanceUsage,
     OptimizationResult,
     OptimizationRecommendation,
+    ResolvedAccount,
+    ResolvedInstance,
 )
 from qauvern.cli import format_instance_table, format_seconds, format_fairness
 
@@ -68,9 +70,47 @@ def test_format_exact_fairness() -> None:
     assert "1.00" in result
 
 
+def _make_resolved(
+    crn: str,
+    name: str,
+    *,
+    allocation_seconds: int,
+    consumed_seconds: int,
+    limit_seconds: int | None,
+    target_usage_seconds: int,
+    consumed_balance_period: int,
+    consumed_14day: int,
+    consumed_7day: int,
+    consumed_3day: int,
+    consumed_24h: int,
+) -> ResolvedInstance:
+    instance = Instance(
+        crn=crn,
+        name=name,
+        allocation_seconds=allocation_seconds,
+        consumed_seconds=consumed_seconds,
+        limit_seconds=limit_seconds,
+    )
+    config = InstanceConfig(
+        name=name,
+        crn=crn,
+        target_usage_seconds=target_usage_seconds,
+        start_date=datetime(2026, 1, 1),
+        end_date=datetime(2026, 12, 31),
+    )
+    usage = InstanceUsage(
+        consumed_balance_period=consumed_balance_period,
+        consumed_14day=consumed_14day,
+        consumed_7day=consumed_7day,
+        consumed_3day=consumed_3day,
+        consumed_24h=consumed_24h,
+    )
+    return ResolvedInstance(instance=instance, config=config, usage=usage)
+
+
 @pytest.fixture
-def instance1() -> Instance:
-    return Instance(
+def instance1() -> ResolvedInstance:
+    return _make_resolved(
         crn="crn:v1:test:public:quantum-computing:us-east:a/account1:instance1::",
         name="test-instance-1",
         allocation_seconds=1000,
@@ -86,8 +126,8 @@ def instance1() -> Instance:
 
 
 @pytest.fixture
-def instance2() -> Instance:
-    return Instance(
+def instance2() -> ResolvedInstance:
+    return _make_resolved(
         crn="crn:v1:test:public:quantum-computing:us-east:a/account1:instance2::",
         name="test-instance-2",
         allocation_seconds=2000,
@@ -103,29 +143,7 @@ def instance2() -> Instance:
 
 
 @pytest.fixture
-def cfg1(instance1: Instance) -> InstanceConfig:
-    return InstanceConfig(
-        name="Instance 1",
-        crn=instance1.crn,
-        target_usage_seconds=5000,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-
-
-@pytest.fixture
-def cfg2(instance2: Instance) -> InstanceConfig:
-    return InstanceConfig(
-        name="Instance 2",
-        crn=instance2.crn,
-        target_usage_seconds=10000,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-
-
-@pytest.fixture
-def rec1(instance1: Instance) -> OptimizationRecommendation:
+def rec1(instance1: ResolvedInstance) -> OptimizationRecommendation:
     return OptimizationRecommendation(
         instance_crn=instance1.crn,
         current_allocation=1000,
@@ -135,7 +153,7 @@ def rec1(instance1: Instance) -> OptimizationRecommendation:
 
 
 @pytest.fixture
-def rec2(instance2: Instance) -> OptimizationRecommendation:
+def rec2(instance2: ResolvedInstance) -> OptimizationRecommendation:
     return OptimizationRecommendation(
         instance_crn=instance2.crn,
         current_allocation=2000,
@@ -144,7 +162,7 @@ def rec2(instance2: Instance) -> OptimizationRecommendation:
     )
 
 
-def test_format_basic_columns(instance1: Instance, instance2: Instance) -> None:
+def test_format_basic_columns(instance1: ResolvedInstance, instance2: ResolvedInstance) -> None:
     """Test formatting with basic columns."""
     instances = [instance1, instance2]
     columns = ["name", "allocation", "consumed"]
@@ -158,15 +176,12 @@ def test_format_basic_columns(instance1: Instance, instance2: Instance) -> None:
     assert "Consumed" in headers
 
 
-def test_format_with_instance_configs(
-    instance1: Instance, instance2: Instance, cfg1: InstanceConfig, cfg2: InstanceConfig
-) -> None:
+def test_format_with_instance_configs(instance1: ResolvedInstance, instance2: ResolvedInstance) -> None:
     """Test formatting with instance config information."""
     instances = [instance1, instance2]
-    instance_configs = [cfg1, cfg2]
     columns = ["name", "target", "target_pct"]
 
-    table_data, headers = format_instance_table(instances, instance_configs=instance_configs, columns=columns)
+    table_data, headers = format_instance_table(instances, columns=columns)
 
     assert len(table_data) == 2
     assert "Target" in headers
@@ -174,7 +189,10 @@ def test_format_with_instance_configs(
 
 
 def test_format_with_recommendations(
-    instance1: Instance, instance2: Instance, rec1: OptimizationRecommendation, rec2: OptimizationRecommendation
+    instance1: ResolvedInstance,
+    instance2: ResolvedInstance,
+    rec1: OptimizationRecommendation,
+    rec2: OptimizationRecommendation,
 ) -> None:
     """Test formatting with recommendations."""
     instances = [instance1, instance2]
@@ -201,15 +219,12 @@ def test_format_with_recommendations(
     assert "+" not in str(row2)  # Change should be negative (no + sign)
 
 
-def test_format_all_time_periods(
-    instance1: Instance, instance2: Instance, cfg1: InstanceConfig, cfg2: InstanceConfig
-) -> None:
+def test_format_all_time_periods(instance1: ResolvedInstance, instance2: ResolvedInstance) -> None:
     """Test formatting with all time period columns."""
     instances = [instance1, instance2]
-    instance_configs = [cfg1, cfg2]
     columns = ["name", "period", "28d", "14d", "7d", "3d", "24h"]
 
-    table_data, headers = format_instance_table(instances, instance_configs=instance_configs, columns=columns)
+    table_data, headers = format_instance_table(instances, columns=columns)
 
     assert len(table_data) == 2
     assert "Period" in headers
@@ -220,7 +235,7 @@ def test_format_all_time_periods(
     assert "24h" in headers
 
 
-def test_format_with_fairness(instance1: Instance, instance2: Instance) -> None:
+def test_format_with_fairness(instance1: ResolvedInstance, instance2: ResolvedInstance) -> None:
     """Test formatting with fairness column."""
     instances = [instance1, instance2]
     columns = ["name", "allocation", "consumed", "fairness"]
@@ -231,7 +246,7 @@ def test_format_with_fairness(instance1: Instance, instance2: Instance) -> None:
     assert "Fairness" in headers
 
 
-def test_format_with_limit(instance1: Instance, instance2: Instance) -> None:
+def test_format_with_limit(instance1: ResolvedInstance, instance2: ResolvedInstance) -> None:
     """Test formatting with limit column."""
     instances = [instance1, instance2]
     columns = ["name", "allocation", "limit"]
@@ -244,7 +259,7 @@ def test_format_with_limit(instance1: Instance, instance2: Instance) -> None:
 
 def test_format_empty_instances() -> None:
     """Test formatting with empty instance list."""
-    instances = []
+    instances: list[Instance] = []
     columns = ["name", "allocation"]
 
     table_data, headers = format_instance_table(instances, columns=columns)
@@ -254,7 +269,7 @@ def test_format_empty_instances() -> None:
 
 
 def test_format_instance_without_recommendation(
-    instance1: Instance, instance2: Instance, rec1: OptimizationRecommendation
+    instance1: ResolvedInstance, instance2: ResolvedInstance, rec1: OptimizationRecommendation
 ) -> None:
     """Test formatting instance that has no recommendation."""
     instances = [instance1, instance2]
@@ -312,8 +327,8 @@ def test_recommendation_negative_change() -> None:
 
 
 @pytest.fixture
-def opt_result_account() -> Account:
-    return Account(
+def opt_result_account() -> ResolvedAccount:
+    return ResolvedAccount(
         account_id="test-account",
         plan_id="test-plan",
         target_usage_seconds=100000,
@@ -337,7 +352,7 @@ def opt_result_instance_configs() -> list[InstanceConfig]:
 
 
 def test_result_reductions_property(
-    opt_result_account: Account, opt_result_instance_configs: list[InstanceConfig]
+    opt_result_account: ResolvedAccount, opt_result_instance_configs: list[InstanceConfig]
 ) -> None:
     """Test that reductions property filters correctly."""
     result = OptimizationResult(
@@ -371,7 +386,7 @@ def test_result_reductions_property(
 
 
 def test_result_additions_property(
-    opt_result_account: Account, opt_result_instance_configs: list[InstanceConfig]
+    opt_result_account: ResolvedAccount, opt_result_instance_configs: list[InstanceConfig]
 ) -> None:
     """Test that additions property filters correctly."""
     result = OptimizationResult(
@@ -405,7 +420,7 @@ def test_result_additions_property(
 
 
 def test_result_no_change_recommendations(
-    opt_result_account: Account, opt_result_instance_configs: list[InstanceConfig]
+    opt_result_account: ResolvedAccount, opt_result_instance_configs: list[InstanceConfig]
 ) -> None:
     """Test result with no-change recommendations."""
     result = OptimizationResult(

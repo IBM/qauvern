@@ -10,6 +10,7 @@
 
 """Mock API client for testing."""
 
+import dataclasses
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -130,7 +131,9 @@ class MockIBMQuantumAPIClient:
         if instance_crn not in self.instances:
             raise ValueError(f"Instance {instance_crn} not found")
 
-        self.instances[instance_crn].allocation_seconds = allocation_seconds
+        self.instances[instance_crn] = dataclasses.replace(
+            self.instances[instance_crn], allocation_seconds=allocation_seconds
+        )
         return True
 
     def update_instance_limit(self, instance_crn: str, limit_seconds: int | None) -> bool:
@@ -138,7 +141,7 @@ class MockIBMQuantumAPIClient:
         if instance_crn not in self.instances:
             raise ValueError(f"Instance {instance_crn} not found")
 
-        self.instances[instance_crn].limit_seconds = limit_seconds
+        self.instances[instance_crn] = dataclasses.replace(self.instances[instance_crn], limit_seconds=limit_seconds)
         return True
 
     def list_instances(self, account_id: str, plan: Plan | None = None) -> list[InstanceIdentifier]:

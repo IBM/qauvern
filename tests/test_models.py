@@ -15,7 +15,14 @@ from typing import Any
 
 import pytest
 
-from qauvern.models import Account, Instance, InstanceConfig, NetGrant
+from qauvern.models import (
+    Account,
+    Instance,
+    InstanceConfig,
+    InstanceUsage,
+    NetGrant,
+    ResolvedInstance,
+)
 
 
 # -------------------------------------------------------------------
@@ -25,6 +32,39 @@ from qauvern.models import Account, Instance, InstanceConfig, NetGrant
 
 def _instance(**kwargs: Any) -> Instance:
     return Instance(crn="crn:test:1", name="Test", allocation_seconds=100000, **kwargs)
+
+
+_USAGE_FIELDS = {
+    "consumed_balance_period",
+    "consumed_14day",
+    "consumed_7day",
+    "consumed_3day",
+    "consumed_24h",
+    "daily_usage",
+}
+
+
+def _resolved(**kwargs: Any) -> ResolvedInstance:
+    """Build a ResolvedInstance, splitting kwargs across Instance / InstanceUsage / config."""
+    target_usage_seconds = kwargs.pop("target_usage_seconds", None)
+    usage_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in _USAGE_FIELDS}
+    instance = Instance(
+        crn="crn:test:1",
+        name="Test",
+        allocation_seconds=100000,
+        consumed_seconds=kwargs.pop("consumed_seconds", 0),
+        limit_seconds=kwargs.pop("limit_seconds", None),
+    )
+    if kwargs:
+        raise TypeError(f"Unexpected kwargs: {sorted(kwargs)}")
+    config = InstanceConfig(
+        name="Test",
+        crn="crn:test:1",
+        start_date=datetime(2026, 1, 1),
+        end_date=datetime(2026, 12, 31),
+        target_usage_seconds=target_usage_seconds,
+    )
+    return ResolvedInstance(instance=instance, config=config, usage=InstanceUsage(**usage_kwargs))
 
 
 # -------------------------------------------------------------------
@@ -113,47 +153,47 @@ def test_instance_fairness_zero_allocation() -> None:
 
 
 # -------------------------------------------------------------------
-# Instance — activity_score
+# ResolvedInstance — activity_score
 # -------------------------------------------------------------------
 
 
 def test_activity_score_zero_when_no_usage() -> None:
-    assert _instance().activity_score == 0.0
+    assert _resolved().activity_score == 0.0
 
 
 def test_activity_score_single_bucket() -> None:
     """24h usage contributes consumed_24h * bias^5 (= 32x)."""
-    assert _instance(consumed_24h=100).activity_score == 100 * (2.0**5)
+    assert _resolved(consumed_24h=100).activity_score == 100 * (2.0**5)
 
 
 def test_activity_score_recent_outweighs_old() -> None:
     """Same per-day rate in 24h window scores higher than in 28d window."""
-    recent = _instance(consumed_24h=100)
-    old = _instance(consumed_seconds=100 * 28)  # same average daily rate over 28d
+    recent = _resolved(consumed_24h=100)
+    old = _resolved(consumed_seconds=100 * 28)  # same average daily rate over 28d
     assert recent.activity_score > old.activity_score
 
 
 # -------------------------------------------------------------------
-# Instance — exhausted
+# ResolvedInstance — exhausted
 # -------------------------------------------------------------------
 
 
 def test_exhausted_no_target() -> None:
-    """target_usage_seconds=0 means no cap — never exhausted regardless of consumption."""
-    assert not _instance(consumed_balance_period=999999).exhausted
+    """target_usage_seconds=None means no cap — never exhausted regardless of consumption."""
+    assert not _resolved(consumed_balance_period=999999).exhausted
 
 
 def test_exhausted_under_target() -> None:
-    assert not _instance(target_usage_seconds=1000, consumed_balance_period=999).exhausted
+    assert not _resolved(target_usage_seconds=1000, consumed_balance_period=999).exhausted
 
 
 def test_exhausted_at_target() -> None:
     """Boundary: >= means exactly hitting the target counts as exhausted."""
-    assert _instance(target_usage_seconds=1000, consumed_balance_period=1000).exhausted
+    assert _resolved(target_usage_seconds=1000, consumed_balance_period=1000).exhausted
 
 
 def test_exhausted_over_target() -> None:
-    assert _instance(target_usage_seconds=1000, consumed_balance_period=1001).exhausted
+    assert _resolved(target_usage_seconds=1000, consumed_balance_period=1001).exhausted
 
 
 # -------------------------------------------------------------------

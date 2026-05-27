@@ -10,10 +10,11 @@
 
 """Command-line interface for qauvern."""
 
+import dataclasses
 import functools
 import sys
 from collections.abc import Sequence
-from datetime import date, datetime, timedelta
+from datetime import date
 from pathlib import Path
 
 import click
@@ -22,60 +23,11 @@ from tabulate import tabulate
 from .api_client import IBMQuantumAPIClient
 from .commands.configure import build_configure_yaml, build_instance_summary_table
 from .config import ConfigParser
+from .enrichment import enrich_instances_with_usage_data
 from .formatting import format_fairness, format_limit, format_seconds
-from .models import Account, Instance, InstanceConfig, OptimizationRecommendation
+from .models import Instance, InstanceConfig, OptimizationRecommendation, ResolvedInstance
 from .optimizer import AllocationOptimizer
 from .plan import Plan, plan_from_name
-
-
-def enrich_instances_with_usage_data(
-    account: Account,
-    instance_configs: list[InstanceConfig],
-    client: IBMQuantumAPIClient,
-) -> None:
-    for instance in account.instances:
-        config = next((cfg for cfg in instance_configs if cfg.crn == instance.crn), None)
-
-        # Set target_usage_seconds from instance config
-        if config and config.target_usage_seconds:
-            instance.target_usage_seconds = config.target_usage_seconds
-        else:
-            instance.target_usage_seconds = 0
-
-        try:
-            # Usage since balance period start (if config found)
-            if config and config.start_date:
-                instance.consumed_balance_period = client.get_instance_usage_seconds(
-                    instance.crn, config.start_date, datetime.now(), account.account_id
-                )
-            else:
-                instance.consumed_balance_period = 0
-
-            # Get detailed usage for multiple time periods
-            detailed_usage = client.get_detailed_usage(instance.crn, account.account_id)
-            instance.consumed_14day = detailed_usage["consumed_14day"]
-            instance.consumed_7day = detailed_usage["consumed_7day"]
-            instance.consumed_3day = detailed_usage["consumed_3day"]
-            instance.consumed_24h = detailed_usage["consumed_24h"]
-
-            # Fetch per-day usage for net grant rolloff calculation (60-day lookback)
-
-            today_date = date.today()
-            daily_start = today_date - timedelta(days=60)
-            try:
-                instance.daily_usage = client.get_daily_usage(instance.crn, account.account_id, daily_start, today_date)
-            except Exception as daily_e:
-                click.echo(f"Warning: Could not fetch daily usage for {instance.name}: {daily_e}", err=True)
-                instance.daily_usage = {}
-
-        except Exception as e:
-            click.echo(f"Warning: Could not fetch usage data for {instance.name}: {e}", err=True)
-            instance.consumed_balance_period = 0
-            instance.consumed_14day = 0
-            instance.consumed_7day = 0
-            instance.consumed_3day = 0
-            instance.consumed_24h = 0
-            instance.daily_usage = {}
 
 
 def format_limit_display(
@@ -136,44 +88,24 @@ def parse_seconds(value: str) -> int:
 
 
 def format_instance_table(
-    instances: Sequence[Instance],
+    instances: Sequence[Instance] | Sequence[ResolvedInstance],
     instance_configs: list[InstanceConfig] | None = None,
     columns: list[str] | None = None,
     rec_map: dict[str, "OptimizationRecommendation"] | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     """Format instance data into a table with configurable columns.
 
-    Args:
-        instances: List of Instance objects to display
-        instance_configs: Optional list of InstanceConfig objects (needed for target columns)
-        columns: List of column names to display. Available columns:
-            - name: Instance name
-            - target: Target usage seconds
-            - target_pct: Percentage of target consumed
-            - period: Balance period consumption
-            - 28d: 28-day consumption
-            - 14d: 14-day consumption
-            - 7d: 7-day consumption
-            - 3d: 3-day consumption
-            - 24h: 24-hour consumption
-            - allocation: Current allocation
-            - consumed: Consumed seconds (28-day)
-            - utilization: Utilization percentage
-            - limit: Limit seconds
-            - fairness: Fairness value
-            - recommended: Recommended allocation (from rec_map)
-            - change: Change amount (from rec_map)
-            - reason: Reason for change (from rec_map)
-        rec_map: Optional dict mapping CRN to recommendation data
-
-    Returns:
-        Tuple of (table_data, headers) ready for tabulate()
+    Accepts either base ``Instance`` rows (for show/instances/configure) or
+    ``ResolvedInstance`` rows (for analyze/optimize). Enriched columns
+    (``target``, ``target_pct``, ``period``, ``14d``/``7d``/``3d``/``24h``)
+    read directly off ResolvedInstance when present; otherwise they fall back
+    to ``instance_configs`` for the config and to zero for usage.
     """
     if columns is None:
         columns = ["name", "allocation", "consumed", "utilization", "limit", "fairness"]
 
-    # Build config map if instance_configs provided
-    config_map = {}
+    # Build config map if instance_configs provided (used for plain Instance rows)
+    config_map: dict[str, InstanceConfig] = {}
     if instance_configs:
         for cfg in instance_configs:
             config_map[cfg.crn] = cfg
@@ -205,8 +137,19 @@ def format_instance_table(
 
     for instance in instances:
         row = []
-        config = config_map.get(instance.crn) if config_map else None
+        # ResolvedInstance carries its own config; plain Instance uses the config_map.
+        if isinstance(instance, ResolvedInstance):
+            config: InstanceConfig | None = instance.config
+        else:
+            config = config_map.get(instance.crn) if config_map else None
         rec = rec_map.get(instance.crn) if rec_map else None
+
+        # Enriched usage fields are only present on ResolvedInstance.
+        balance_period = instance.consumed_balance_period if isinstance(instance, ResolvedInstance) else 0
+        c14 = instance.consumed_14day if isinstance(instance, ResolvedInstance) else 0
+        c7 = instance.consumed_7day if isinstance(instance, ResolvedInstance) else 0
+        c3 = instance.consumed_3day if isinstance(instance, ResolvedInstance) else 0
+        c24 = instance.consumed_24h if isinstance(instance, ResolvedInstance) else 0
 
         for col in columns:
             if col == "name":
@@ -218,22 +161,22 @@ def format_instance_table(
                     row.append("-")
             elif col == "target_pct":
                 if config and config.target_usage_seconds:
-                    pct = (instance.consumed_balance_period / config.target_usage_seconds) * 100
+                    pct = (balance_period / config.target_usage_seconds) * 100
                     row.append(f"{pct:.1f}%")
                 else:
                     row.append("-")
             elif col == "period":
-                row.append(format_seconds(instance.consumed_balance_period))
+                row.append(format_seconds(balance_period))
             elif col == "28d":
                 row.append(format_seconds(instance.consumed_seconds))
             elif col == "14d":
-                row.append(format_seconds(instance.consumed_14day))
+                row.append(format_seconds(c14))
             elif col == "7d":
-                row.append(format_seconds(instance.consumed_7day))
+                row.append(format_seconds(c7))
             elif col == "3d":
-                row.append(format_seconds(instance.consumed_3day))
+                row.append(format_seconds(c3))
             elif col == "24h":
-                row.append(format_seconds(instance.consumed_24h))
+                row.append(format_seconds(c24))
             elif col == "allocation":
                 row.append(format_seconds(instance.allocation_seconds))
             elif col == "consumed":
@@ -431,29 +374,27 @@ def instances(ctx, config: str, api_key: str | None):
         f"Fetching usage information for {len(config_parser.instance_configs)} instances (plan: {plan.value})..."
     )
 
-    instances_data = []
+    instances_data: list[Instance] = []
     for instance_config in config_parser.instance_configs:
         try:
-            instance = client.get_instance(instance_config.crn)
-            instance.name = instance_config.name
+            base = client.get_instance(instance_config.crn)
 
             # Fetch 28-day usage data using /v1/instances/usage endpoint
-            # This endpoint does not require admin privileges
+            # (does not require admin privileges).
             try:
-                instance.consumed_seconds = client.get_instance_usage_28d(instance_config.crn)
+                consumed = client.get_instance_usage_28d(instance_config.crn)
             except ValueError as usage_error:
-                # Show detailed error for JSON parsing issues
-                click.echo(f"Warning: Could not fetch usage for {instance.name}:", err=True)
+                click.echo(f"Warning: Could not fetch usage for {instance_config.name}:", err=True)
                 click.echo(f"  {usage_error}", err=True)
-                instance.consumed_seconds = 0
+                consumed = 0
             except Exception as usage_error:
                 click.echo(
-                    f"Warning: Could not fetch usage for {instance.name}: {usage_error}",
+                    f"Warning: Could not fetch usage for {instance_config.name}: {usage_error}",
                     err=True,
                 )
-                instance.consumed_seconds = 0
+                consumed = 0
 
-            instances_data.append(instance)
+            instances_data.append(dataclasses.replace(base, name=instance_config.name, consumed_seconds=consumed))
         except Exception as e:
             click.echo(f"Warning: Could not fetch instance {instance_config.crn}: {e}", err=True)
 
@@ -510,7 +451,7 @@ def analyze(ctx, config: str, api_key: str | None):
 
     # Enrich instances with target usage and detailed usage data
     click.echo("Fetching usage data for different time periods...")
-    enrich_instances_with_usage_data(account, instance_configs, client)
+    resolved = enrich_instances_with_usage_data(account, instance_configs, client)
 
     # Get minimum allocation from config
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
@@ -518,8 +459,7 @@ def analyze(ctx, config: str, api_key: str | None):
     # Run optimization analysis
     click.echo("Analyzing allocations...")
     optimizer = AllocationOptimizer(
-        account,
-        instance_configs,
+        resolved,
         minimum_allocation_seconds,
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
     )
@@ -540,23 +480,22 @@ def analyze(ctx, config: str, api_key: str | None):
     click.echo("ACCOUNT PLAN ALLOCATION SUMMARY")
     click.echo("=" * 80)
     click.echo(f"Plan: {plan.value}")
-    click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
+    click.echo(f"Target Usage: {format_seconds(resolved.target_usage_seconds)}")
 
     # Calculate target usage percentage for balance period
     target_percentage = 0.0
-    if account.target_usage_seconds > 0:
-        # Sum up consumed_balance_period for all instances
-        total_balance_consumed = sum(inst.consumed_balance_period for inst in account.instances)
-        target_percentage = (total_balance_consumed / account.target_usage_seconds) * 100
+    total_balance_consumed = sum(r.consumed_balance_period for r in resolved.instances)
+    if resolved.target_usage_seconds > 0:
+        target_percentage = (total_balance_consumed / resolved.target_usage_seconds) * 100
 
     click.echo(
-        f"Consumed (Balance Period): {format_seconds(sum(inst.consumed_balance_period for inst in account.instances))} ({target_percentage:.1f}% of target)"
+        f"Consumed (Balance Period): {format_seconds(total_balance_consumed)} ({target_percentage:.1f}% of target)"
     )
-    click.echo(f"Consumed (28-day): {format_seconds(account.consumed_seconds)}")
-    click.echo(f"Available: {format_seconds(account.available_seconds)}")
+    click.echo(f"Consumed (28-day): {format_seconds(resolved.consumed_seconds)}")
+    click.echo(f"Available: {format_seconds(resolved.available_seconds)}")
     if config_parser.allocation_reserve_percent > 0:
-        click.echo(format_reserve_summary(account.available_seconds, config_parser.allocation_reserve_percent))
-    limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
+        click.echo(format_reserve_summary(resolved.available_seconds, config_parser.allocation_reserve_percent))
+    limit_str = format_seconds(resolved.limit_seconds) if resolved.limit_seconds else "Unlimited"
     click.echo(f"Limit: {limit_str}")
 
     # Display instance analysis table (show ALL instances) using utility function
@@ -565,9 +504,7 @@ def analyze(ctx, config: str, api_key: str | None):
     click.echo("=" * 80)
 
     # Build a map of recommendations by CRN
-    rec_map = {}
-    for rec in result.recommendations:
-        rec_map[rec.instance_crn] = rec
+    rec_map = {rec.instance_crn: rec for rec in result.recommendations}
 
     # Use utility function with all analysis columns
     columns = [
@@ -587,9 +524,7 @@ def analyze(ctx, config: str, api_key: str | None):
         "change",
         "reason",
     ]
-    table_data, headers = format_instance_table(
-        account.instances, instance_configs=instance_configs, columns=columns, rec_map=rec_map
-    )
+    table_data, headers = format_instance_table(resolved.instances, columns=columns, rec_map=rec_map)
 
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
 
@@ -623,8 +558,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     click.echo(f"Fetching account information for plan {plan.value}...")
     account = client.get_account(account_id, plan)
 
-    # Enrich instances with target usage (no detailed usage needed for optimize)
-    enrich_instances_with_usage_data(account, instance_configs, client)
+    resolved = enrich_instances_with_usage_data(account, instance_configs, client)
 
     # Get minimum allocation from config
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
@@ -632,8 +566,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     # Run optimization
     click.echo("Computing optimal allocations...")
     optimizer = AllocationOptimizer(
-        account,
-        instance_configs,
+        resolved,
         minimum_allocation_seconds,
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
     )
@@ -649,7 +582,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     click.echo("=" * 80)
 
     # Build a map of CRN to instance name
-    instance_map = {inst.crn: inst.name for inst in account.instances}
+    instance_map = {r.crn: r.name for r in resolved.instances}
 
     rec_data = []
     for rec in result.recommendations:

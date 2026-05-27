@@ -13,7 +13,7 @@
 from datetime import date
 
 from .limit_resolver import LimitResolver
-from .models import Account, Instance, InstanceConfig, OptimizationResult
+from .models import OptimizationResult, ResolvedAccount, ResolvedInstance
 
 
 class AllocationOptimizer:
@@ -21,8 +21,7 @@ class AllocationOptimizer:
 
     def __init__(
         self,
-        account: Account,
-        instance_configs: list[InstanceConfig],
+        resolved_account: ResolvedAccount,
         minimum_allocation_seconds: int = 60,
         allocation_reserve_percent: float = 0.0,
         today: date | None = None,
@@ -30,62 +29,39 @@ class AllocationOptimizer:
         """Initialize the optimizer.
 
         Args:
-            account: Account with instances to optimize
-            instance_configs: List of instance configs with allocation constraints
+            resolved_account: Account with instances paired to configs and detailed usage.
             minimum_allocation_seconds: Minimum allocation to maintain for each instance (default: 60 seconds)
             allocation_reserve_percent: Fraction of available seconds to hold back from redistribution
             today: Date to use for limit override resolution (defaults to date.today())
         """
-        self.account = account
-        self.instance_configs = instance_configs
+        self.account = resolved_account
         self.minimum_allocation_seconds = minimum_allocation_seconds
         self.allocation_reserve_percent = allocation_reserve_percent
         self.today = today or date.today()
-        self._config_by_crn = {config.crn: config for config in instance_configs}
         self._limit_resolver = LimitResolver()
 
-    def _config_for(self, instance: Instance) -> InstanceConfig | None:
-        """Get the instance config for a runtime instance."""
-        return self._config_by_crn.get(instance.crn)
+    @property
+    def instance_configs(self) -> list:
+        """Configs for each resolved instance, in order."""
+        return [r.config for r in self.account.instances]
 
-    def _consumption_for(self, config: InstanceConfig) -> int:
-        """Calculate total consumption for an instance config."""
-        for instance in self.account.instances:
-            if instance.crn == config.crn:
-                return instance.consumed_seconds
-        return 0
+    def _remaining_for(self, resolved: ResolvedInstance) -> int | None:
+        """How much more this instance is allowed to consume this period.
 
-    def _remaining_for(self, config: InstanceConfig) -> int | None:
-        """Calculate remaining allocation for an instance config.
-
-        Returns None if the config has no target_usage_seconds (uncapped).
+        Returns ``None`` when the config has no ``target_usage_seconds`` (uncapped).
         """
-        if config.target_usage_seconds is None:
+        target = resolved.config.target_usage_seconds
+        if target is None:
             return None
-        consumed = self._consumption_for(config)
-        return max(0, config.target_usage_seconds - consumed)
+        return max(0, target - resolved.consumed_seconds)
 
-    def _get_active_instances(self, threshold_seconds: int = 3600) -> list[Instance]:
-        """Get instances that have been used recently.
+    def _get_active_instances(self, threshold_seconds: int = 3600) -> list[ResolvedInstance]:
+        """Resolved instances with at least ``threshold_seconds`` of 28-day usage."""
+        return [r for r in self.account.instances if r.consumed_seconds >= threshold_seconds]
 
-        Args:
-            threshold_seconds: Minimum usage to consider active (default: 1 hour)
-
-        Returns:
-            List of active instances
-        """
-        return [inst for inst in self.account.instances if inst.consumed_seconds >= threshold_seconds]
-
-    def _get_inactive_instances(self, threshold_seconds: int = 3600) -> list[Instance]:
-        """Get instances that have minimal or no usage.
-
-        Args:
-            threshold_seconds: Maximum usage to consider inactive (default: 1 hour)
-
-        Returns:
-            List of inactive instances
-        """
-        return [inst for inst in self.account.instances if inst.consumed_seconds < threshold_seconds]
+    def _get_inactive_instances(self, threshold_seconds: int = 3600) -> list[ResolvedInstance]:
+        """Resolved instances with less than ``threshold_seconds`` of 28-day usage."""
+        return [r for r in self.account.instances if r.consumed_seconds < threshold_seconds]
 
     def analyze(self) -> OptimizationResult:
         """Analyze current allocations and provide recommendations based on core algorithm.
@@ -113,29 +89,23 @@ class AllocationOptimizer:
 
         # Step 1: Categorize instances by activity score
         print("\n=== Step 1: Categorizing Instances ===")
-        instance_scores = {}
-        exhausted = []
-        inactive = []  # score = 0
-        active = []  # score > 0
+        instance_scores: dict[str, float] = {}
+        exhausted: list[ResolvedInstance] = []
+        inactive: list[ResolvedInstance] = []  # score = 0
+        active: list[ResolvedInstance] = []  # score > 0
 
-        for instance in self.account.instances:
-            config = self._config_for(instance)
-            if not config:
+        for resolved in self.account.instances:
+            if resolved.exhausted:
+                exhausted.append(resolved)
                 continue
 
-            # Check if instance has exhausted its configured allocation
-            if instance.exhausted:
-                exhausted.append(instance)
-                continue
-
-            # Use the activity_score property from Instance model
-            score = instance.activity_score
-            instance_scores[instance.crn] = score
+            score = resolved.activity_score
+            instance_scores[resolved.crn] = score
 
             if score == 0:
-                inactive.append(instance)
+                inactive.append(resolved)
             else:
-                active.append(instance)
+                active.append(resolved)
 
         print(f"  Exhausted instances: {len(exhausted)}")
         print(f"  Inactive instances (score=0): {len(inactive)}")
@@ -144,11 +114,11 @@ class AllocationOptimizer:
         # Step 2: Handle exhausted instances - set allocation=0, limit=1
         print("\n=== Step 2: Handling Exhausted Instances ===")
         exhausted_count = 0
-        for instance in exhausted:
-            if instance.allocation_seconds > 0 or (instance.limit_seconds is None or instance.limit_seconds != 1):
+        for resolved in exhausted:
+            if resolved.allocation_seconds > 0 or (resolved.limit_seconds is None or resolved.limit_seconds != 1):
                 result.add_recommendation(
-                    instance_crn=instance.crn,
-                    current_allocation=instance.allocation_seconds,
+                    instance_crn=resolved.crn,
+                    current_allocation=resolved.allocation_seconds,
                     new_allocation=0,
                     reason="Instance has exhausted allocation for accounting period",
                 )
@@ -161,27 +131,27 @@ class AllocationOptimizer:
         freed_allocation = 0
         inactive_reduced = 0
         inactive_increased = 0
-        for instance in inactive:
+        for resolved in inactive:
             # Minimum is the greater of: minimum_allocation_seconds or current 28d usage
-            min_allocation = max(self.minimum_allocation_seconds, instance.consumed_seconds)
-            if instance.allocation_seconds > min_allocation:
-                freed = instance.allocation_seconds - min_allocation
+            min_allocation = max(self.minimum_allocation_seconds, resolved.consumed_seconds)
+            if resolved.allocation_seconds > min_allocation:
+                freed = resolved.allocation_seconds - min_allocation
                 freed_allocation += freed
                 result.add_recommendation(
-                    instance_crn=instance.crn,
-                    current_allocation=instance.allocation_seconds,
+                    instance_crn=resolved.crn,
+                    current_allocation=resolved.allocation_seconds,
                     new_allocation=min_allocation,
-                    reason=f"No recent activity (score=0), reducing to minimum (cannot go below 28d usage: {instance.consumed_seconds}s)",
+                    reason=f"No recent activity (score=0), reducing to minimum (cannot go below 28d usage: {resolved.consumed_seconds}s)",
                 )
                 inactive_reduced += 1
-            elif instance.allocation_seconds < min_allocation:
+            elif resolved.allocation_seconds < min_allocation:
                 # Need to increase allocation to meet minimum (28d usage floor)
-                additional = min_allocation - instance.allocation_seconds
+                additional = min_allocation - resolved.allocation_seconds
                 result.add_recommendation(
-                    instance_crn=instance.crn,
-                    current_allocation=instance.allocation_seconds,
+                    instance_crn=resolved.crn,
+                    current_allocation=resolved.allocation_seconds,
                     new_allocation=min_allocation,
-                    reason=f"Allocation below 28d usage floor, increasing to minimum: {instance.consumed_seconds}s",
+                    reason=f"Allocation below 28d usage floor, increasing to minimum: {resolved.consumed_seconds}s",
                 )
                 freed_allocation -= additional  # This reduces available allocation
                 inactive_increased += 1
@@ -193,11 +163,10 @@ class AllocationOptimizer:
         # This frees up all allocation not already consumed this period
         print("\n=== Step 4: Reducing Active Instances to 28-Day Usage ===")
         active_freed = 0
-        for instance in active:
-            # Reduce to 28-day usage (cannot go below this anyway)
-            min_allocation = max(self.minimum_allocation_seconds, instance.consumed_seconds)
-            if instance.allocation_seconds > min_allocation:
-                freed = instance.allocation_seconds - min_allocation
+        for resolved in active:
+            min_allocation = max(self.minimum_allocation_seconds, resolved.consumed_seconds)
+            if resolved.allocation_seconds > min_allocation:
+                freed = resolved.allocation_seconds - min_allocation
                 freed_allocation += freed
                 active_freed += freed
         print(f"  Allocation freed from active instances: {active_freed}s")
@@ -220,49 +189,44 @@ class AllocationOptimizer:
             print("  Distributing all available allocation by activity score")
             print(f"    Total to distribute: {total_to_allocate}s")
 
-            # Calculate total score across all active instances
-            total_score = sum(instance_scores[inst.crn] for inst in active)
+            total_score = sum(instance_scores[r.crn] for r in active)
             print(f"    Total activity score: {total_score:.1f}")
 
             if total_score > 0:
                 # Sort by score (highest first) for better distribution
-                active_sorted = sorted(active, key=lambda x: instance_scores[x.crn], reverse=True)
+                active_sorted = sorted(active, key=lambda r: instance_scores[r.crn], reverse=True)
 
                 active_recommendations = 0
-                for instance in active_sorted:
-                    config = self._config_for(instance)
-                    if not config:
-                        continue
-
+                for resolved in active_sorted:
                     # Calculate how much more this instance could use
-                    config_remaining = self._remaining_for(config)
+                    config_remaining = self._remaining_for(resolved)
                     if config_remaining is not None and config_remaining <= 0:
                         continue
 
                     # Calculate proportional share based on activity score
-                    score = instance_scores[instance.crn]
+                    score = instance_scores[resolved.crn]
                     proportional_share = int((score / total_score) * total_to_allocate)
 
                     # Start from 28-day usage floor
-                    min_allocation = max(self.minimum_allocation_seconds, instance.consumed_seconds)
+                    min_allocation = max(self.minimum_allocation_seconds, resolved.consumed_seconds)
                     new_allocation = min_allocation + proportional_share
 
                     # Cap allocation: use config target if available, otherwise limit_seconds
                     if config_remaining is not None:
-                        max_allocation = instance.allocation_seconds + config_remaining
+                        max_allocation = resolved.allocation_seconds + config_remaining
                         if new_allocation > max_allocation:
                             new_allocation = max_allocation
-                    elif instance.limit_seconds is not None:
-                        if new_allocation > instance.limit_seconds:
-                            new_allocation = instance.limit_seconds
+                    elif resolved.limit_seconds is not None:
+                        if new_allocation > resolved.limit_seconds:
+                            new_allocation = resolved.limit_seconds
 
                     # Only create recommendation if allocation changes
-                    if new_allocation != instance.allocation_seconds:
+                    if new_allocation != resolved.allocation_seconds:
                         result.add_recommendation(
-                            instance_crn=instance.crn,
-                            current_allocation=instance.allocation_seconds,
+                            instance_crn=resolved.crn,
+                            current_allocation=resolved.allocation_seconds,
                             new_allocation=new_allocation,
-                            reason=f"Active instance (activity score: {score:.1f}, fairness: {instance.fairness:.2f})",
+                            reason=f"Active instance (activity score: {score:.1f}, fairness: {resolved.fairness:.2f})",
                         )
                         active_recommendations += 1
 
@@ -287,22 +251,18 @@ class AllocationOptimizer:
         result = self.analyze()
 
         # Calculate new limits for each instance using LimitResolver
-        for instance in self.account.instances:
-            config = self._config_for(instance)
-            if not config:
-                continue
+        for resolved in self.account.instances:
+            new_limit = self._limit_resolver.resolve(resolved, self.today)
 
-            new_limit = self._limit_resolver.resolve(config, instance, self.today)
-
-            if new_limit is not None and new_limit != instance.limit_seconds:
-                existing_rec = next((rec for rec in result.recommendations if rec.instance_crn == instance.crn), None)
+            if new_limit is not None and new_limit != resolved.limit_seconds:
+                existing_rec = next((rec for rec in result.recommendations if rec.instance_crn == resolved.crn), None)
                 if existing_rec:
                     existing_rec.new_limit = new_limit
                 else:
                     result.add_recommendation(
-                        instance_crn=instance.crn,
-                        current_allocation=instance.allocation_seconds,
-                        new_allocation=instance.allocation_seconds,
+                        instance_crn=resolved.crn,
+                        current_allocation=resolved.allocation_seconds,
+                        new_allocation=resolved.allocation_seconds,
                         reason="Updating limit via LimitResolver",
                     )
                     result.recommendations[-1].new_limit = new_limit
@@ -318,22 +278,25 @@ class AllocationOptimizer:
         errors = []
 
         # Check that sum of allocations doesn't exceed account target
-        total_allocated = sum(inst.allocation_seconds for inst in self.account.instances)
+        total_allocated = sum(r.allocation_seconds for r in self.account.instances)
         if total_allocated > self.account.target_usage_seconds:
             errors.append(
                 f"Total instance allocations ({total_allocated}s) exceeds "
                 f"account target ({self.account.target_usage_seconds}s)"
             )
 
-        # Check that each instance config's allocation doesn't exceed its target
-        for config in self.instance_configs:
-            if config.target_usage_seconds is None:
+        # Check that each instance config's allocation doesn't exceed its target.
+        # Deduplicate by CRN so multiple instances sharing a CRN produce one error.
+        seen_crns: set[str] = set()
+        for resolved in self.account.instances:
+            target = resolved.config.target_usage_seconds
+            if target is None or resolved.crn in seen_crns:
                 continue
-            allocated = sum(inst.allocation_seconds for inst in self.account.instances if inst.crn == config.crn)
-            if allocated > config.target_usage_seconds:
+            seen_crns.add(resolved.crn)
+            allocated = sum(r.allocation_seconds for r in self.account.instances if r.crn == resolved.crn)
+            if allocated > target:
                 errors.append(
-                    f"Instance '{config.name}' total allocation ({allocated}s) "
-                    f"exceeds target ({config.target_usage_seconds}s)"
+                    f"Instance '{resolved.config.name}' total allocation ({allocated}s) exceeds target ({target}s)"
                 )
 
         return len(errors) == 0, errors

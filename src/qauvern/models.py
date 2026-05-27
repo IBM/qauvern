@@ -59,22 +59,20 @@ class InstanceIdentifier:
     name: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class Instance:
-    """Represents a quantum service instance."""
+    """Base instance state from the IBM Quantum API.
+
+    Carries only the fields the API returns for a single instance, plus the
+    28-day rolling consumption. Detailed analytics data lives on
+    :class:`InstanceUsage` and is paired with this in :class:`ResolvedInstance`.
+    """
 
     crn: str
     name: str
     allocation_seconds: int
     limit_seconds: int | None = None
-    consumed_seconds: int = 0  # Usage in 28-day rolling window
-    target_usage_seconds: int = 0  # Target usage from the instance configuration
-    consumed_balance_period: int = 0  # Usage since balance period start
-    consumed_14day: int = 0  # Usage in last 14 days
-    consumed_7day: int = 0  # Usage in last 7 days
-    consumed_3day: int = 0  # Usage in last 3 days
-    consumed_24h: int = 0  # Usage in last 24 hours
-    daily_usage: dict[date, int] = field(default_factory=dict)
+    consumed_seconds: int = 0  # 28-day rolling window
 
     @property
     def fairness(self) -> float:
@@ -83,45 +81,120 @@ class Instance:
             return self.consumed_seconds / self.allocation_seconds
         return float("inf") if self.consumed_seconds > 0 else 0.0
 
+
+@dataclass(frozen=True)
+class InstanceUsage:
+    """Detailed usage data for one instance, fetched from analytics endpoints.
+
+    Constructed once during enrichment so downstream consumers can rely on the
+    full set of buckets being present rather than mutating an Instance in place.
+    """
+
+    consumed_balance_period: int = 0  # Usage since balance period start
+    consumed_14day: int = 0
+    consumed_7day: int = 0
+    consumed_3day: int = 0
+    consumed_24h: int = 0
+    daily_usage: dict[date, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ResolvedInstance:
+    """An :class:`Instance` paired with its :class:`InstanceConfig` and resolved
+    :class:`InstanceUsage`.
+
+    This is the type the optimizer and limit resolver operate on — by
+    construction, every field needed to compute ``activity_score`` /
+    ``exhausted`` / limit overrides is present.
+    """
+
+    instance: Instance
+    config: InstanceConfig
+    usage: InstanceUsage
+
+    # ---- delegations to the underlying records ----
+    @property
+    def crn(self) -> str:
+        return self.instance.crn
+
+    @property
+    def name(self) -> str:
+        return self.instance.name
+
+    @property
+    def allocation_seconds(self) -> int:
+        return self.instance.allocation_seconds
+
+    @property
+    def limit_seconds(self) -> int | None:
+        return self.instance.limit_seconds
+
+    @property
+    def consumed_seconds(self) -> int:
+        return self.instance.consumed_seconds
+
+    @property
+    def fairness(self) -> float:
+        return self.instance.fairness
+
+    @property
+    def target_usage_seconds(self) -> int | None:
+        return self.config.target_usage_seconds
+
+    @property
+    def consumed_balance_period(self) -> int:
+        return self.usage.consumed_balance_period
+
+    @property
+    def consumed_14day(self) -> int:
+        return self.usage.consumed_14day
+
+    @property
+    def consumed_7day(self) -> int:
+        return self.usage.consumed_7day
+
+    @property
+    def consumed_3day(self) -> int:
+        return self.usage.consumed_3day
+
+    @property
+    def consumed_24h(self) -> int:
+        return self.usage.consumed_24h
+
+    @property
+    def daily_usage(self) -> dict[date, int]:
+        return self.usage.daily_usage
+
+    # ---- derived values ----
     @property
     def activity_score(self) -> float:
-        """Calculate composite activity score based on usage across time periods.
+        """Composite activity score with exponential weighting.
 
-        Uses exponential weighting where recent usage is weighted more heavily.
-        Each time bucket is multiplied by bias raised to an exponent:
-        - 24h usage: bias^5.0
-        - 3d usage: bias^4.0
-        - 7d usage: bias^3.0
-        - 14d usage: bias^2.0
-        - 28d usage: bias^1.0
-
-        Returns:
-            Composite activity score (higher = more active recently)
+        Each time bucket is multiplied by ``bias`` raised to an exponent:
+        24h=5.0, 3d=4.0, 7d=3.0, 14d=2.0, 28d=1.0 (with bias=2.0, 24h carries
+        16x the weight of 28d).
         """
         score: float = 0.0
         bias: float = 2.0
-        if self.consumed_24h > 0:
-            score += (self.consumed_24h / 1.0) * (bias**5.0)
-        if self.consumed_3day > 0:
-            score += (self.consumed_3day / 3.0) * (bias**4.0)
-        if self.consumed_7day > 0:
-            score += (self.consumed_7day / 7.0) * (bias**3.0)
-        if self.consumed_14day > 0:
-            score += (self.consumed_14day / 14.0) * (bias**2.0)
-        if self.consumed_seconds > 0:
-            score += (self.consumed_seconds / 28.0) * (bias**1.0)
+        if self.usage.consumed_24h > 0:
+            score += (self.usage.consumed_24h / 1.0) * (bias**5.0)
+        if self.usage.consumed_3day > 0:
+            score += (self.usage.consumed_3day / 3.0) * (bias**4.0)
+        if self.usage.consumed_7day > 0:
+            score += (self.usage.consumed_7day / 7.0) * (bias**3.0)
+        if self.usage.consumed_14day > 0:
+            score += (self.usage.consumed_14day / 14.0) * (bias**2.0)
+        if self.instance.consumed_seconds > 0:
+            score += (self.instance.consumed_seconds / 28.0) * (bias**1.0)
         return score
 
     @property
     def exhausted(self) -> bool:
-        """Check if instance has exhausted its target usage for the balance period.
-
-        Returns:
-            True if consumed_balance_period exceeds target_usage_seconds, False otherwise
-        """
-        if self.target_usage_seconds > 0:
-            return self.consumed_balance_period >= self.target_usage_seconds
-        return False
+        """True when the instance has used its full configured target."""
+        target = self.config.target_usage_seconds
+        if target is None or target <= 0:
+            return False
+        return self.usage.consumed_balance_period >= target
 
 
 @dataclass(frozen=True)
@@ -138,6 +211,33 @@ class Account:
     @cached_property
     def consumed_seconds(self) -> int:
         return sum(i.consumed_seconds for i in self.instances)
+
+    @property
+    def utilization(self) -> float:
+        if self.target_usage_seconds > 0:
+            return (self.consumed_seconds / self.target_usage_seconds) * 100
+        return 0.0
+
+
+@dataclass(frozen=True)
+class ResolvedAccount:
+    """An :class:`Account` whose instances have been paired with their configs
+    and detailed usage.
+
+    Returned by ``enrich_instances_with_usage_data`` and consumed by the
+    optimizer / limit resolver.
+    """
+
+    account_id: str
+    plan_id: str
+    target_usage_seconds: int
+    available_seconds: int
+    limit_seconds: int | None
+    instances: tuple[ResolvedInstance, ...]
+
+    @cached_property
+    def consumed_seconds(self) -> int:
+        return sum(r.consumed_seconds for r in self.instances)
 
     @property
     def utilization(self) -> float:
@@ -166,7 +266,7 @@ class OptimizationRecommendation:
 class OptimizationResult:
     """Results from optimization algorithm."""
 
-    account: Account
+    account: ResolvedAccount
     instance_configs: list[InstanceConfig]
     recommendations: list[OptimizationRecommendation]
 
