@@ -386,7 +386,7 @@ def show(ctx, config: str, api_key: str | None):
     plan = config_parser.plan
 
     click.echo(f"Fetching account information for plan {plan.value}...")
-    account = client.get_account_with_instances(account_id, plan)
+    account = client.get_account(account_id, plan)
 
     click.echo("\n" + "=" * 80)
     click.echo("ACCOUNT SUMMARY")
@@ -506,7 +506,7 @@ def analyze(ctx, config: str, api_key: str | None):
     instance_configs = config_parser.instance_configs
 
     click.echo(f"Fetching account information for plan {plan.value}...")
-    account = client.get_account_with_instances(account_id, plan)
+    account = client.get_account(account_id, plan)
 
     # Enrich instances with target usage and detailed usage data
     click.echo("Fetching usage data for different time periods...")
@@ -621,7 +621,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     instance_configs = config_parser.instance_configs
 
     click.echo(f"Fetching account information for plan {plan.value}...")
-    account = client.get_account_with_instances(account_id, plan)
+    account = client.get_account(account_id, plan)
 
     # Enrich instances with target usage (no detailed usage needed for optimize)
     enrich_instances_with_usage_data(account, instance_configs, client)
@@ -779,7 +779,7 @@ def configure(
     client = _build_client(ctx, api_key)
 
     click.echo("Fetching instances...")
-    instances = client.get_account_with_instances(account_id, plan).instances
+    instances = client.get_account(account_id, plan).instances
 
     if not instances:
         click.echo("⚠ No instances found in this account.", err=True)

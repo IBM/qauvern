@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
-from .models import Account, AccountAllocation, Instance, InstanceIdentifier
+from .models import Account, Instance, InstanceIdentifier
 from .plan import Plan, plan_id_for
 
 QUANTUM_COMPUTING_RESOURCE_ID = "b6049020-80f4-11eb-a0f7-e35ec9b4054f"
@@ -181,25 +181,6 @@ class IBMQuantumAPIClient:
                 f"Response body: {response.text[:500]}"
             )
             raise Exception(details) from e
-
-    def get_account(self, account_id: str, plan: Plan) -> AccountAllocation:
-        """Get account allocation for a specific plan."""
-        plan_id = plan_id_for(plan)
-        url = f"{self.base_url}/v1/accounts/{account_id}"
-        data = self._request_json("GET", url, params={"plan_id": plan_id})
-
-        plans = data.get("plans", [])
-        if not plans:
-            raise ValueError(f"No plan found for plan {plan.value} (plan_id {plan_id})")
-
-        api_plan = plans[0]
-        return AccountAllocation(
-            account_id=account_id,
-            plan_id=plan_id,
-            target_usage_seconds=api_plan.get("usage_allocation_seconds", 0),
-            available_seconds=api_plan.get("unallocated_usage_seconds", 0),
-            limit_seconds=api_plan.get("usage_limit_seconds"),
-        )
 
     def get_instance(self, instance_crn: str) -> Instance:
         """Get instance configuration including allocation and limits.
@@ -424,9 +405,17 @@ class IBMQuantumAPIClient:
 
         return instances
 
-    def get_account_with_instances(self, account_id: str, plan: Plan) -> Account:
+    def get_account(self, account_id: str, plan: Plan) -> Account:
         """Get account with instances filtered by plan, populated with full data."""
-        alloc = self.get_account(account_id, plan)
+        plan_id = plan_id_for(plan)
+        url = f"{self.base_url}/v1/accounts/{account_id}"
+        data = self._request_json("GET", url, params={"plan_id": plan_id})
+
+        plans = data.get("plans", [])
+        if not plans:
+            raise ValueError(f"No plan found for plan {plan.value} (plan_id {plan_id})")
+        api_plan = plans[0]
+
         identifiers = self.list_instances(account_id, plan)
         instances = []
         for identifier in identifiers:
@@ -444,11 +433,12 @@ class IBMQuantumAPIClient:
                 )
             except Exception as e:
                 print(f"Warning: Could not fetch full data for instance `{identifier.name}`, so skipping: {e}")
+
         return Account(
-            account_id=alloc.account_id,
-            plan_id=alloc.plan_id,
-            target_usage_seconds=alloc.target_usage_seconds,
-            available_seconds=alloc.available_seconds,
-            limit_seconds=alloc.limit_seconds,
+            account_id=account_id,
+            plan_id=plan_id,
+            target_usage_seconds=api_plan.get("usage_allocation_seconds", 0),
+            available_seconds=api_plan.get("unallocated_usage_seconds", 0),
+            limit_seconds=api_plan.get("usage_limit_seconds"),
             instances=tuple(instances),
         )

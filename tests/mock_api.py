@@ -101,10 +101,6 @@ class MockIBMQuantumAPIClient:
         all_days = self.daily_usage_data.get(instance_crn, {})
         return {d: s for d, s in all_days.items() if start_date <= d < end_date}
 
-    def get_account(self, account_id: str) -> Account:
-        """Get mock account information."""
-        return self._build_account(account_id)
-
     def get_instance(self, instance_crn: str) -> Instance:
         """Get mock instance configuration."""
         if instance_crn not in self.instances:
@@ -159,7 +155,7 @@ class MockIBMQuantumAPIClient:
             if crn in self.instances
         ]
 
-    def get_account_with_instances(self, account_id: str, plan: Plan | None = None) -> Account:
+    def get_account(self, account_id: str, plan: Plan | None = None) -> Account:
         """Get mock account with all instances populated.
 
         `plan` is accepted to match the real client signature; the mock does
