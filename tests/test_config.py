@@ -53,7 +53,7 @@ def test_missing_required_field_raises() -> None:
     base = {
         "account_id": "acc-1",
         "plan": "internal",
-        "balance_period": {"start_date": "2026-01-01T00:00:00", "end_date": "2026-12-31T23:59:59"},
+        "balance_period": {"start_date": "2026-01-01T00:00:00+00:00", "end_date": "2026-12-31T23:59:59+00:00"},
         "instances": [],
     }
     for field in ["account_id", "plan", "balance_period", "instances"]:
@@ -72,8 +72,8 @@ def test_instances_key_not_a_list_raises() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances: "not-a-list"
 """)
     try:
@@ -83,10 +83,27 @@ instances: "not-a-list"
         os.unlink(path)
 
 
+def test_naive_date_string_raises() -> None:
+    """Test that a date string without timezone offset raises ValueError."""
+    path = _write_config("""
+account_id: "acc-1"
+plan: "internal"
+balance_period:
+  start_date: "2026-01-01T00:00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
+instances: []
+""")
+    try:
+        with pytest.raises(ValueError, match="UTC offset"):
+            ConfigParser(path)
+    finally:
+        os.unlink(path)
+
+
 def test_balance_period_missing_dates_raises() -> None:
     """Test that balance_period missing start_date or end_date raises ValueError."""
     for missing in ["start_date", "end_date"]:
-        dates = {"start_date": "2026-01-01T00:00:00", "end_date": "2026-12-31T23:59:59"}
+        dates = {"start_date": "2026-01-01T00:00:00+00:00", "end_date": "2026-12-31T23:59:59+00:00"}
         del dates[missing]
         period_yaml = "\n".join(f'  {k}: "{v}"' for k, v in dates.items())
         path = _write_config(f"""
@@ -113,8 +130,8 @@ def test_instance_missing_required_field_raises() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   -
 {entry_yaml}
@@ -137,8 +154,8 @@ def test_invalid_plan_raises() -> None:
 account_id: "acc-1"
 plan: "flex"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -156,8 +173,8 @@ def test_minimum_allocation_seconds_defaults_to_60() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -176,8 +193,8 @@ account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 300
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -195,8 +212,8 @@ def test_allocation_reserve_percent_defaults_to_zero() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -216,8 +233,8 @@ account_id: "acc-1"
 plan: "internal"
 allocation_reserve_percent: 20
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -237,8 +254,8 @@ account_id: "acc-1"
 plan: "internal"
 allocation_reserve_percent: 100
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -262,8 +279,8 @@ def test_instance_inherits_balance_period_dates() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -283,13 +300,13 @@ def test_instance_date_overrides_balance_period() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    start_date: "2026-03-01T00:00:00"
-    end_date: "2026-09-30T23:59:59"
+    start_date: "2026-03-01T00:00:00+00:00"
+    end_date: "2026-09-30T23:59:59+00:00"
 """)
     try:
         parser = ConfigParser(path)
@@ -306,8 +323,8 @@ def test_instance_without_target_usage_seconds() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -326,8 +343,8 @@ def test_limit_seconds_parsed() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -347,8 +364,8 @@ def test_limit_below_target_raises() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -373,8 +390,8 @@ def test_no_net_grants_defaults_to_empty_tuple() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -393,15 +410,15 @@ def test_net_grant_parsed() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
     limit_seconds: 50000
     net_grants:
-      - start_date: "2026-05-01T00:00:00"
+      - start_date: "2026-05-01T00:00:00+00:00"
         net_grant_seconds: 180000
 """)
     try:
@@ -418,17 +435,17 @@ def test_multiple_net_grants_parsed() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
     limit_seconds: 50000
     net_grants:
-      - start_date: "2026-05-01T00:00:00"
+      - start_date: "2026-05-01T00:00:00+00:00"
         net_grant_seconds: 180000
-      - start_date: "2026-06-01T00:00:00"
+      - start_date: "2026-06-01T00:00:00+00:00"
         net_grant_seconds: 96000
 """)
     try:
@@ -445,15 +462,15 @@ def test_net_grant_zero_seconds_raises() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
     limit_seconds: 50000
     net_grants:
-      - start_date: "2026-05-01T00:00:00"
+      - start_date: "2026-05-01T00:00:00+00:00"
         net_grant_seconds: 0
 """)
     try:
@@ -469,16 +486,16 @@ def test_net_grant_end_date_parsed() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
     limit_seconds: 50000
     net_grants:
-      - start_date: "2026-05-01T00:00:00"
-        end_date: "2026-06-15T00:00:00"
+      - start_date: "2026-05-01T00:00:00+00:00"
+        end_date: "2026-06-15T00:00:00+00:00"
         net_grant_seconds: 180000
 """)
     try:
@@ -494,15 +511,15 @@ def test_net_grant_no_end_date_defaults_28_days() -> None:
 account_id: "acc-1"
 plan: "internal"
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
     target_usage_seconds: 30000
     limit_seconds: 50000
     net_grants:
-      - start_date: "2026-05-01T00:00:00"
+      - start_date: "2026-05-01T00:00:00+00:00"
         net_grant_seconds: 180000
 """)
     try:

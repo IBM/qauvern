@@ -99,7 +99,9 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     from datetime import datetime
 
     instances = [_make_instance(crn="crn:test:rt", allocation_seconds=36000)]
-    text = build_configure_yaml("acct", Plan.INTERNAL, instances, "2026-01-01T00:00:00", "2026-12-31T23:59:59")
+    text = build_configure_yaml(
+        "acct", Plan.INTERNAL, instances, "2026-01-01T00:00:00+00:00", "2026-12-31T23:59:59+00:00"
+    )
 
     path = tmp_path / "config.yaml"
     path.write_text(text)
@@ -123,7 +125,7 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     parsed["instances"][0]["target_usage_seconds"] = 50000
     parsed["instances"][0]["limit_seconds"] = 80000
     parsed["instances"][0]["net_grants"] = [
-        {"start_date": "2026-05-01T00:00:00", "net_grant_seconds": 180000},
+        {"start_date": "2026-05-01T00:00:00+00:00", "net_grant_seconds": 180000},
     ]
     path.write_text(yaml.dump(parsed))
 

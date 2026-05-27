@@ -75,8 +75,8 @@ minimum_allocation_seconds: 60
 # allocation_reserve_percent: 20
 
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 
 instances:
   - name: "Quantum Chemistry Research"
@@ -89,10 +89,10 @@ instances:
     # Optional: Temporary time bonus above limit_seconds.
     # end_date is optional; defaults to start_date + 28 days if omitted.
     # net_grants:
-    #   - start_date: "2026-05-01T00:00:00"
+    #   - start_date: "2026-05-01T00:00:00+00:00"
     #     net_grant_seconds: 360000  # 100 extra hours for a May sprint
-    #   - start_date: "2026-06-15T00:00:00"
-    #     end_date: "2026-07-31T00:00:00"
+    #   - start_date: "2026-06-15T00:00:00+00:00"
+    #     end_date: "2026-07-31T00:00:00+00:00"
     #     net_grant_seconds: 180000
 
   - name: "Quantum Machine Learning"

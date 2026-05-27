@@ -21,7 +21,10 @@ from .plan import Plan, plan_from_name
 
 
 def _parse_utc(s: str) -> datetime:
-    return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        raise ValueError(f"Date {s!r} must include a UTC offset, e.g. {s}+00:00")
+    return dt.astimezone(timezone.utc)
 
 
 class ConfigParser:

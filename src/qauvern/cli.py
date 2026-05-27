@@ -735,13 +735,13 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
 )
 @click.option(
     "--balance-start",
-    default="2026-01-01T00:00:00",
-    help="Balance period start date (ISO format, default: 2026-01-01T00:00:00)",
+    default="2026-01-01T00:00:00+00:00",
+    help="Balance period start date (ISO format with UTC offset, default: 2026-01-01T00:00:00+00:00)",
 )
 @click.option(
     "--balance-end",
-    default="2026-12-31T23:59:59",
-    help="Balance period end date (ISO format, default: 2026-12-31T23:59:59)",
+    default="2026-12-31T23:59:59+00:00",
+    help="Balance period end date (ISO format with UTC offset, default: 2026-12-31T23:59:59+00:00)",
 )
 @click.pass_context
 @handle_errors
