@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
-from .models import Account, DiscoveredInstance, Instance, InstanceRef
+from .models import Account, DiscoveredInstance, InstanceState, InstanceRef
 from .plan import Plan, plan_id_for
 
 QUANTUM_COMPUTING_RESOURCE_ID = "b6049020-80f4-11eb-a0f7-e35ec9b4054f"
@@ -183,14 +183,14 @@ class IBMQuantumAPIClient:
             )
             raise Exception(details) from e
 
-    def get_instance(self, ref: InstanceRef) -> Instance:
+    def get_instance(self, ref: InstanceRef) -> InstanceState:
         """Get instance configuration including allocation and limits."""
         url = f"{self._get_regional_base_url(ref.crn)}/v1/instance"
         data = self._request_json("GET", url, crn=ref.crn)
 
         # Map API response fields to Instance model
         # API returns: instance_limit_seconds, usage_allocation_seconds, backends, plan_id
-        return Instance(
+        return InstanceState(
             crn=ref.crn,
             name=ref.name,
             allocation_seconds=int(data.get("usage_allocation_seconds", 0)),
@@ -421,7 +421,7 @@ class IBMQuantumAPIClient:
                 full = self.get_instance(ref)
                 consumed = self.get_rolling_window_seconds(ref.crn, account_id)
                 instances.append(
-                    Instance(
+                    InstanceState(
                         crn=ref.crn,
                         name=ref.name,
                         allocation_seconds=full.allocation_seconds,

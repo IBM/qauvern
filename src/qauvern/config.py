@@ -117,7 +117,7 @@ class ConfigParser:
                 target_usage_seconds=target_usage_seconds,
                 start_date=start_date,
                 end_date=end_date,
-                limit_seconds=limit_seconds,
+                target_limit_seconds=limit_seconds,
                 net_grants=tuple(net_grants),
             )
 

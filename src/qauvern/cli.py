@@ -23,7 +23,7 @@ from .api_client import IBMQuantumAPIClient
 from .commands.configure import build_configure_yaml, build_instance_summary_table
 from .config import ConfigParser
 from .formatting import format_fairness, format_limit, format_seconds
-from .models import Account, Instance, InstanceConfig, InstanceDetailedUsage, OptimizationRecommendation
+from .models import Account, InstanceState, InstanceConfig, InstanceDetailedUsage, OptimizationRecommendation
 from .optimizer import AllocationOptimizer
 from .plan import Plan, plan_from_name
 
@@ -135,7 +135,7 @@ def parse_seconds(value: str) -> int:
 
 
 def format_instance_table(
-    instances: Sequence[Instance],
+    instances: Sequence[InstanceState],
     instance_configs: list[InstanceConfig] | None = None,
     columns: list[str] | None = None,
     rec_map: dict[str, "OptimizationRecommendation"] | None = None,

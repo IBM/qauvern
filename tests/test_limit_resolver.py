@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from qauvern.limit_resolver import LimitResolver
-from qauvern.models import Instance, InstanceConfig, InstanceDetailedUsage, NetGrant
+from qauvern.models import InstanceState, InstanceConfig, InstanceDetailedUsage, NetGrant
 
 
 def make_instance_config(
@@ -29,7 +29,7 @@ def make_instance_config(
         target_usage_seconds=target_usage_seconds,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
-        limit_seconds=limit_seconds,
+        target_limit_seconds=limit_seconds,
         net_grants=tuple(net_grants) if net_grants else (),
     )
 
@@ -38,8 +38,8 @@ def make_instance(
     consumed_balance: int = 0,
     consumed_seconds: int = 0,
     daily_usage: dict[date, int] | None = None,
-) -> Instance:
-    return Instance(
+) -> InstanceState:
+    return InstanceState(
         crn="crn:test:1",
         name="Test Instance",
         allocation_seconds=10000,
@@ -277,7 +277,7 @@ def test_grant_with_short_end_date_expired(resolver: LimitResolver) -> None:
 
 
 @pytest.fixture
-def rolloff_scenario() -> tuple[LimitResolver, InstanceConfig, Instance]:
+def rolloff_scenario() -> tuple[LimitResolver, InstanceConfig, InstanceState]:
     """End-to-end rolloff scenario fixture.
 
     Setup (all values in seconds; 30m=1800s, 100m=6000s, 200m=12000s):
@@ -303,38 +303,38 @@ def rolloff_scenario() -> tuple[LimitResolver, InstanceConfig, Instance]:
     return resolver, cfg, instance
 
 
-def test_jan5_grant_start_full_grant(rolloff_scenario: tuple[LimitResolver, InstanceConfig, Instance]) -> None:
+def test_jan5_grant_start_full_grant(rolloff_scenario: tuple[LimitResolver, InstanceConfig, InstanceState]) -> None:
     """Jan 5 (grant start): no rolloff yet, full grant active."""
     resolver, cfg, instance = rolloff_scenario
     assert resolver.resolve(cfg, instance, date(2026, 1, 5)) == 18000
 
 
-def test_jan29_no_rolloff_yet(rolloff_scenario: tuple[LimitResolver, InstanceConfig, Instance]) -> None:
+def test_jan29_no_rolloff_yet(rolloff_scenario: tuple[LimitResolver, InstanceConfig, InstanceState]) -> None:
     """Jan 29: today-28=Jan 1, but rolloff requires d < Jan 1 strict, so no rolloff."""
     # today - 28 = Jan 1; condition is d < Jan 1 (strict), so Jan 1 itself has not exited
     resolver, cfg, instance = rolloff_scenario
     assert resolver.resolve(cfg, instance, date(2026, 1, 29)) == 18000
 
 
-def test_jan30_first_day_rolls_off(rolloff_scenario: tuple[LimitResolver, InstanceConfig, Instance]) -> None:
+def test_jan30_first_day_rolls_off(rolloff_scenario: tuple[LimitResolver, InstanceConfig, InstanceState]) -> None:
     """Jan 30: today-28=Jan 2, Jan 1 exits (d < Jan 2), rolloff=1800."""
     resolver, cfg, instance = rolloff_scenario
     assert resolver.resolve(cfg, instance, date(2026, 1, 30)) == 16200  # 12000+4200
 
 
-def test_jan31_two_days_rolled_off(rolloff_scenario: tuple[LimitResolver, InstanceConfig, Instance]) -> None:
+def test_jan31_two_days_rolled_off(rolloff_scenario: tuple[LimitResolver, InstanceConfig, InstanceState]) -> None:
     """Jan 31: today-28=Jan 3, Jan 1+2 exit, rolloff=3600."""
     resolver, cfg, instance = rolloff_scenario
     assert resolver.resolve(cfg, instance, date(2026, 1, 31)) == 14400  # 12000+2400
 
 
-def test_feb1_three_days_rolled_off(rolloff_scenario: tuple[LimitResolver, InstanceConfig, Instance]) -> None:
+def test_feb1_three_days_rolled_off(rolloff_scenario: tuple[LimitResolver, InstanceConfig, InstanceState]) -> None:
     """Feb 1: today-28=Jan 4, Jan 1+2+3 exit, rolloff=5400, last active day of grant."""
     resolver, cfg, instance = rolloff_scenario
     assert resolver.resolve(cfg, instance, date(2026, 2, 1)) == 12600  # 12000+600
 
 
-def test_feb2_grant_expired(rolloff_scenario: tuple[LimitResolver, InstanceConfig, Instance]) -> None:
+def test_feb2_grant_expired(rolloff_scenario: tuple[LimitResolver, InstanceConfig, InstanceState]) -> None:
     """Feb 2: grant_end=Jan 5+28=Feb 2, today >= grant_end so grant inactive, base only."""
     resolver, cfg, instance = rolloff_scenario
     assert resolver.resolve(cfg, instance, date(2026, 2, 2)) == 12000

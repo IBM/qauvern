@@ -13,7 +13,7 @@
 import pytest
 from datetime import datetime
 from qauvern.models import (
-    Instance,
+    InstanceState,
     InstanceConfig,
     InstanceDetailedUsage,
     OptimizationResult,
@@ -69,8 +69,8 @@ def test_format_exact_fairness() -> None:
 
 
 @pytest.fixture
-def instance1() -> Instance:
-    return Instance(
+def instance1() -> InstanceState:
+    return InstanceState(
         crn="crn:v1:test:public:quantum-computing:us-east:a/account1:instance1::",
         name="test-instance-1",
         allocation_seconds=1000,
@@ -88,8 +88,8 @@ def instance1() -> Instance:
 
 
 @pytest.fixture
-def instance2() -> Instance:
-    return Instance(
+def instance2() -> InstanceState:
+    return InstanceState(
         crn="crn:v1:test:public:quantum-computing:us-east:a/account1:instance2::",
         name="test-instance-2",
         allocation_seconds=2000,
@@ -107,7 +107,7 @@ def instance2() -> Instance:
 
 
 @pytest.fixture
-def cfg1(instance1: Instance) -> InstanceConfig:
+def cfg1(instance1: InstanceState) -> InstanceConfig:
     return InstanceConfig(
         name="Instance 1",
         crn=instance1.crn,
@@ -118,7 +118,7 @@ def cfg1(instance1: Instance) -> InstanceConfig:
 
 
 @pytest.fixture
-def cfg2(instance2: Instance) -> InstanceConfig:
+def cfg2(instance2: InstanceState) -> InstanceConfig:
     return InstanceConfig(
         name="Instance 2",
         crn=instance2.crn,
@@ -129,7 +129,7 @@ def cfg2(instance2: Instance) -> InstanceConfig:
 
 
 @pytest.fixture
-def rec1(instance1: Instance) -> OptimizationRecommendation:
+def rec1(instance1: InstanceState) -> OptimizationRecommendation:
     return OptimizationRecommendation(
         instance_crn=instance1.crn,
         current_allocation=1000,
@@ -139,7 +139,7 @@ def rec1(instance1: Instance) -> OptimizationRecommendation:
 
 
 @pytest.fixture
-def rec2(instance2: Instance) -> OptimizationRecommendation:
+def rec2(instance2: InstanceState) -> OptimizationRecommendation:
     return OptimizationRecommendation(
         instance_crn=instance2.crn,
         current_allocation=2000,
@@ -148,7 +148,7 @@ def rec2(instance2: Instance) -> OptimizationRecommendation:
     )
 
 
-def test_format_basic_columns(instance1: Instance, instance2: Instance) -> None:
+def test_format_basic_columns(instance1: InstanceState, instance2: InstanceState) -> None:
     """Test formatting with basic columns."""
     instances = [instance1, instance2]
     columns = ["name", "allocation", "consumed"]
@@ -163,7 +163,7 @@ def test_format_basic_columns(instance1: Instance, instance2: Instance) -> None:
 
 
 def test_format_with_instance_configs(
-    instance1: Instance, instance2: Instance, cfg1: InstanceConfig, cfg2: InstanceConfig
+    instance1: InstanceState, instance2: InstanceState, cfg1: InstanceConfig, cfg2: InstanceConfig
 ) -> None:
     """Test formatting with instance config information."""
     instances = [instance1, instance2]
@@ -178,7 +178,10 @@ def test_format_with_instance_configs(
 
 
 def test_format_with_recommendations(
-    instance1: Instance, instance2: Instance, rec1: OptimizationRecommendation, rec2: OptimizationRecommendation
+    instance1: InstanceState,
+    instance2: InstanceState,
+    rec1: OptimizationRecommendation,
+    rec2: OptimizationRecommendation,
 ) -> None:
     """Test formatting with recommendations."""
     instances = [instance1, instance2]
@@ -206,7 +209,7 @@ def test_format_with_recommendations(
 
 
 def test_format_all_time_periods(
-    instance1: Instance, instance2: Instance, cfg1: InstanceConfig, cfg2: InstanceConfig
+    instance1: InstanceState, instance2: InstanceState, cfg1: InstanceConfig, cfg2: InstanceConfig
 ) -> None:
     """Test formatting with all time period columns."""
     instances = [instance1, instance2]
@@ -224,7 +227,7 @@ def test_format_all_time_periods(
     assert "24h" in headers
 
 
-def test_format_with_fairness(instance1: Instance, instance2: Instance) -> None:
+def test_format_with_fairness(instance1: InstanceState, instance2: InstanceState) -> None:
     """Test formatting with fairness column."""
     instances = [instance1, instance2]
     columns = ["name", "allocation", "consumed", "fairness"]
@@ -235,7 +238,7 @@ def test_format_with_fairness(instance1: Instance, instance2: Instance) -> None:
     assert "Fairness" in headers
 
 
-def test_format_with_limit(instance1: Instance, instance2: Instance) -> None:
+def test_format_with_limit(instance1: InstanceState, instance2: InstanceState) -> None:
     """Test formatting with limit column."""
     instances = [instance1, instance2]
     columns = ["name", "allocation", "limit"]
@@ -258,7 +261,7 @@ def test_format_empty_instances() -> None:
 
 
 def test_format_instance_without_recommendation(
-    instance1: Instance, instance2: Instance, rec1: OptimizationRecommendation
+    instance1: InstanceState, instance2: InstanceState, rec1: OptimizationRecommendation
 ) -> None:
     """Test formatting instance that has no recommendation."""
     instances = [instance1, instance2]

@@ -13,7 +13,7 @@
 from datetime import date
 
 from .limit_resolver import LimitResolver
-from .models import Account, Instance, InstanceConfig, OptimizationRecommendation, OptimizationResult
+from .models import Account, InstanceState, InstanceConfig, OptimizationRecommendation, OptimizationResult
 
 
 class AllocationOptimizer:
@@ -44,7 +44,7 @@ class AllocationOptimizer:
         self._config_by_crn = {config.crn: config for config in instance_configs}
         self._limit_resolver = LimitResolver()
 
-    def _config_for(self, instance: Instance) -> InstanceConfig | None:
+    def _config_for(self, instance: InstanceState) -> InstanceConfig | None:
         """Get the instance config for a runtime instance."""
         return self._config_by_crn.get(instance.crn)
 
@@ -65,7 +65,7 @@ class AllocationOptimizer:
         consumed = self._consumption_for(config)
         return max(0, config.target_usage_seconds - consumed)
 
-    def _get_active_instances(self, threshold_seconds: int = 3600) -> list[Instance]:
+    def _get_active_instances(self, threshold_seconds: int = 3600) -> list[InstanceState]:
         """Get instances that have been used recently.
 
         Args:
@@ -76,7 +76,7 @@ class AllocationOptimizer:
         """
         return [inst for inst in self.account.instances if inst.consumed_seconds >= threshold_seconds]
 
-    def _get_inactive_instances(self, threshold_seconds: int = 3600) -> list[Instance]:
+    def _get_inactive_instances(self, threshold_seconds: int = 3600) -> list[InstanceState]:
         """Get instances that have minimal or no usage.
 
         Args:

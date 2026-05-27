@@ -336,7 +336,7 @@ instances:
 """)
     try:
         parser = ConfigParser(path)
-        assert parser.instance_configs[0].limit_seconds == 50000
+        assert parser.instance_configs[0].target_limit_seconds == 50000
     finally:
         os.unlink(path)
 

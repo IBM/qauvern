@@ -16,14 +16,14 @@ import io
 import yaml
 
 from ..formatting import format_fairness, format_limit, format_seconds
-from ..models import Instance
+from ..models import InstanceState
 from ..plan import Plan
 
 
 def build_configure_yaml(
     account_id: str,
     plan: Plan,
-    instances: Sequence[Instance],
+    instances: Sequence[InstanceState],
     balance_start: str,
     balance_end: str,
 ) -> str:
@@ -51,7 +51,7 @@ def build_configure_yaml(
     return out.getvalue()
 
 
-def build_instance_summary_table(instances: Sequence[Instance]) -> tuple[list[list[str]], list[str]]:
+def build_instance_summary_table(instances: Sequence[InstanceState]) -> tuple[list[list[str]], list[str]]:
     """Build the rows and headers for the post-configure instance summary."""
     headers = ["Instance Name", "Allocation", "Limit", "Consumed", "Fairness"]
     rows = [
