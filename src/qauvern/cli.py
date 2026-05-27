@@ -25,7 +25,7 @@ from .config import ConfigParser
 from .formatting import format_fairness, format_limit, format_seconds
 from .models import Account, Instance, InstanceConfig, OptimizationRecommendation
 from .optimizer import AllocationOptimizer
-from .plan import Plan, plan_from_name, plan_id_for
+from .plan import Plan, plan_from_name
 
 
 def enrich_instances_with_usage_data(
@@ -426,7 +426,6 @@ def instances(ctx, config: str, api_key: str | None):
     """
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     plan = config_parser.plan
-    plan_uuid = plan_id_for(plan)
 
     click.echo(
         f"Fetching usage information for {len(config_parser.instance_configs)} instances (plan: {plan.value})..."
@@ -437,9 +436,6 @@ def instances(ctx, config: str, api_key: str | None):
         try:
             instance = client.get_instance(instance_config.crn)
             instance.name = instance_config.name
-
-            if instance.plan != plan_uuid:
-                continue
 
             # Fetch 28-day usage data using /v1/instances/usage endpoint
             # This endpoint does not require admin privileges
