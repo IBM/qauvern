@@ -27,6 +27,16 @@ def _instance(**kwargs: Any) -> Instance:
     return Instance(crn="crn:test:1", name="Test", allocation_seconds=100000, **kwargs)
 
 
+def _config(**kwargs: Any) -> InstanceConfig:
+    return InstanceConfig(
+        name=kwargs.get("name", "Test"),
+        crn=kwargs.get("crn", "crn:test:1"),
+        start_date=kwargs.get("start_date", datetime(2026, 1, 1)),
+        end_date=kwargs.get("end_date", datetime(2026, 12, 31)),
+        target_usage_seconds=kwargs.get("target_usage_seconds"),
+    )
+
+
 def _usage(**kwargs: Any) -> InstanceDetailedUsage:
     return InstanceDetailedUsage(
         consumed_balance_period=kwargs.get("consumed_balance_period", 0),
@@ -169,21 +179,25 @@ def test_activity_score_recent_outweighs_old() -> None:
 
 
 def test_exhausted_no_target() -> None:
-    """target_usage_seconds=0 means no cap — never exhausted regardless of consumption."""
-    assert not _instance(detailed_usage=_usage(consumed_balance_period=999999)).exhausted
+    """target_usage_seconds=None means no cap — never exhausted regardless of consumption."""
+    instance = _instance(detailed_usage=_usage(consumed_balance_period=999999))
+    assert not instance.exhausted(_config())
 
 
 def test_exhausted_under_target() -> None:
-    assert not _instance(target_usage_seconds=1000, detailed_usage=_usage(consumed_balance_period=999)).exhausted
+    instance = _instance(detailed_usage=_usage(consumed_balance_period=999))
+    assert not instance.exhausted(_config(target_usage_seconds=1000))
 
 
 def test_exhausted_at_target() -> None:
     """Boundary: >= means exactly hitting the target counts as exhausted."""
-    assert _instance(target_usage_seconds=1000, detailed_usage=_usage(consumed_balance_period=1000)).exhausted
+    instance = _instance(detailed_usage=_usage(consumed_balance_period=1000))
+    assert instance.exhausted(_config(target_usage_seconds=1000))
 
 
 def test_exhausted_over_target() -> None:
-    assert _instance(target_usage_seconds=1000, detailed_usage=_usage(consumed_balance_period=1001)).exhausted
+    instance = _instance(detailed_usage=_usage(consumed_balance_period=1001))
+    assert instance.exhausted(_config(target_usage_seconds=1000))
 
 
 # -------------------------------------------------------------------

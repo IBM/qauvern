@@ -285,7 +285,6 @@ def _make_account_and_config() -> tuple[Account, InstanceConfig]:
         name="Active Instance",
         allocation_seconds=200000,
         consumed_seconds=100000,
-        target_usage_seconds=2000000,
         detailed_usage=InstanceDetailedUsage(
             consumed_balance_period=0,
             consumed_14day=80000,
@@ -345,7 +344,6 @@ def lr_account_and_config() -> tuple[Account, InstanceConfig]:
         name="Test Instance",
         allocation_seconds=250000,
         consumed_seconds=100000,
-        target_usage_seconds=300000,
         detailed_usage=InstanceDetailedUsage(
             consumed_balance_period=0,
             consumed_14day=80000,
@@ -454,7 +452,6 @@ def test_no_target_instance_never_exhausted() -> None:
         name="Heavy Instance",
         allocation_seconds=500000,
         consumed_seconds=500000,
-        target_usage_seconds=0,
         limit_seconds=600000,
         detailed_usage=InstanceDetailedUsage(
             consumed_balance_period=999999,

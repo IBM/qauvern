@@ -37,7 +37,7 @@ class LimitResolver:
         where rolloff = sum(usage on days that were in the 28-day window at grant
         start but have since exited, and are strictly before grant start).
         """
-        if instance.exhausted:
+        if instance.exhausted(instance_config):
             return 1
 
         daily_usage: dict[date, int] = instance.usage.daily_usage
