@@ -379,20 +379,19 @@ def main(ctx, staging):
 @click.pass_context
 @handle_errors
 def show(ctx, config: str, api_key: str | None):
-    """Show current account and instance allocations for a specific plan."""
+    """Show current account and instance allocations, including admin info."""
     config_parser, client = _load_config_and_client(ctx, config, api_key)
-    account_id = config_parser.account_id
-    plan = config_parser.plan
 
-    click.echo(f"Fetching account information for plan {plan.value}...")
-    instance_refs = client.discover_instances(account_id, plan)
-    account = client.get_account(account_id, plan, instance_refs)
+    click.echo(
+        f"Fetching account information and {len(config_parser.instance_configs)} instances from config file {config}..."
+    )
+    account = client.get_account(config_parser.account_id, config_parser.plan, config_parser.instance_configs)
 
     click.echo("\n" + "=" * 80)
     click.echo("ACCOUNT SUMMARY")
     click.echo("=" * 80)
     click.echo(f"Account ID: {account.account_id}")
-    click.echo(f"Plan: {plan.value}")
+    click.echo(f"Plan: {config_parser.plan.value}")
     click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
     click.echo(f"Consumed: {format_seconds(account.consumed_seconds)}")
     click.echo(f"Available: {format_seconds(account.available_seconds)}")
@@ -419,16 +418,11 @@ def show(ctx, config: str, api_key: str | None):
 @click.pass_context
 @handle_errors
 def instances(ctx, config: str, api_key: str | None):
-    """Show instance usage summary for a specific plan.
-
-    This command displays usage information for all instances defined in the
-    configuration file that match the specified plan, without requiring admin privileges.
-    """
+    """Show instance usage summary, without requiring admin privileges."""
     config_parser, client = _load_config_and_client(ctx, config, api_key)
-    plan = config_parser.plan
 
     click.echo(
-        f"Fetching usage information for {len(config_parser.instance_configs)} instances (plan: {plan.value})..."
+        f"Fetching usage information for {len(config_parser.instance_configs)} instances from config file {config}"
     )
 
     instances_data = []
