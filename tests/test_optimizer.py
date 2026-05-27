@@ -158,7 +158,6 @@ def test_analyze_generates_recommendations(
 
     assert len(result.recommendations) > 0
     assert result.account == optimizer_account
-    assert result.instance_configs == optimizer_instance_configs
 
 
 def test_optimize_generates_recommendations(

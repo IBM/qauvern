@@ -167,7 +167,6 @@ class OptimizationResult:
     """Results from optimization algorithm."""
 
     account: Account
-    instance_configs: list[InstanceConfig]
     recommendations: list[OptimizationRecommendation]
 
     @property

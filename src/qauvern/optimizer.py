@@ -107,7 +107,6 @@ class AllocationOptimizer:
         """
         result = OptimizationResult(
             account=self.account,
-            instance_configs=self.instance_configs,
             recommendations=[],
         )
 
