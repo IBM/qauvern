@@ -10,10 +10,11 @@
 
 """Mock API client for testing."""
 
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from qauvern.models import Account, Instance, InstanceIdentifier
+from qauvern.models import Account, DiscoveredInstance, Instance, InstanceRef
 from qauvern.plan import Plan, plan_id_for
 
 
@@ -101,11 +102,11 @@ class MockIBMQuantumAPIClient:
         all_days = self.daily_usage_data.get(instance_crn, {})
         return {d: s for d, s in all_days.items() if start_date <= d < end_date}
 
-    def get_instance(self, instance_crn: str) -> Instance:
+    def get_instance(self, ref: InstanceRef) -> Instance:
         """Get mock instance configuration."""
-        if instance_crn not in self.instances:
-            raise ValueError(f"Instance {instance_crn} not found in mock data")
-        return self.instances[instance_crn]
+        if ref.crn not in self.instances:
+            raise ValueError(f"Instance {ref.crn} not found in mock data")
+        return self.instances[ref.crn]
 
     def get_instance_usage_seconds(
         self, instance_crn: str, start_date: datetime, end_date: datetime, account_id: str
@@ -117,7 +118,9 @@ class MockIBMQuantumAPIClient:
             return self.usage_data[key]["total_seconds"]
 
         # Default to instance's consumed_seconds if no specific usage data
-        return self.get_instance(instance_crn).consumed_seconds
+        if instance_crn not in self.instances:
+            raise ValueError(f"Instance {instance_crn} not found in mock data")
+        return self.instances[instance_crn].consumed_seconds
 
     def get_rolling_window_seconds(self, instance_crn: str, account_id: str, days: int = 28) -> int:
         """Get mock usage in seconds for the rolling window period."""
@@ -141,7 +144,7 @@ class MockIBMQuantumAPIClient:
         self.instances[instance_crn].limit_seconds = limit_seconds
         return True
 
-    def list_instances(self, account_id: str, plan: Plan | None = None) -> list[InstanceIdentifier]:
+    def discover_instances(self, account_id: str, plan: Plan | None = None) -> list[DiscoveredInstance]:
         """List mock instances for an account.
 
         `plan` is accepted to match the real client signature; the mock does
@@ -150,16 +153,22 @@ class MockIBMQuantumAPIClient:
         if account_id not in self._account_params:
             raise ValueError(f"Account {account_id} not found")
         return [
-            InstanceIdentifier(crn=crn, name=self.instances[crn].name)
+            DiscoveredInstance(crn=crn, name=self.instances[crn].name)
             for crn in self._account_instances.get(account_id, [])
             if crn in self.instances
         ]
 
-    def get_account(self, account_id: str, plan: Plan | None = None) -> Account:
+    def get_account(
+        self,
+        account_id: str,
+        plan: Plan | None = None,
+        instance_refs: Sequence[InstanceRef] | None = None,
+    ) -> Account:
         """Get mock account with all instances populated.
 
-        `plan` is accepted to match the real client signature; the mock does
-        not filter by plan since each test scenario sets up instances directly.
+        `plan` and `instance_refs` are accepted to match the real client signature;
+        the mock does not filter by plan since each test scenario sets up
+        instances directly.
         """
         return self._build_account(account_id)
 
