@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] - 2026-05-xx
 
+### Changelog
+
+- Dates in the config file must now set the UTC timezone offset in the ISO 8601 format, e.g. `2026-06-15T00:00:00+00:00`.
+
 ### Fixed
 
+- Fix naive timezone handling, which could skew usage windows.
 - Fix calculation of the 28-day consumption to consistently use IBM's official window, rather than using qauvern's own window.
 
 ## [0.3.0] - 2026-05-26

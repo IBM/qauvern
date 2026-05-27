@@ -10,7 +10,7 @@
 
 """Configuration file parser for qauvern."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from pathlib import Path
 
@@ -18,6 +18,13 @@ import yaml
 
 from .models import InstanceConfig, NetGrant
 from .plan import Plan, plan_from_name
+
+
+def parse_utc_datetime(s: str, *, provenance: str) -> datetime:
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        raise ValueError(f"{provenance}: {s!r} must include a UTC offset, e.g. {s}+00:00")
+    return dt.astimezone(timezone.utc)
 
 
 class ConfigParser:
@@ -74,8 +81,8 @@ class ConfigParser:
     def balance_period(self) -> dict[str, datetime]:
         period = self.config_data["balance_period"]
         return {
-            "start_date": datetime.fromisoformat(period["start_date"]),
-            "end_date": datetime.fromisoformat(period["end_date"]),
+            "start_date": parse_utc_datetime(period["start_date"], provenance="balance_period.start_date"),
+            "end_date": parse_utc_datetime(period["end_date"], provenance="balance_period.end_date"),
         }
 
     @cached_property
@@ -89,14 +96,25 @@ class ConfigParser:
                 if field not in entry:
                     raise ValueError(f"Instance config missing required field: {field}")
 
-            start_date = datetime.fromisoformat(entry["start_date"]) if "start_date" in entry else period["start_date"]
-            end_date = datetime.fromisoformat(entry["end_date"]) if "end_date" in entry else period["end_date"]
+            inst = entry.get("name", "?")
+            start_date = (
+                parse_utc_datetime(entry["start_date"], provenance=f"instances[{inst}].start_date")
+                if "start_date" in entry
+                else period["start_date"]
+            )
+            end_date = (
+                parse_utc_datetime(entry["end_date"], provenance=f"instances[{inst}].end_date")
+                if "end_date" in entry
+                else period["end_date"]
+            )
 
             net_grants = []
             for grant_data in entry.get("net_grants", []):
-                grant_start = datetime.fromisoformat(grant_data["start_date"])
+                grant_start = parse_utc_datetime(
+                    grant_data["start_date"], provenance=f"instances[{inst}].net_grants.start_date"
+                )
                 grant_end = (
-                    datetime.fromisoformat(grant_data["end_date"])
+                    parse_utc_datetime(grant_data["end_date"], provenance=f"instances[{inst}].net_grants.end_date")
                     if "end_date" in grant_data
                     else grant_start + timedelta(days=28)
                 )

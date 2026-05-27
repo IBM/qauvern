@@ -22,8 +22,8 @@ minimum_allocation_seconds: 60
 
 # Balance period - the time frame for optimization
 balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59"
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
 
 instances:
   - name: "Quantum Chemistry Research"
@@ -36,8 +36,8 @@ instances:
     # Example: 50 hours = 50 * 3600 = 180000 seconds (~1.875 QAU)
     target_usage_seconds: 180000
     # Optional: Override balance period for this instance
-    # start_date: "2026-01-01T00:00:00"
-    # end_date: "2026-06-30T23:59:59"
+    # start_date: "2026-01-01T00:00:00+00:00"
+    # end_date: "2026-06-30T23:59:59+00:00"
 
     # Optional: Base limit for this instance. Must be >= target_usage_seconds (if set).
     # When set, the optimizer applies this limit on every run.
@@ -48,10 +48,10 @@ instances:
     # Multiple grants stack. Limit snaps back to limit_seconds after end_date.
     # end_date is optional; defaults to start_date + 28 days if omitted.
     # net_grants:
-    #   - start_date: "2026-05-01T00:00:00"
+    #   - start_date: "2026-05-01T00:00:00+00:00"
     #     net_grant_seconds: 360000  # 100 extra hours, default 28-day window
-    #   - start_date: "2026-06-15T00:00:00"
-    #     end_date: "2026-07-31T00:00:00"
+    #   - start_date: "2026-06-15T00:00:00+00:00"
+    #     end_date: "2026-07-31T00:00:00+00:00"
     #     net_grant_seconds: 180000  # 50 extra hours until July 31
 
   - name: "Quantum Machine Learning"
