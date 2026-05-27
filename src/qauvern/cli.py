@@ -23,7 +23,7 @@ from .api_client import IBMQuantumAPIClient
 from .commands.configure import build_configure_yaml, build_instance_summary_table
 from .config import ConfigParser
 from .formatting import format_fairness, format_limit, format_seconds
-from .models import Account, Instance, InstanceConfig, OptimizationRecommendation
+from .models import Account, Instance, InstanceConfig, InstanceDetailedUsage, OptimizationRecommendation
 from .optimizer import AllocationOptimizer
 from .plan import Plan, plan_from_name
 
@@ -53,29 +53,34 @@ def enrich_instances_with_usage_data(
 
             # Get detailed usage for multiple time periods
             detailed_usage = client.get_detailed_usage(instance.crn, account.account_id)
-            instance.consumed_14day = detailed_usage["consumed_14day"]
-            instance.consumed_7day = detailed_usage["consumed_7day"]
-            instance.consumed_3day = detailed_usage["consumed_3day"]
-            instance.consumed_24h = detailed_usage["consumed_24h"]
 
             # Fetch per-day usage for net grant rolloff calculation (60-day lookback)
-
             today_date = date.today()
             daily_start = today_date - timedelta(days=60)
             try:
-                instance.daily_usage = client.get_daily_usage(instance.crn, account.account_id, daily_start, today_date)
+                daily = client.get_daily_usage(instance.crn, account.account_id, daily_start, today_date)
             except Exception as daily_e:
                 click.echo(f"Warning: Could not fetch daily usage for {instance.name}: {daily_e}", err=True)
-                instance.daily_usage = {}
+                daily = {}
+
+            instance.detailed_usage = InstanceDetailedUsage(
+                consumed_14day=detailed_usage["consumed_14day"],
+                consumed_7day=detailed_usage["consumed_7day"],
+                consumed_3day=detailed_usage["consumed_3day"],
+                consumed_24h=detailed_usage["consumed_24h"],
+                daily_usage=daily,
+            )
 
         except Exception as e:
             click.echo(f"Warning: Could not fetch usage data for {instance.name}: {e}", err=True)
             instance.consumed_balance_period = 0
-            instance.consumed_14day = 0
-            instance.consumed_7day = 0
-            instance.consumed_3day = 0
-            instance.consumed_24h = 0
-            instance.daily_usage = {}
+            instance.detailed_usage = InstanceDetailedUsage(
+                consumed_14day=0,
+                consumed_7day=0,
+                consumed_3day=0,
+                consumed_24h=0,
+                daily_usage={},
+            )
 
 
 def format_limit_display(
@@ -227,13 +232,13 @@ def format_instance_table(
             elif col == "28d":
                 row.append(format_seconds(instance.consumed_seconds))
             elif col == "14d":
-                row.append(format_seconds(instance.consumed_14day))
+                row.append(format_seconds(instance.usage.consumed_14day))
             elif col == "7d":
-                row.append(format_seconds(instance.consumed_7day))
+                row.append(format_seconds(instance.usage.consumed_7day))
             elif col == "3d":
-                row.append(format_seconds(instance.consumed_3day))
+                row.append(format_seconds(instance.usage.consumed_3day))
             elif col == "24h":
-                row.append(format_seconds(instance.consumed_24h))
+                row.append(format_seconds(instance.usage.consumed_24h))
             elif col == "allocation":
                 row.append(format_seconds(instance.allocation_seconds))
             elif col == "consumed":

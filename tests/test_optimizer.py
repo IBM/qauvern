@@ -14,7 +14,7 @@ from datetime import datetime
 
 import pytest
 
-from qauvern.models import Account, Instance, InstanceConfig
+from qauvern.models import Account, Instance, InstanceConfig, InstanceDetailedUsage
 from qauvern.optimizer import AllocationOptimizer
 
 
@@ -25,33 +25,42 @@ def optimizer_account() -> Account:
         name="Active Instance",
         allocation_seconds=600000,
         consumed_seconds=550000,  # High usage in 28d
-        consumed_14day=400000,
-        consumed_7day=300000,
-        consumed_3day=150000,
-        consumed_24h=50000,  # Active in last 24h
         limit_seconds=800000,
+        detailed_usage=InstanceDetailedUsage(
+            consumed_14day=400000,
+            consumed_7day=300000,
+            consumed_3day=150000,
+            consumed_24h=50000,  # Active in last 24h
+            daily_usage={},
+        ),
     )
     instance2 = Instance(
         crn="crn:test:2",
         name="Inactive Instance",
         allocation_seconds=400000,
         consumed_seconds=1000,  # Very low usage
-        consumed_14day=0,  # No recent activity
-        consumed_7day=0,
-        consumed_3day=0,
-        consumed_24h=0,
         limit_seconds=500000,
+        detailed_usage=InstanceDetailedUsage(
+            consumed_14day=0,  # No recent activity
+            consumed_7day=0,
+            consumed_3day=0,
+            consumed_24h=0,
+            daily_usage={},
+        ),
     )
     instance3 = Instance(
         crn="crn:test:3",
         name="Medium Instance",
         allocation_seconds=300000,
         consumed_seconds=150000,  # Medium usage
-        consumed_14day=100000,
-        consumed_7day=50000,
-        consumed_3day=20000,
-        consumed_24h=0,  # Not active in last 24h
         limit_seconds=400000,
+        detailed_usage=InstanceDetailedUsage(
+            consumed_14day=100000,
+            consumed_7day=50000,
+            consumed_3day=20000,
+            consumed_24h=0,  # Not active in last 24h
+            daily_usage={},
+        ),
     )
     return Account(
         account_id="test-account",
@@ -273,11 +282,14 @@ def _make_account_and_config() -> tuple[Account, InstanceConfig]:
         name="Active Instance",
         allocation_seconds=200000,
         consumed_seconds=100000,
-        consumed_14day=80000,
-        consumed_7day=60000,
-        consumed_3day=30000,
-        consumed_24h=10000,
         target_usage_seconds=2000000,
+        detailed_usage=InstanceDetailedUsage(
+            consumed_14day=80000,
+            consumed_7day=60000,
+            consumed_3day=30000,
+            consumed_24h=10000,
+            daily_usage={},
+        ),
     )
     account = Account(
         account_id="test-account",
@@ -329,11 +341,14 @@ def lr_account_and_config() -> tuple[Account, InstanceConfig]:
         name="Test Instance",
         allocation_seconds=250000,
         consumed_seconds=100000,
-        consumed_14day=80000,
-        consumed_7day=60000,
-        consumed_3day=30000,
-        consumed_24h=10000,
         target_usage_seconds=300000,
+        detailed_usage=InstanceDetailedUsage(
+            consumed_14day=80000,
+            consumed_7day=60000,
+            consumed_3day=30000,
+            consumed_24h=10000,
+            daily_usage={},
+        ),
     )
     account = Account(
         account_id="test-account",
@@ -391,11 +406,14 @@ def test_no_target_usage_caps_at_limit() -> None:
         name="Active Instance",
         allocation_seconds=100000,
         consumed_seconds=50000,
-        consumed_14day=40000,
-        consumed_7day=30000,
-        consumed_3day=15000,
-        consumed_24h=5000,
         limit_seconds=200000,
+        detailed_usage=InstanceDetailedUsage(
+            consumed_14day=40000,
+            consumed_7day=30000,
+            consumed_3day=15000,
+            consumed_24h=5000,
+            daily_usage={},
+        ),
     )
     account = Account(
         account_id="test-account",
@@ -433,6 +451,13 @@ def test_no_target_instance_never_exhausted() -> None:
         consumed_balance_period=999999,
         target_usage_seconds=0,
         limit_seconds=600000,
+        detailed_usage=InstanceDetailedUsage(
+            consumed_14day=0,
+            consumed_7day=0,
+            consumed_3day=0,
+            consumed_24h=0,
+            daily_usage={},
+        ),
     )
     account = Account(
         account_id="test-account",

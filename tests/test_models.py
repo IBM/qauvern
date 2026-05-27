@@ -15,15 +15,26 @@ from typing import Any
 
 import pytest
 
-from qauvern.models import Account, Instance, InstanceConfig, NetGrant
+from qauvern.models import Account, Instance, InstanceConfig, InstanceDetailedUsage, NetGrant
 
 
 # -------------------------------------------------------------------
 # Helpers
 # -------------------------------------------------------------------
 
+_USAGE_FIELD_NAMES = {"consumed_14day", "consumed_7day", "consumed_3day", "consumed_24h", "daily_usage"}
+
 
 def _instance(**kwargs: Any) -> Instance:
+    usage_kwargs = {k: kwargs.pop(k) for k in list(kwargs) if k in _USAGE_FIELD_NAMES}
+    if "detailed_usage" not in kwargs:
+        kwargs["detailed_usage"] = InstanceDetailedUsage(
+            consumed_14day=usage_kwargs.get("consumed_14day", 0),
+            consumed_7day=usage_kwargs.get("consumed_7day", 0),
+            consumed_3day=usage_kwargs.get("consumed_3day", 0),
+            consumed_24h=usage_kwargs.get("consumed_24h", 0),
+            daily_usage=usage_kwargs.get("daily_usage", {}),
+        )
     return Instance(crn="crn:test:1", name="Test", allocation_seconds=100000, **kwargs)
 
 
@@ -96,6 +107,27 @@ def test_instance_config_empty_crn() -> None:
             start_date=datetime(2026, 1, 1),
             end_date=datetime(2026, 12, 31),
         )
+
+
+# -------------------------------------------------------------------
+# Instance — validation
+# -------------------------------------------------------------------
+
+
+def test_instance_detailed_usage() -> None:
+    instance = Instance(
+        name="",
+        crn="",
+        allocation_seconds=100,
+        detailed_usage=None,
+    )
+    with pytest.raises(AssertionError):
+        instance.usage.consumed_14day
+
+    instance.detailed_usage = InstanceDetailedUsage(
+        consumed_14day=14, consumed_7day=7, consumed_3day=3, consumed_24h=24, daily_usage={}
+    )
+    assert instance.usage.consumed_14day == 14
 
 
 # -------------------------------------------------------------------

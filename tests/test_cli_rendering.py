@@ -15,6 +15,7 @@ from datetime import datetime
 from qauvern.models import (
     Instance,
     InstanceConfig,
+    InstanceDetailedUsage,
     OptimizationResult,
     OptimizationRecommendation,
 )
@@ -76,11 +77,14 @@ def instance1() -> Instance:
         consumed_seconds=500,
         limit_seconds=2000,
         consumed_balance_period=300,
-        consumed_14day=400,
-        consumed_7day=350,
-        consumed_3day=250,
-        consumed_24h=100,
         target_usage_seconds=5000,
+        detailed_usage=InstanceDetailedUsage(
+            consumed_14day=400,
+            consumed_7day=350,
+            consumed_3day=250,
+            consumed_24h=100,
+            daily_usage={},
+        ),
     )
 
 
@@ -93,11 +97,14 @@ def instance2() -> Instance:
         consumed_seconds=1500,
         limit_seconds=None,
         consumed_balance_period=1200,
-        consumed_14day=1400,
-        consumed_7day=1300,
-        consumed_3day=800,
-        consumed_24h=200,
         target_usage_seconds=10000,
+        detailed_usage=InstanceDetailedUsage(
+            consumed_14day=1400,
+            consumed_7day=1300,
+            consumed_3day=800,
+            consumed_24h=200,
+            daily_usage={},
+        ),
     )
 
 

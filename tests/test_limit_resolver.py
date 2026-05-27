@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from qauvern.limit_resolver import LimitResolver
-from qauvern.models import Instance, InstanceConfig, NetGrant
+from qauvern.models import Instance, InstanceConfig, InstanceDetailedUsage, NetGrant
 
 
 def make_instance_config(
@@ -47,7 +47,13 @@ def make_instance(
         target_usage_seconds=target,
         consumed_balance_period=consumed_balance,
         consumed_seconds=consumed_seconds,
-        daily_usage=daily_usage or {},
+        detailed_usage=InstanceDetailedUsage(
+            consumed_14day=0,
+            consumed_7day=0,
+            consumed_3day=0,
+            consumed_24h=0,
+            daily_usage=daily_usage or {},
+        ),
     )
 
 
