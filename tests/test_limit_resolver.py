@@ -45,9 +45,9 @@ def make_instance(
         name="Test Instance",
         allocation_seconds=10000,
         target_usage_seconds=target,
-        consumed_balance_period=consumed_balance,
         consumed_seconds=consumed_seconds,
         detailed_usage=InstanceDetailedUsage(
+            consumed_balance_period=consumed_balance,
             consumed_14day=0,
             consumed_7day=0,
             consumed_3day=0,

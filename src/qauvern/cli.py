@@ -44,12 +44,11 @@ def enrich_instances_with_usage_data(
 
         try:
             # Usage since balance period start (if config found)
-            if config and config.start_date:
-                instance.consumed_balance_period = client.get_instance_usage_seconds(
-                    instance.crn, config.start_date, datetime.now(), account.account_id
-                )
-            else:
-                instance.consumed_balance_period = 0
+            consumed_balance_period = (
+                client.get_instance_usage_seconds(instance.crn, config.start_date, datetime.now(), account.account_id)
+                if config and config.start_date
+                else 0
+            )
 
             # Get detailed usage for multiple time periods
             detailed_usage = client.get_detailed_usage(instance.crn, account.account_id)
@@ -64,6 +63,7 @@ def enrich_instances_with_usage_data(
                 daily = {}
 
             instance.detailed_usage = InstanceDetailedUsage(
+                consumed_balance_period=consumed_balance_period,
                 consumed_14day=detailed_usage["consumed_14day"],
                 consumed_7day=detailed_usage["consumed_7day"],
                 consumed_3day=detailed_usage["consumed_3day"],
@@ -73,8 +73,8 @@ def enrich_instances_with_usage_data(
 
         except Exception as e:
             click.echo(f"Warning: Could not fetch usage data for {instance.name}: {e}", err=True)
-            instance.consumed_balance_period = 0
             instance.detailed_usage = InstanceDetailedUsage(
+                consumed_balance_period=0,
                 consumed_14day=0,
                 consumed_7day=0,
                 consumed_3day=0,
@@ -223,12 +223,12 @@ def format_instance_table(
                     row.append("-")
             elif col == "target_pct":
                 if config and config.target_usage_seconds:
-                    pct = (instance.consumed_balance_period / config.target_usage_seconds) * 100
+                    pct = (instance.usage.consumed_balance_period / config.target_usage_seconds) * 100
                     row.append(f"{pct:.1f}%")
                 else:
                     row.append("-")
             elif col == "period":
-                row.append(format_seconds(instance.consumed_balance_period))
+                row.append(format_seconds(instance.usage.consumed_balance_period))
             elif col == "28d":
                 row.append(format_seconds(instance.consumed_seconds))
             elif col == "14d":
@@ -551,12 +551,11 @@ def analyze(ctx, config: str, api_key: str | None):
     # Calculate target usage percentage for balance period
     target_percentage = 0.0
     if account.target_usage_seconds > 0:
-        # Sum up consumed_balance_period for all instances
-        total_balance_consumed = sum(inst.consumed_balance_period for inst in account.instances)
+        total_balance_consumed = sum(inst.usage.consumed_balance_period for inst in account.instances)
         target_percentage = (total_balance_consumed / account.target_usage_seconds) * 100
 
     click.echo(
-        f"Consumed (Balance Period): {format_seconds(sum(inst.consumed_balance_period for inst in account.instances))} ({target_percentage:.1f}% of target)"
+        f"Consumed (Balance Period): {format_seconds(sum(inst.usage.consumed_balance_period for inst in account.instances))} ({target_percentage:.1f}% of target)"
     )
     click.echo(f"Consumed (28-day): {format_seconds(account.consumed_seconds)}")
     click.echo(f"Available: {format_seconds(account.available_seconds)}")

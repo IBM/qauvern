@@ -448,10 +448,10 @@ def test_no_target_instance_never_exhausted() -> None:
         name="Heavy Instance",
         allocation_seconds=500000,
         consumed_seconds=500000,
-        consumed_balance_period=999999,
         target_usage_seconds=0,
         limit_seconds=600000,
         detailed_usage=InstanceDetailedUsage(
+            consumed_balance_period=999999,
             consumed_14day=0,
             consumed_7day=0,
             consumed_3day=0,

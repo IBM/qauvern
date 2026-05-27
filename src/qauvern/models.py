@@ -75,6 +75,7 @@ class InstanceDetailedUsage:
     consumed_3day: int
     consumed_24h: int
     daily_usage: dict[date, int]
+    consumed_balance_period: int = 0  # Usage since balance period start
 
 
 @dataclass
@@ -87,7 +88,6 @@ class Instance:
     limit_seconds: int | None = None
     target_usage_seconds: int = 0  # Target usage from the instance configuration
     consumed_seconds: int = 0  # Usage in 28-day rolling window
-    consumed_balance_period: int = 0  # Usage since balance period start
     detailed_usage: InstanceDetailedUsage | None = None
 
     @property
@@ -140,7 +140,7 @@ class Instance:
             True if consumed_balance_period exceeds target_usage_seconds, False otherwise
         """
         if self.target_usage_seconds > 0:
-            return self.consumed_balance_period >= self.target_usage_seconds
+            return self.usage.consumed_balance_period >= self.target_usage_seconds
         return False
 
 
