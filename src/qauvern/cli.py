@@ -434,25 +434,7 @@ def instances(ctx, config: str, api_key: str | None):
     instances_data = []
     for instance_config in config_parser.instance_configs:
         try:
-            instance = client.get_instance(instance_config)
-
-            # Fetch 28-day usage data using /v1/instances/usage endpoint
-            # This endpoint does not require admin privileges
-            try:
-                instance.consumed_seconds = client.get_instance_usage_28d(instance_config.crn)
-            except ValueError as usage_error:
-                # Show detailed error for JSON parsing issues
-                click.echo(f"Warning: Could not fetch usage for {instance.name}:", err=True)
-                click.echo(f"  {usage_error}", err=True)
-                instance.consumed_seconds = 0
-            except Exception as usage_error:
-                click.echo(
-                    f"Warning: Could not fetch usage for {instance.name}: {usage_error}",
-                    err=True,
-                )
-                instance.consumed_seconds = 0
-
-            instances_data.append(instance)
+            instances_data.append(client.get_instance(instance_config))
         except Exception as e:
             click.echo(f"Warning: Could not fetch instance {instance_config.crn}: {e}", err=True)
 

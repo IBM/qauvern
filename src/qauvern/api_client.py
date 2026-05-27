@@ -184,12 +184,10 @@ class IBMQuantumAPIClient:
             raise Exception(details) from e
 
     def get_instance(self, ref: InstanceRef) -> InstanceState:
-        """Get instance configuration including allocation and limits."""
-        url = f"{self._get_regional_base_url(ref.crn)}/v1/instance"
-        data = self._request_json("GET", url, crn=ref.crn)
-
-        # Map API response fields to Instance model
-        # API returns: instance_limit_seconds, usage_allocation_seconds, backends, plan_id
+        """Get instance configuration and 28-day rolling window usage."""
+        base_url = self._get_regional_base_url(ref.crn)
+        data = self._request_json("GET", f"{base_url}/v1/instance", crn=ref.crn)
+        usage_data = self._request_json("GET", f"{base_url}/v1/instances/usage", crn=ref.crn)
         return InstanceState(
             crn=ref.crn,
             name=ref.name,
@@ -197,24 +195,9 @@ class IBMQuantumAPIClient:
             limit_seconds=(
                 int(float(data.get("instance_limit_seconds", 0))) if data.get("instance_limit_seconds") else None
             ),
-            consumed_seconds=0,  # Will be populated by get_instance_usage
+            consumed_seconds=int(usage_data.get("usage_consumed_seconds", 0)),
             detailed_usage=None,
         )
-
-    def get_instance_usage_28d(self, instance_crn: str) -> int:
-        """Get 28-day rolling window usage for an instance using /v1/instances/usage endpoint.
-
-        This endpoint does not require admin privileges and returns usage for the last 28 days.
-
-        Args:
-            instance_crn: The CRN of the service instance
-
-        Returns:
-            Consumed seconds in the 28-day window
-        """
-        url = f"{self._get_regional_base_url(instance_crn)}/v1/instances/usage"
-        data = self._request_json("GET", url, crn=instance_crn)
-        return int(data.get("usage_consumed_seconds", 0))
 
     def get_instance_usage_seconds(
         self, instance_crn: str, start_date: datetime, end_date: datetime, account_id: str
@@ -404,9 +387,7 @@ class IBMQuantumAPIClient:
         instances = []
         for ref in instance_refs:
             try:
-                instance = self.get_instance(ref)
-                instance.consumed_seconds = self.get_instance_usage_28d(ref.crn)
-                instances.append(instance)
+                instances.append(self.get_instance(ref))
             except Exception as e:
                 print(f"Warning: Could not fetch full data for instance `{ref.name}`, so skipping: {e}")
 
