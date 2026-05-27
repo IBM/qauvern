@@ -77,6 +77,7 @@ class MockIBMQuantumAPIClient:
             allocation_seconds=allocation_seconds,
             limit_seconds=limit_seconds,
             consumed_seconds=consumed_seconds,
+            detailed_usage=None,
         )
         self.instances[crn] = instance
         if account_id:
@@ -188,6 +189,7 @@ class MockIBMQuantumAPIClient:
             allocation_seconds=allocation_seconds or 0,
             limit_seconds=None,
             consumed_seconds=0,
+            detailed_usage=None,
         )
         self.instances[crn] = instance
         return {

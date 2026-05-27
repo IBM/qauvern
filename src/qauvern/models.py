@@ -85,9 +85,9 @@ class InstanceState:
     crn: str
     name: str
     allocation_seconds: int
-    limit_seconds: int | None = None
-    consumed_seconds: int = 0  # Usage in 28-day rolling window
-    detailed_usage: InstanceDetailedUsage | None = None
+    limit_seconds: int | None
+    consumed_seconds: int  # Usage in 28-day rolling window
+    detailed_usage: InstanceDetailedUsage | None
 
     @property
     def usage(self) -> InstanceDetailedUsage:

@@ -186,8 +186,22 @@ def test_optimize_generates_recommendations(
 
 def test_validate_allocations_valid() -> None:
     """Test validation with valid allocations."""
-    instance1 = InstanceState(crn="crn:test:1", name="Test1", allocation_seconds=500000, consumed_seconds=100000)
-    instance2 = InstanceState(crn="crn:test:2", name="Test2", allocation_seconds=500000, consumed_seconds=100000)
+    instance1 = InstanceState(
+        crn="crn:test:1",
+        name="Test1",
+        allocation_seconds=500000,
+        consumed_seconds=100000,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
+    instance2 = InstanceState(
+        crn="crn:test:2",
+        name="Test2",
+        allocation_seconds=500000,
+        consumed_seconds=100000,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
     account = Account(
         account_id="test",
         plan_id="test-plan",
@@ -214,8 +228,22 @@ def test_validate_allocations_valid() -> None:
 
 def test_validate_allocations_exceeds_account() -> None:
     """Test validation when allocations exceed account limit."""
-    instance1 = InstanceState(crn="crn:test:1", name="Test1", allocation_seconds=400000, consumed_seconds=100000)
-    instance2 = InstanceState(crn="crn:test:2", name="Test2", allocation_seconds=300000, consumed_seconds=100000)
+    instance1 = InstanceState(
+        crn="crn:test:1",
+        name="Test1",
+        allocation_seconds=400000,
+        consumed_seconds=100000,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
+    instance2 = InstanceState(
+        crn="crn:test:2",
+        name="Test2",
+        allocation_seconds=300000,
+        consumed_seconds=100000,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
     account = Account(
         account_id="test",
         plan_id="test-plan",
@@ -243,8 +271,22 @@ def test_validate_allocations_exceeds_account() -> None:
 
 def test_validate_allocations_exceeds_instance_target() -> None:
     """Test validation when allocations exceed cfg limit."""
-    instance1 = InstanceState(crn="crn:test:1", name="Test1", allocation_seconds=600000, consumed_seconds=100000)
-    instance2 = InstanceState(crn="crn:test:1", name="Test2", allocation_seconds=600000, consumed_seconds=100000)
+    instance1 = InstanceState(
+        crn="crn:test:1",
+        name="Test1",
+        allocation_seconds=600000,
+        consumed_seconds=100000,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
+    instance2 = InstanceState(
+        crn="crn:test:1",
+        name="Test2",
+        allocation_seconds=600000,
+        consumed_seconds=100000,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
     account = Account(
         account_id="test",
         plan_id="test-plan",
@@ -285,6 +327,7 @@ def _make_account_and_config() -> tuple[Account, InstanceConfig]:
         name="Active Instance",
         allocation_seconds=200000,
         consumed_seconds=100000,
+        limit_seconds=None,
         detailed_usage=InstanceDetailedUsage(
             consumed_balance_period=0,
             consumed_14day=80000,
@@ -344,6 +387,7 @@ def lr_account_and_config() -> tuple[Account, InstanceConfig]:
         name="Test Instance",
         allocation_seconds=250000,
         consumed_seconds=100000,
+        limit_seconds=None,
         detailed_usage=InstanceDetailedUsage(
             consumed_balance_period=0,
             consumed_14day=80000,
@@ -489,7 +533,14 @@ def test_no_target_instance_never_exhausted() -> None:
 
 def test_validate_skips_config_without_target() -> None:
     """Validation skips instance configs without target_usage_seconds."""
-    instance = InstanceState(crn="crn:test:1", name="Instance", allocation_seconds=999999, limit_seconds=1000000)
+    instance = InstanceState(
+        crn="crn:test:1",
+        name="Instance",
+        allocation_seconds=999999,
+        limit_seconds=1000000,
+        consumed_seconds=0,
+        detailed_usage=None,
+    )
     account = Account(
         account_id="test-account",
         plan_id="test-plan",

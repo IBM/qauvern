@@ -24,7 +24,14 @@ from qauvern.models import Account, InstanceState, InstanceConfig, InstanceDetai
 
 
 def _instance(**kwargs: Any) -> InstanceState:
-    return InstanceState(crn="crn:test:1", name="Test", allocation_seconds=100000, **kwargs)
+    return InstanceState(
+        crn="crn:test:1",
+        name="Test",
+        allocation_seconds=100000,
+        limit_seconds=kwargs.get("limit_seconds"),
+        consumed_seconds=kwargs.get("consumed_seconds", 0),
+        detailed_usage=kwargs.get("detailed_usage", None),
+    )
 
 
 def _usage(**kwargs: Any) -> InstanceDetailedUsage:
@@ -116,10 +123,7 @@ def test_instance_config_empty_crn() -> None:
 
 def test_instance_detailed_usage() -> None:
     instance = InstanceState(
-        name="",
-        crn="",
-        allocation_seconds=100,
-        detailed_usage=None,
+        name="", crn="", allocation_seconds=100, detailed_usage=None, consumed_seconds=0, limit_seconds=None
     )
     with pytest.raises(AssertionError):
         instance.usage.consumed_14day
@@ -138,7 +142,14 @@ def test_instance_fairness_calculation() -> None:
 
 
 def test_instance_fairness_zero_allocation() -> None:
-    instance = InstanceState(crn="crn:test:1", name="Test", allocation_seconds=0, consumed_seconds=1000)
+    instance = InstanceState(
+        crn="crn:test:1",
+        name="Test",
+        allocation_seconds=0,
+        consumed_seconds=1000,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
     assert instance.fairness == float("inf")
 
 
@@ -192,7 +203,14 @@ def test_exhausted_over_target() -> None:
 
 
 def test_account_utilization() -> None:
-    instance = InstanceState(crn="crn:test:1", name="Test", allocation_seconds=1000000, consumed_seconds=250000)
+    instance = InstanceState(
+        crn="crn:test:1",
+        name="Test",
+        allocation_seconds=1000000,
+        consumed_seconds=250000,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
@@ -205,8 +223,22 @@ def test_account_utilization() -> None:
 
 
 def test_account_consumed_seconds_is_sum_of_instances() -> None:
-    i1 = InstanceState(crn="crn:test:1", name="A", allocation_seconds=500000, consumed_seconds=100000)
-    i2 = InstanceState(crn="crn:test:2", name="B", allocation_seconds=500000, consumed_seconds=150000)
+    i1 = InstanceState(
+        crn="crn:test:1",
+        name="A",
+        allocation_seconds=500000,
+        consumed_seconds=100000,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
+    i2 = InstanceState(
+        crn="crn:test:2",
+        name="B",
+        allocation_seconds=500000,
+        consumed_seconds=150000,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
