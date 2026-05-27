@@ -20,6 +20,10 @@ from .models import InstanceConfig, NetGrant
 from .plan import Plan, plan_from_name
 
 
+def _parse_utc(s: str) -> datetime:
+    return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+
+
 class ConfigParser:
     """Parser for YAML configuration files."""
 
@@ -74,8 +78,8 @@ class ConfigParser:
     def balance_period(self) -> dict[str, datetime]:
         period = self.config_data["balance_period"]
         return {
-            "start_date": datetime.fromisoformat(period["start_date"]).replace(tzinfo=timezone.utc),
-            "end_date": datetime.fromisoformat(period["end_date"]).replace(tzinfo=timezone.utc),
+            "start_date": _parse_utc(period["start_date"]),
+            "end_date": _parse_utc(period["end_date"]),
         }
 
     @cached_property
@@ -89,24 +93,14 @@ class ConfigParser:
                 if field not in entry:
                     raise ValueError(f"Instance config missing required field: {field}")
 
-            start_date = (
-                datetime.fromisoformat(entry["start_date"]).replace(tzinfo=timezone.utc)
-                if "start_date" in entry
-                else period["start_date"]
-            )
-            end_date = (
-                datetime.fromisoformat(entry["end_date"]).replace(tzinfo=timezone.utc)
-                if "end_date" in entry
-                else period["end_date"]
-            )
+            start_date = _parse_utc(entry["start_date"]) if "start_date" in entry else period["start_date"]
+            end_date = _parse_utc(entry["end_date"]) if "end_date" in entry else period["end_date"]
 
             net_grants = []
             for grant_data in entry.get("net_grants", []):
-                grant_start = datetime.fromisoformat(grant_data["start_date"]).replace(tzinfo=timezone.utc)
+                grant_start = _parse_utc(grant_data["start_date"])
                 grant_end = (
-                    datetime.fromisoformat(grant_data["end_date"]).replace(tzinfo=timezone.utc)
-                    if "end_date" in grant_data
-                    else grant_start + timedelta(days=28)
+                    _parse_utc(grant_data["end_date"]) if "end_date" in grant_data else grant_start + timedelta(days=28)
                 )
                 net_grants.append(
                     NetGrant(
