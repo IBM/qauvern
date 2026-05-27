@@ -94,7 +94,7 @@ balance_period:
 instances: []
 """)
     try:
-        with pytest.raises(ValueError, match="UTC offset"):
+        with pytest.raises(ValueError, match="balance_period.start_date"):
             ConfigParser(path)
     finally:
         os.unlink(path)

@@ -20,10 +20,10 @@ from .models import InstanceConfig, NetGrant
 from .plan import Plan, plan_from_name
 
 
-def _parse_utc(s: str) -> datetime:
+def parse_utc_datetime(s: str, *, provenance: str) -> datetime:
     dt = datetime.fromisoformat(s)
     if dt.tzinfo is None:
-        raise ValueError(f"Date {s!r} must include a UTC offset, e.g. {s}+00:00")
+        raise ValueError(f"{provenance}: {s!r} must include a UTC offset, e.g. {s}+00:00")
     return dt.astimezone(timezone.utc)
 
 
@@ -81,8 +81,8 @@ class ConfigParser:
     def balance_period(self) -> dict[str, datetime]:
         period = self.config_data["balance_period"]
         return {
-            "start_date": _parse_utc(period["start_date"]),
-            "end_date": _parse_utc(period["end_date"]),
+            "start_date": parse_utc_datetime(period["start_date"], provenance="balance_period.start_date"),
+            "end_date": parse_utc_datetime(period["end_date"], provenance="balance_period.end_date"),
         }
 
     @cached_property
@@ -96,14 +96,27 @@ class ConfigParser:
                 if field not in entry:
                     raise ValueError(f"Instance config missing required field: {field}")
 
-            start_date = _parse_utc(entry["start_date"]) if "start_date" in entry else period["start_date"]
-            end_date = _parse_utc(entry["end_date"]) if "end_date" in entry else period["end_date"]
+            inst = entry.get("name", "?")
+            start_date = (
+                parse_utc_datetime(entry["start_date"], provenance=f"instances[{inst}].start_date")
+                if "start_date" in entry
+                else period["start_date"]
+            )
+            end_date = (
+                parse_utc_datetime(entry["end_date"], provenance=f"instances[{inst}].end_date")
+                if "end_date" in entry
+                else period["end_date"]
+            )
 
             net_grants = []
             for grant_data in entry.get("net_grants", []):
-                grant_start = _parse_utc(grant_data["start_date"])
+                grant_start = parse_utc_datetime(
+                    grant_data["start_date"], provenance=f"instances[{inst}].net_grants.start_date"
+                )
                 grant_end = (
-                    _parse_utc(grant_data["end_date"]) if "end_date" in grant_data else grant_start + timedelta(days=28)
+                    parse_utc_datetime(grant_data["end_date"], provenance=f"instances[{inst}].net_grants.end_date")
+                    if "end_date" in grant_data
+                    else grant_start + timedelta(days=28)
                 )
                 net_grants.append(
                     NetGrant(

@@ -20,6 +20,7 @@ import click
 from tabulate import tabulate
 
 from .api_client import IBMQuantumAPIClient
+from .config import parse_utc_datetime
 from .commands.configure import build_configure_yaml, build_instance_summary_table
 from .config import ConfigParser
 from .formatting import format_fairness, format_limit, format_seconds
@@ -316,6 +317,13 @@ api_key_option = click.option(
 
 def _parse_plan(_ctx: click.Context, _param: click.Parameter, value: str | None) -> Plan | None:
     return plan_from_name(value) if value else None
+
+
+def _parse_balance_date(_ctx: click.Context, param: click.Parameter, value: str) -> str:
+    try:
+        return parse_utc_datetime(value, provenance=param.opts[0]).isoformat()
+    except ValueError as e:
+        raise click.BadParameter(str(e)) from e
 
 
 plan_option = click.option(
@@ -736,11 +744,13 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
 @click.option(
     "--balance-start",
     default="2026-01-01T00:00:00+00:00",
+    callback=_parse_balance_date,
     help="Balance period start date (ISO format with UTC offset, default: 2026-01-01T00:00:00+00:00)",
 )
 @click.option(
     "--balance-end",
     default="2026-12-31T23:59:59+00:00",
+    callback=_parse_balance_date,
     help="Balance period end date (ISO format with UTC offset, default: 2026-12-31T23:59:59+00:00)",
 )
 @click.pass_context
