@@ -346,6 +346,7 @@ def _load_config_and_client(
 ) -> tuple[ConfigParser, IBMQuantumAPIClient]:
     config_parser = ConfigParser(config)
     client = _build_client(ctx, api_key)
+    config_parser.validate_instances_against_api(client)
     return config_parser, client
 
 

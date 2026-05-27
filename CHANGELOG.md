@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.4.0] - 2026-05-xx
 
-### Changelog
+### Added
+
+- `qauvern` now eagerly validates that all instances in the config file exist and still belong to your account and plan. This is to ensure that `qauvern` never runs on instances you do not expect.
+
+### Changed
 
 - Dates in the config file must now set the UTC timezone offset in the ISO 8601 format, e.g. `2026-06-15T00:00:00+00:00`.
 

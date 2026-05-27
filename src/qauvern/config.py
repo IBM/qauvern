@@ -13,11 +13,15 @@
 from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
 from .models import InstanceConfig, NetGrant
 from .plan import Plan, plan_from_name
+
+if TYPE_CHECKING:
+    from .api_client import IBMQuantumAPIClient
 
 
 def parse_utc_datetime(s: str, *, provenance: str) -> datetime:
@@ -148,3 +152,18 @@ class ConfigParser:
             configs.append(config)
 
         return configs
+
+    def validate_instances_against_api(self, client: "IBMQuantumAPIClient") -> None:
+        """Verify every configured instance exists on the API for this account+plan.
+
+        Raises ValueError if any configured CRN is not returned by discover_instances.
+        """
+        discovered = client.discover_instances(self.account_id, self.plan)
+        discovered_crns = {d.crn for d in discovered}
+        unrecognized = [cfg for cfg in self.instance_configs if cfg.crn not in discovered_crns]
+        if unrecognized:
+            bullets = "\n".join(f"  - {cfg.name}, {cfg.crn}" for cfg in unrecognized)
+            raise ValueError(
+                f"Config file contains instances not found in account "
+                f"{self.account_id} on plan {self.plan.value}:\n{bullets}"
+            )
