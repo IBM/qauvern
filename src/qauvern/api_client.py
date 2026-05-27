@@ -419,18 +419,9 @@ class IBMQuantumAPIClient:
         instances = []
         for ref in instance_refs:
             try:
-                full = self.get_instance(ref)
-                consumed = self.get_rolling_window_seconds(ref.crn, account_id)
-                instances.append(
-                    InstanceState(
-                        crn=ref.crn,
-                        name=ref.name,
-                        allocation_seconds=full.allocation_seconds,
-                        limit_seconds=full.limit_seconds,
-                        consumed_seconds=consumed,
-                        detailed_usage=None,
-                    )
-                )
+                instance = self.get_instance(ref)
+                instance.consumed_seconds = self.get_rolling_window_seconds(ref.crn, account_id)
+                instances.append(instance)
             except Exception as e:
                 print(f"Warning: Could not fetch full data for instance `{ref.name}`, so skipping: {e}")
 
