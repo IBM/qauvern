@@ -61,7 +61,7 @@ qauvern --help
 
 ## Configuration
 
-The program operates on YAML configuration files where you define your account and instances, such as:
+The program operates on YAML configuration files where you define your account, plan, and instances, such as:
 
 ```yaml
 # config.yaml
@@ -151,7 +151,7 @@ After generating the configuration, optionally set `target_usage_seconds` to ena
 
 #### Show Current Allocations
 
-Display a summary of account and instance allocations:
+Display a summary of your account and instance allocations:
 
 ```bash
 qauvern show --config config.yaml
@@ -163,17 +163,15 @@ Output includes:
 
 #### Instances (Non-Admin View)
 
-Display instance usage summary without requiring admin privileges:
+Display instance usage summary, without requiring admin privileges:
 
 ```bash
 qauvern instances --config config.yaml
 ```
 
-This command only queries instance-level data and does not require account admin privileges, unlike the `show` command which accesses account-level allocation information.
-
 #### Analyze Allocations
 
-Analyze current allocations and show optimization recommendations without making changes:
+Analyze current allocations and show optimization recommendations, without making changes:
 
 ```bash
 qauvern analyze --config config.yaml
