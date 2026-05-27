@@ -131,11 +131,11 @@ class Instance:
             score += (self.consumed_seconds / 28.0) * (bias**1.0)
         return score
 
-    def exhausted(self, config: InstanceConfig) -> bool:
+    def exhausted(self, target_usage_seconds: int | None) -> bool:
         """Check if instance has exhausted its target usage for the balance period."""
-        if config.target_usage_seconds is None:
+        if target_usage_seconds is None:
             return False
-        return self.usage.consumed_balance_period >= config.target_usage_seconds
+        return self.usage.consumed_balance_period >= target_usage_seconds
 
 
 @dataclass(frozen=True)

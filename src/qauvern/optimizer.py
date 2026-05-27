@@ -120,7 +120,7 @@ class AllocationOptimizer:
                 continue
 
             # Check if instance has exhausted its configured allocation
-            if instance.exhausted(config):
+            if instance.exhausted(config.target_usage_seconds):
                 exhausted.append(instance)
                 continue
 
