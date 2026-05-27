@@ -20,7 +20,7 @@ from click.testing import CliRunner, Result
 from qauvern.cli import main
 from qauvern.commands.configure import build_configure_yaml, build_instance_summary_table
 from qauvern.config import ConfigParser
-from qauvern.models import Instance
+from qauvern.models import InstanceState
 from qauvern.plan import Plan
 from tests.mock_api import MockIBMQuantumAPIClient
 
@@ -36,8 +36,8 @@ def _make_instance(
     allocation_seconds: int = 36000,
     consumed_seconds: int = 0,
     limit_seconds: int | None = None,
-) -> Instance:
-    return Instance(
+) -> InstanceState:
+    return InstanceState(
         crn=crn,
         name=name,
         allocation_seconds=allocation_seconds,
@@ -129,7 +129,7 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     assert cfg.plan == Plan.PREMIUM
     assert cfg.minimum_allocation_seconds == 120
     assert cfg.instance_configs[0].target_usage_seconds == 50000
-    assert cfg.instance_configs[0].limit_seconds == 80000
+    assert cfg.instance_configs[0].target_limit_seconds == 80000
     assert len(cfg.instance_configs[0].net_grants) == 1
     assert cfg.instance_configs[0].net_grants[0].net_grant_seconds == 180000
     assert cfg.instance_configs[0].net_grants[0].end_date == datetime(2026, 5, 29)

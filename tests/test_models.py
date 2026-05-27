@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from qauvern.models import Account, Instance, InstanceConfig, InstanceDetailedUsage, NetGrant
+from qauvern.models import Account, InstanceState, InstanceConfig, InstanceDetailedUsage, NetGrant
 
 
 # -------------------------------------------------------------------
@@ -23,8 +23,8 @@ from qauvern.models import Account, Instance, InstanceConfig, InstanceDetailedUs
 # -------------------------------------------------------------------
 
 
-def _instance(**kwargs: Any) -> Instance:
-    return Instance(crn="crn:test:1", name="Test", allocation_seconds=100000, **kwargs)
+def _instance(**kwargs: Any) -> InstanceState:
+    return InstanceState(crn="crn:test:1", name="Test", allocation_seconds=100000, **kwargs)
 
 
 def _usage(**kwargs: Any) -> InstanceDetailedUsage:
@@ -115,7 +115,7 @@ def test_instance_config_empty_crn() -> None:
 
 
 def test_instance_detailed_usage() -> None:
-    instance = Instance(
+    instance = InstanceState(
         name="",
         crn="",
         allocation_seconds=100,
@@ -138,7 +138,7 @@ def test_instance_fairness_calculation() -> None:
 
 
 def test_instance_fairness_zero_allocation() -> None:
-    instance = Instance(crn="crn:test:1", name="Test", allocation_seconds=0, consumed_seconds=1000)
+    instance = InstanceState(crn="crn:test:1", name="Test", allocation_seconds=0, consumed_seconds=1000)
     assert instance.fairness == float("inf")
 
 
@@ -192,7 +192,7 @@ def test_exhausted_over_target() -> None:
 
 
 def test_account_utilization() -> None:
-    instance = Instance(crn="crn:test:1", name="Test", allocation_seconds=1000000, consumed_seconds=250000)
+    instance = InstanceState(crn="crn:test:1", name="Test", allocation_seconds=1000000, consumed_seconds=250000)
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
@@ -205,8 +205,8 @@ def test_account_utilization() -> None:
 
 
 def test_account_consumed_seconds_is_sum_of_instances() -> None:
-    i1 = Instance(crn="crn:test:1", name="A", allocation_seconds=500000, consumed_seconds=100000)
-    i2 = Instance(crn="crn:test:2", name="B", allocation_seconds=500000, consumed_seconds=150000)
+    i1 = InstanceState(crn="crn:test:1", name="A", allocation_seconds=500000, consumed_seconds=100000)
+    i2 = InstanceState(crn="crn:test:2", name="B", allocation_seconds=500000, consumed_seconds=150000)
     account = Account(
         account_id="test-account",
         plan_id="test-plan",

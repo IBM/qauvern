@@ -40,7 +40,7 @@ class InstanceConfig:
     start_date: datetime
     end_date: datetime
     target_usage_seconds: int | None = None
-    limit_seconds: int | None = None
+    target_limit_seconds: int | None = None
     net_grants: tuple[NetGrant, ...] = ()
 
     def __post_init__(self) -> None:
@@ -79,8 +79,8 @@ class InstanceDetailedUsage:
 
 
 @dataclass
-class Instance:
-    """Represents a quantum service instance."""
+class InstanceState:
+    """Represents the live state of an instance, populated by the IBM APIs."""
 
     crn: str
     name: str
@@ -147,7 +147,7 @@ class Account:
     target_usage_seconds: int
     available_seconds: int
     limit_seconds: int | None
-    instances: tuple[Instance, ...]
+    instances: tuple[InstanceState, ...]
 
     @cached_property
     def consumed_seconds(self) -> int:

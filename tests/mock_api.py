@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from qauvern.models import Account, DiscoveredInstance, Instance, InstanceRef
+from qauvern.models import Account, DiscoveredInstance, InstanceState, InstanceRef
 from qauvern.plan import Plan, plan_id_for
 
 
@@ -34,7 +34,7 @@ class MockIBMQuantumAPIClient:
 
         self._account_params: dict[str, dict] = {}
         self._account_instances: dict[str, list[str]] = {}
-        self.instances: dict[str, Instance] = {}
+        self.instances: dict[str, InstanceState] = {}
         self.usage_data: dict[str, dict] = {}
         self.daily_usage_data: dict[str, dict[date, int]] = {}
 
@@ -69,9 +69,9 @@ class MockIBMQuantumAPIClient:
         consumed_seconds: int = 0,
         limit_seconds: int | None = None,
         account_id: str | None = None,
-    ) -> Instance:
+    ) -> InstanceState:
         """Setup a mock instance for testing."""
-        instance = Instance(
+        instance = InstanceState(
             crn=crn,
             name=name,
             allocation_seconds=allocation_seconds,
@@ -102,7 +102,7 @@ class MockIBMQuantumAPIClient:
         all_days = self.daily_usage_data.get(instance_crn, {})
         return {d: s for d, s in all_days.items() if start_date <= d < end_date}
 
-    def get_instance(self, ref: InstanceRef) -> Instance:
+    def get_instance(self, ref: InstanceRef) -> InstanceState:
         """Get mock instance configuration."""
         if ref.crn not in self.instances:
             raise ValueError(f"Instance {ref.crn} not found in mock data")
@@ -182,7 +182,7 @@ class MockIBMQuantumAPIClient:
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
         crn = f"crn:v1:bluemix:public:quantum-computing:{target}:a/mock-account:{name}::"
-        instance = Instance(
+        instance = InstanceState(
             crn=crn,
             name=name,
             allocation_seconds=allocation_seconds or 0,

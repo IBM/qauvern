@@ -12,7 +12,7 @@
 
 from datetime import date, timedelta
 
-from .models import Instance, InstanceConfig
+from .models import InstanceState, InstanceConfig
 
 
 class LimitResolver:
@@ -24,7 +24,7 @@ class LimitResolver:
     This ensures headroom decays as old usage leaves the window.
     """
 
-    def resolve(self, instance_config: InstanceConfig, instance: Instance, today: date) -> int | None:
+    def resolve(self, instance_config: InstanceConfig, instance_state: InstanceState, today: date) -> int | None:
         """Return the effective limit in seconds for the given instance today.
 
         Resolution order:
@@ -37,11 +37,10 @@ class LimitResolver:
         where rolloff = sum(usage on days that were in the 28-day window at grant
         start but have since exited, and are strictly before grant start).
         """
-        if instance.exhausted(instance_config.target_usage_seconds):
+        if instance_state.exhausted(instance_config.target_usage_seconds):
             return 1
 
-        daily_usage: dict[date, int] = instance.usage.daily_usage
-        base_limit = instance_config.limit_seconds
+        base_limit = instance_config.target_limit_seconds
 
         if not instance_config.net_grants:
             return base_limit
@@ -68,7 +67,7 @@ class LimitResolver:
 
             rolloff = sum(
                 seconds
-                for day, seconds in daily_usage.items()
+                for day, seconds in instance_state.usage.daily_usage.items()
                 if day < grant_start and day >= window_floor_at_grant and day < current_window_floor
             )
 

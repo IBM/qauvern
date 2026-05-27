@@ -14,13 +14,13 @@ from datetime import datetime
 
 import pytest
 
-from qauvern.models import Account, Instance, InstanceConfig, InstanceDetailedUsage
+from qauvern.models import Account, InstanceState, InstanceConfig, InstanceDetailedUsage
 from qauvern.optimizer import AllocationOptimizer
 
 
 @pytest.fixture
 def optimizer_account() -> Account:
-    instance1 = Instance(
+    instance1 = InstanceState(
         crn="crn:test:1",
         name="Active Instance",
         allocation_seconds=600000,
@@ -35,7 +35,7 @@ def optimizer_account() -> Account:
             daily_usage={},
         ),
     )
-    instance2 = Instance(
+    instance2 = InstanceState(
         crn="crn:test:2",
         name="Inactive Instance",
         allocation_seconds=400000,
@@ -50,7 +50,7 @@ def optimizer_account() -> Account:
             daily_usage={},
         ),
     )
-    instance3 = Instance(
+    instance3 = InstanceState(
         crn="crn:test:3",
         name="Medium Instance",
         allocation_seconds=300000,
@@ -83,7 +83,7 @@ def optimizer_instance_configs() -> list[InstanceConfig]:
         target_usage_seconds=1000000,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
-        limit_seconds=900000,
+        target_limit_seconds=900000,
     )
 
     cfg2 = InstanceConfig(
@@ -186,8 +186,8 @@ def test_optimize_generates_recommendations(
 
 def test_validate_allocations_valid() -> None:
     """Test validation with valid allocations."""
-    instance1 = Instance(crn="crn:test:1", name="Test1", allocation_seconds=500000, consumed_seconds=100000)
-    instance2 = Instance(crn="crn:test:2", name="Test2", allocation_seconds=500000, consumed_seconds=100000)
+    instance1 = InstanceState(crn="crn:test:1", name="Test1", allocation_seconds=500000, consumed_seconds=100000)
+    instance2 = InstanceState(crn="crn:test:2", name="Test2", allocation_seconds=500000, consumed_seconds=100000)
     account = Account(
         account_id="test",
         plan_id="test-plan",
@@ -214,8 +214,8 @@ def test_validate_allocations_valid() -> None:
 
 def test_validate_allocations_exceeds_account() -> None:
     """Test validation when allocations exceed account limit."""
-    instance1 = Instance(crn="crn:test:1", name="Test1", allocation_seconds=400000, consumed_seconds=100000)
-    instance2 = Instance(crn="crn:test:2", name="Test2", allocation_seconds=300000, consumed_seconds=100000)
+    instance1 = InstanceState(crn="crn:test:1", name="Test1", allocation_seconds=400000, consumed_seconds=100000)
+    instance2 = InstanceState(crn="crn:test:2", name="Test2", allocation_seconds=300000, consumed_seconds=100000)
     account = Account(
         account_id="test",
         plan_id="test-plan",
@@ -243,8 +243,8 @@ def test_validate_allocations_exceeds_account() -> None:
 
 def test_validate_allocations_exceeds_instance_target() -> None:
     """Test validation when allocations exceed cfg limit."""
-    instance1 = Instance(crn="crn:test:1", name="Test1", allocation_seconds=600000, consumed_seconds=100000)
-    instance2 = Instance(crn="crn:test:1", name="Test2", allocation_seconds=600000, consumed_seconds=100000)
+    instance1 = InstanceState(crn="crn:test:1", name="Test1", allocation_seconds=600000, consumed_seconds=100000)
+    instance2 = InstanceState(crn="crn:test:1", name="Test2", allocation_seconds=600000, consumed_seconds=100000)
     account = Account(
         account_id="test",
         plan_id="test-plan",
@@ -280,7 +280,7 @@ def _make_account_and_config() -> tuple[Account, InstanceConfig]:
       with  0% reserve: int(600000 * 1.0) = 600000  -> new_allocation = 100000 + 600000 = 700000
       remaining = 2000000 - 100000 = 1900000, far above both, so reserve is binding.
     """
-    instance = Instance(
+    instance = InstanceState(
         crn="crn:test:reserve:1",
         name="Active Instance",
         allocation_seconds=200000,
@@ -339,7 +339,7 @@ def test_zero_reserve_is_deterministic() -> None:
 
 @pytest.fixture
 def lr_account_and_config() -> tuple[Account, InstanceConfig]:
-    instance = Instance(
+    instance = InstanceState(
         crn="crn:test:lr:1",
         name="Test Instance",
         allocation_seconds=250000,
@@ -367,7 +367,7 @@ def lr_account_and_config() -> tuple[Account, InstanceConfig]:
         target_usage_seconds=300000,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
-        limit_seconds=350000,
+        target_limit_seconds=350000,
     )
     return account, cfg
 
@@ -394,7 +394,7 @@ def test_optimize_uses_active_grant(lr_account_and_config: tuple[Account, Instan
         net_grant_seconds=300000,
         end_date=datetime(2026, 5, 13),
     )
-    cfg = dataclasses.replace(cfg, limit_seconds=200000, net_grants=(grant,))
+    cfg = dataclasses.replace(cfg, target_limit_seconds=200000, net_grants=(grant,))
     optimizer = AllocationOptimizer(account, [cfg], today=date(2026, 4, 15))
     result = optimizer.optimize()
     limit_recs = [r for r in result.recommendations if r.new_limit is not None]
@@ -404,7 +404,7 @@ def test_optimize_uses_active_grant(lr_account_and_config: tuple[Account, Instan
 
 def test_no_target_usage_caps_at_limit() -> None:
     """Optimizer caps allocation at limit_seconds when cfg has no target."""
-    instance = Instance(
+    instance = InstanceState(
         crn="crn:test:1",
         name="Active Instance",
         allocation_seconds=100000,
@@ -433,7 +433,7 @@ def test_no_target_usage_caps_at_limit() -> None:
         crn="crn:test:1",
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
-        limit_seconds=200000,
+        target_limit_seconds=200000,
     )
 
     optimizer = AllocationOptimizer(account, [cfg])
@@ -447,7 +447,7 @@ def test_no_target_usage_caps_at_limit() -> None:
 
 def test_no_target_instance_never_exhausted() -> None:
     """Instance with no cfg target is never exhausted."""
-    instance = Instance(
+    instance = InstanceState(
         crn="crn:test:1",
         name="Heavy Instance",
         allocation_seconds=500000,
@@ -489,7 +489,7 @@ def test_no_target_instance_never_exhausted() -> None:
 
 def test_validate_skips_config_without_target() -> None:
     """Validation skips instance configs without target_usage_seconds."""
-    instance = Instance(crn="crn:test:1", name="Instance", allocation_seconds=999999, limit_seconds=1000000)
+    instance = InstanceState(crn="crn:test:1", name="Instance", allocation_seconds=999999, limit_seconds=1000000)
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
