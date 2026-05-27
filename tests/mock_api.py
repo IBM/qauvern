@@ -11,7 +11,7 @@
 """Mock API client for testing."""
 
 from collections.abc import Sequence
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 from qauvern.models import Account, DiscoveredInstance, InstanceState, InstanceRef
@@ -122,12 +122,6 @@ class MockIBMQuantumAPIClient:
         if instance_crn not in self.instances:
             raise ValueError(f"Instance {instance_crn} not found in mock data")
         return self.instances[instance_crn].consumed_seconds
-
-    def get_rolling_window_seconds(self, instance_crn: str, account_id: str, days: int = 28) -> int:
-        """Get mock usage in seconds for the rolling window period."""
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
-        return self.get_instance_usage_seconds(instance_crn, start_date, end_date, account_id)
 
     def update_instance_allocation(self, instance_crn: str, allocation_seconds: int) -> bool:
         """Update the allocation for a mock instance."""

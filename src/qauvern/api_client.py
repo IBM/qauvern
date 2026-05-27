@@ -242,21 +242,6 @@ class IBMQuantumAPIClient:
         usage_ms = data.get("usage", 0)
         return int(usage_ms / 1000) if usage_ms else 0
 
-    def get_rolling_window_seconds(self, instance_crn: str, account_id: str, days: int = 28) -> int:
-        """Get usage in seconds for the rolling window period.
-
-        Args:
-            instance_crn: The CRN of the service instance
-            account_id: The account ID (used as subscription_id)
-            days: Number of days in the rolling window (default: 28)
-
-        Returns:
-            Consumed seconds in the rolling window
-        """
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
-        return self.get_instance_usage_seconds(instance_crn, start_date, end_date, account_id)
-
     def get_detailed_usage(self, instance_crn: str, account_id: str) -> dict:
         """Get detailed usage data for multiple time periods using analytics endpoint.
 
@@ -420,7 +405,7 @@ class IBMQuantumAPIClient:
         for ref in instance_refs:
             try:
                 instance = self.get_instance(ref)
-                instance.consumed_seconds = self.get_rolling_window_seconds(ref.crn, account_id)
+                instance.consumed_seconds = self.get_instance_usage_28d(ref.crn)
                 instances.append(instance)
             except Exception as e:
                 print(f"Warning: Could not fetch full data for instance `{ref.name}`, so skipping: {e}")
