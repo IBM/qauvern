@@ -22,6 +22,7 @@ from qauvern.models import Account, Instance, InstanceConfig, InstanceDetailedUs
 # Helpers
 # -------------------------------------------------------------------
 
+
 def _instance(**kwargs: Any) -> Instance:
     return Instance(crn="crn:test:1", name="Test", allocation_seconds=100000, **kwargs)
 
@@ -150,8 +151,12 @@ def test_activity_score_single_bucket() -> None:
 
 def test_activity_score_recent_outweighs_old() -> None:
     """Same per-day rate in 24h window scores higher than in 28d window."""
-    zero_usage = InstanceDetailedUsage(consumed_14day=0, consumed_7day=0, consumed_3day=0, consumed_24h=0, daily_usage={})
-    recent_usage = InstanceDetailedUsage(consumed_14day=0, consumed_7day=0, consumed_3day=0, consumed_24h=100, daily_usage={})
+    zero_usage = InstanceDetailedUsage(
+        consumed_14day=0, consumed_7day=0, consumed_3day=0, consumed_24h=0, daily_usage={}
+    )
+    recent_usage = InstanceDetailedUsage(
+        consumed_14day=0, consumed_7day=0, consumed_3day=0, consumed_24h=100, daily_usage={}
+    )
     recent = _instance(detailed_usage=recent_usage)
     old = _instance(consumed_seconds=100 * 28, detailed_usage=zero_usage)  # same average daily rate over 28d
     assert recent.activity_score > old.activity_score
