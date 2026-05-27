@@ -169,21 +169,21 @@ def test_activity_score_recent_outweighs_old() -> None:
 
 
 def test_exhausted_no_target() -> None:
-    """target_usage_seconds=0 means no cap — never exhausted regardless of consumption."""
-    assert not _instance(detailed_usage=_usage(consumed_balance_period=999999)).exhausted
+    """target_usage_seconds=None means no cap — never exhausted regardless of consumption."""
+    assert not _instance(detailed_usage=_usage(consumed_balance_period=999999)).exhausted(None)
 
 
 def test_exhausted_under_target() -> None:
-    assert not _instance(target_usage_seconds=1000, detailed_usage=_usage(consumed_balance_period=999)).exhausted
+    assert not _instance(detailed_usage=_usage(consumed_balance_period=999)).exhausted(1000)
 
 
 def test_exhausted_at_target() -> None:
     """Boundary: >= means exactly hitting the target counts as exhausted."""
-    assert _instance(target_usage_seconds=1000, detailed_usage=_usage(consumed_balance_period=1000)).exhausted
+    assert _instance(detailed_usage=_usage(consumed_balance_period=1000)).exhausted(1000)
 
 
 def test_exhausted_over_target() -> None:
-    assert _instance(target_usage_seconds=1000, detailed_usage=_usage(consumed_balance_period=1001)).exhausted
+    assert _instance(detailed_usage=_usage(consumed_balance_period=1001)).exhausted(1000)
 
 
 # -------------------------------------------------------------------

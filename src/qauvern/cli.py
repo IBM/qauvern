@@ -36,12 +36,6 @@ def enrich_instances_with_usage_data(
     for instance in account.instances:
         config = next((cfg for cfg in instance_configs if cfg.crn == instance.crn), None)
 
-        # Set target_usage_seconds from instance config
-        if config and config.target_usage_seconds:
-            instance.target_usage_seconds = config.target_usage_seconds
-        else:
-            instance.target_usage_seconds = 0
-
         try:
             # Usage since balance period start (if config found)
             consumed_balance_period = (

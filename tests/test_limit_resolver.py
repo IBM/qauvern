@@ -36,7 +36,6 @@ def make_instance_config(
 
 def make_instance(
     consumed_balance: int = 0,
-    target: int = 30000,
     consumed_seconds: int = 0,
     daily_usage: dict[date, int] | None = None,
 ) -> Instance:
@@ -44,7 +43,6 @@ def make_instance(
         crn="crn:test:1",
         name="Test Instance",
         allocation_seconds=10000,
-        target_usage_seconds=target,
         consumed_seconds=consumed_seconds,
         detailed_usage=InstanceDetailedUsage(
             consumed_balance_period=consumed_balance,
@@ -76,13 +74,13 @@ def test_base_limit_only_returns_base(resolver: LimitResolver) -> None:
 
 def test_exhausted_returns_one(resolver: LimitResolver) -> None:
     cfg = make_instance_config(limit_seconds=50000)
-    instance = make_instance(consumed_balance=30000, target=30000)
+    instance = make_instance(consumed_balance=30000)
     assert resolver.resolve(cfg, instance, date(2026, 4, 27)) == 1
 
 
 def test_exhausted_no_limits_returns_one(resolver: LimitResolver) -> None:
     cfg = make_instance_config()
-    instance = make_instance(consumed_balance=30000, target=30000)
+    instance = make_instance(consumed_balance=30000)
     assert resolver.resolve(cfg, instance, date(2026, 4, 27)) == 1
 
 
@@ -247,7 +245,7 @@ def test_exhausted_with_active_grant_returns_one(resolver: LimitResolver) -> Non
     today = date(2026, 4, 27)
     grant = NetGrant(start_date=datetime(2026, 4, 27), net_grant_seconds=40000, end_date=datetime(2026, 5, 25))
     cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    instance = make_instance(consumed_balance=30000, target=30000)
+    instance = make_instance(consumed_balance=30000)
     result = resolver.resolve(cfg, instance, today)
     assert result == 1
 

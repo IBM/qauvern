@@ -76,7 +76,6 @@ def instance1() -> Instance:
         allocation_seconds=1000,
         consumed_seconds=500,
         limit_seconds=2000,
-        target_usage_seconds=5000,
         detailed_usage=InstanceDetailedUsage(
             consumed_balance_period=300,
             consumed_14day=400,
@@ -96,7 +95,6 @@ def instance2() -> Instance:
         allocation_seconds=2000,
         consumed_seconds=1500,
         limit_seconds=None,
-        target_usage_seconds=10000,
         detailed_usage=InstanceDetailedUsage(
             consumed_balance_period=1200,
             consumed_14day=1400,
