@@ -105,10 +105,7 @@ class AllocationOptimizer:
         Returns:
             OptimizationResult with recommendations but no changes applied
         """
-        result = OptimizationResult(
-            account=self.account,
-            recommendations=[],
-        )
+        recommendations: list[OptimizationRecommendation] = []
 
         # Step 1: Categorize instances by activity score
         print("\n=== Step 1: Categorizing Instances ===")
@@ -145,7 +142,7 @@ class AllocationOptimizer:
         exhausted_count = 0
         for instance in exhausted:
             if instance.allocation_seconds > 0 or (instance.limit_seconds is None or instance.limit_seconds != 1):
-                result.recommendations.append(
+                recommendations.append(
                     OptimizationRecommendation(
                         instance_crn=instance.crn,
                         current_allocation=instance.allocation_seconds,
@@ -168,7 +165,7 @@ class AllocationOptimizer:
             if instance.allocation_seconds > min_allocation:
                 freed = instance.allocation_seconds - min_allocation
                 freed_allocation += freed
-                result.recommendations.append(
+                recommendations.append(
                     OptimizationRecommendation(
                         instance_crn=instance.crn,
                         current_allocation=instance.allocation_seconds,
@@ -180,7 +177,7 @@ class AllocationOptimizer:
             elif instance.allocation_seconds < min_allocation:
                 # Need to increase allocation to meet minimum (28d usage floor)
                 additional = min_allocation - instance.allocation_seconds
-                result.recommendations.append(
+                recommendations.append(
                     OptimizationRecommendation(
                         instance_crn=instance.crn,
                         current_allocation=instance.allocation_seconds,
@@ -263,7 +260,7 @@ class AllocationOptimizer:
 
                     # Only create recommendation if allocation changes
                     if new_allocation != instance.allocation_seconds:
-                        result.recommendations.append(
+                        recommendations.append(
                             OptimizationRecommendation(
                                 instance_crn=instance.crn,
                                 current_allocation=instance.allocation_seconds,
@@ -278,9 +275,9 @@ class AllocationOptimizer:
             print("  No active instances or no allocation to distribute")
 
         print("\n=== Analysis Complete ===")
-        print(f"Total recommendations: {len(result.recommendations)}")
+        print(f"Total recommendations: {len(recommendations)}")
 
-        return result
+        return OptimizationResult(recommendations)
 
     def optimize(self) -> OptimizationResult:
         """Optimize allocations and calculate new limits.

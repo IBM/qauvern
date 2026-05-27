@@ -13,7 +13,6 @@
 import pytest
 from datetime import datetime
 from qauvern.models import (
-    Account,
     Instance,
     InstanceConfig,
     OptimizationResult,
@@ -311,22 +310,9 @@ def test_recommendation_negative_change() -> None:
     assert rec.change == -1000
 
 
-@pytest.fixture
-def opt_result_account() -> Account:
-    return Account(
-        account_id="test-account",
-        plan_id="test-plan",
-        target_usage_seconds=100000,
-        available_seconds=50000,
-        limit_seconds=None,
-        instances=(),
-    )
-
-
-def test_result_reductions_property(opt_result_account: Account) -> None:
+def test_result_reductions_property() -> None:
     """Test that reductions property filters correctly."""
     result = OptimizationResult(
-        account=opt_result_account,
         recommendations=[
             OptimizationRecommendation(
                 instance_crn="crn:1",
@@ -354,10 +340,9 @@ def test_result_reductions_property(opt_result_account: Account) -> None:
     assert all(rec.change < 0 for rec in reductions)
 
 
-def test_result_additions_property(opt_result_account: Account) -> None:
+def test_result_additions_property() -> None:
     """Test that additions property filters correctly."""
     result = OptimizationResult(
-        account=opt_result_account,
         recommendations=[
             OptimizationRecommendation(
                 instance_crn="crn:1",
@@ -385,10 +370,9 @@ def test_result_additions_property(opt_result_account: Account) -> None:
     assert all(rec.change > 0 for rec in additions)
 
 
-def test_result_no_change_recommendations(opt_result_account: Account) -> None:
+def test_result_no_change_recommendations() -> None:
     """Test result with no-change recommendations."""
     result = OptimizationResult(
-        account=opt_result_account,
         recommendations=[
             OptimizationRecommendation(
                 instance_crn="crn:1",
