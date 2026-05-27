@@ -346,7 +346,15 @@ def _load_config_and_client(
 ) -> tuple[ConfigParser, IBMQuantumAPIClient]:
     config_parser = ConfigParser(config)
     client = _build_client(ctx, api_key)
-    config_parser.validate_instances_against_api(client)
+    name_drifts = config_parser.validate_instances_against_api(client)
+    if name_drifts:
+        bullets = "\n".join(f"  - {d}" for d in name_drifts)
+        click.echo(
+            f"Warning: Configured instance names differ from the live API for account "
+            f"{config_parser.account_id} on plan {config_parser.plan.value}. "
+            f"Update your config:\n{bullets}",
+            err=True,
+        )
     return config_parser, client
 
 
