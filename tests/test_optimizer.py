@@ -27,6 +27,7 @@ def optimizer_account() -> Account:
         consumed_seconds=550000,  # High usage in 28d
         limit_seconds=800000,
         detailed_usage=InstanceDetailedUsage(
+            consumed_balance_period=0,
             consumed_14day=400000,
             consumed_7day=300000,
             consumed_3day=150000,
@@ -41,6 +42,7 @@ def optimizer_account() -> Account:
         consumed_seconds=1000,  # Very low usage
         limit_seconds=500000,
         detailed_usage=InstanceDetailedUsage(
+            consumed_balance_period=0,
             consumed_14day=0,  # No recent activity
             consumed_7day=0,
             consumed_3day=0,
@@ -55,6 +57,7 @@ def optimizer_account() -> Account:
         consumed_seconds=150000,  # Medium usage
         limit_seconds=400000,
         detailed_usage=InstanceDetailedUsage(
+            consumed_balance_period=0,
             consumed_14day=100000,
             consumed_7day=50000,
             consumed_3day=20000,
@@ -284,6 +287,7 @@ def _make_account_and_config() -> tuple[Account, InstanceConfig]:
         consumed_seconds=100000,
         target_usage_seconds=2000000,
         detailed_usage=InstanceDetailedUsage(
+            consumed_balance_period=0,
             consumed_14day=80000,
             consumed_7day=60000,
             consumed_3day=30000,
@@ -343,6 +347,7 @@ def lr_account_and_config() -> tuple[Account, InstanceConfig]:
         consumed_seconds=100000,
         target_usage_seconds=300000,
         detailed_usage=InstanceDetailedUsage(
+            consumed_balance_period=0,
             consumed_14day=80000,
             consumed_7day=60000,
             consumed_3day=30000,
@@ -408,6 +413,7 @@ def test_no_target_usage_caps_at_limit() -> None:
         consumed_seconds=50000,
         limit_seconds=200000,
         detailed_usage=InstanceDetailedUsage(
+            consumed_balance_period=0,
             consumed_14day=40000,
             consumed_7day=30000,
             consumed_3day=15000,

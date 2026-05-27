@@ -75,7 +75,7 @@ class InstanceDetailedUsage:
     consumed_3day: int
     consumed_24h: int
     daily_usage: dict[date, int]
-    consumed_balance_period: int = 0  # Usage since balance period start
+    consumed_balance_period: int  # Usage since balance period start
 
 
 @dataclass

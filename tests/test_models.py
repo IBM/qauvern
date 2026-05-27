@@ -124,9 +124,7 @@ def test_instance_detailed_usage() -> None:
     with pytest.raises(AssertionError):
         instance.usage.consumed_14day
 
-    instance.detailed_usage = InstanceDetailedUsage(
-        consumed_14day=14, consumed_7day=7, consumed_3day=3, consumed_24h=24, daily_usage={}
-    )
+    instance.detailed_usage = _usage(consumed_14day=14)
     assert instance.usage.consumed_14day == 14
 
 
