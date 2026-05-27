@@ -125,17 +125,6 @@ class Instance:
 
 
 @dataclass(frozen=True)
-class AccountAllocation:
-    """Plan-level allocation data from the API (no instances)."""
-
-    account_id: str
-    plan_id: str
-    target_usage_seconds: int
-    available_seconds: int
-    limit_seconds: int | None
-
-
-@dataclass(frozen=True)
 class Account:
     """IBM Cloud account with instances for a specific plan."""
 
