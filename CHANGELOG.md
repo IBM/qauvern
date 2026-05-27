@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.0] - 2026-05-26
 
+The focus of this release is improving `qauvern configure` and the configuration file.
+
 ### Changed
 
 - In the configuration file, `projects` was renamed to `instances` and `project_limit_seconds` to `limit_seconds`. To fix, either manually update your config file keys or run `qauvern configure` to generate a new config file. (This change was to make the program simpler for users; projects and instances were the same thing.)
