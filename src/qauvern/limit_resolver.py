@@ -40,7 +40,7 @@ class LimitResolver:
         if instance.exhausted:
             return 1
 
-        daily_usage: dict[date, int] = instance.daily_usage
+        daily_usage: dict[date, int] = instance.usage.daily_usage
         base_limit = instance_config.limit_seconds
 
         if not instance_config.net_grants:

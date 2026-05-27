@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from qauvern.models import Account, Instance, InstanceConfig, NetGrant
+from qauvern.models import Account, Instance, InstanceConfig, InstanceDetailedUsage, NetGrant
 
 
 # -------------------------------------------------------------------
@@ -25,6 +25,17 @@ from qauvern.models import Account, Instance, InstanceConfig, NetGrant
 
 def _instance(**kwargs: Any) -> Instance:
     return Instance(crn="crn:test:1", name="Test", allocation_seconds=100000, **kwargs)
+
+
+def _usage(**kwargs: Any) -> InstanceDetailedUsage:
+    return InstanceDetailedUsage(
+        consumed_balance_period=kwargs.get("consumed_balance_period", 0),
+        consumed_14day=kwargs.get("consumed_14day", 0),
+        consumed_7day=kwargs.get("consumed_7day", 0),
+        consumed_3day=kwargs.get("consumed_3day", 0),
+        consumed_24h=kwargs.get("consumed_24h", 0),
+        daily_usage=kwargs.get("daily_usage", {}),
+    )
 
 
 # -------------------------------------------------------------------
@@ -99,6 +110,25 @@ def test_instance_config_empty_crn() -> None:
 
 
 # -------------------------------------------------------------------
+# Instance — validation
+# -------------------------------------------------------------------
+
+
+def test_instance_detailed_usage() -> None:
+    instance = Instance(
+        name="",
+        crn="",
+        allocation_seconds=100,
+        detailed_usage=None,
+    )
+    with pytest.raises(AssertionError):
+        instance.usage.consumed_14day
+
+    instance.detailed_usage = _usage(consumed_14day=14)
+    assert instance.usage.consumed_14day == 14
+
+
+# -------------------------------------------------------------------
 # Instance — fairness
 # -------------------------------------------------------------------
 
@@ -118,18 +148,18 @@ def test_instance_fairness_zero_allocation() -> None:
 
 
 def test_activity_score_zero_when_no_usage() -> None:
-    assert _instance().activity_score == 0.0
+    assert _instance(detailed_usage=_usage()).activity_score == 0.0
 
 
 def test_activity_score_single_bucket() -> None:
     """24h usage contributes consumed_24h * bias^5 (= 32x)."""
-    assert _instance(consumed_24h=100).activity_score == 100 * (2.0**5)
+    assert _instance(detailed_usage=_usage(consumed_24h=100)).activity_score == 100 * (2.0**5)
 
 
 def test_activity_score_recent_outweighs_old() -> None:
     """Same per-day rate in 24h window scores higher than in 28d window."""
-    recent = _instance(consumed_24h=100)
-    old = _instance(consumed_seconds=100 * 28)  # same average daily rate over 28d
+    recent = _instance(detailed_usage=_usage(consumed_24h=100))
+    old = _instance(consumed_seconds=100 * 28, detailed_usage=_usage())  # same average daily rate over 28d
     assert recent.activity_score > old.activity_score
 
 
@@ -140,20 +170,20 @@ def test_activity_score_recent_outweighs_old() -> None:
 
 def test_exhausted_no_target() -> None:
     """target_usage_seconds=0 means no cap — never exhausted regardless of consumption."""
-    assert not _instance(consumed_balance_period=999999).exhausted
+    assert not _instance(detailed_usage=_usage(consumed_balance_period=999999)).exhausted
 
 
 def test_exhausted_under_target() -> None:
-    assert not _instance(target_usage_seconds=1000, consumed_balance_period=999).exhausted
+    assert not _instance(target_usage_seconds=1000, detailed_usage=_usage(consumed_balance_period=999)).exhausted
 
 
 def test_exhausted_at_target() -> None:
     """Boundary: >= means exactly hitting the target counts as exhausted."""
-    assert _instance(target_usage_seconds=1000, consumed_balance_period=1000).exhausted
+    assert _instance(target_usage_seconds=1000, detailed_usage=_usage(consumed_balance_period=1000)).exhausted
 
 
 def test_exhausted_over_target() -> None:
-    assert _instance(target_usage_seconds=1000, consumed_balance_period=1001).exhausted
+    assert _instance(target_usage_seconds=1000, detailed_usage=_usage(consumed_balance_period=1001)).exhausted
 
 
 # -------------------------------------------------------------------

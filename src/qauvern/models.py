@@ -11,7 +11,7 @@
 """Data models for qauvern."""
 
 from functools import cached_property
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Protocol, runtime_checkable
 
@@ -68,6 +68,16 @@ class InstanceRef(Protocol):
     name: str
 
 
+@dataclass(frozen=True)
+class InstanceDetailedUsage:
+    consumed_14day: int
+    consumed_7day: int
+    consumed_3day: int
+    consumed_24h: int
+    daily_usage: dict[date, int]
+    consumed_balance_period: int  # Usage since balance period start
+
+
 @dataclass
 class Instance:
     """Represents a quantum service instance."""
@@ -76,14 +86,15 @@ class Instance:
     name: str
     allocation_seconds: int
     limit_seconds: int | None = None
-    consumed_seconds: int = 0  # Usage in 28-day rolling window
     target_usage_seconds: int = 0  # Target usage from the instance configuration
-    consumed_balance_period: int = 0  # Usage since balance period start
-    consumed_14day: int = 0  # Usage in last 14 days
-    consumed_7day: int = 0  # Usage in last 7 days
-    consumed_3day: int = 0  # Usage in last 3 days
-    consumed_24h: int = 0  # Usage in last 24 hours
-    daily_usage: dict[date, int] = field(default_factory=dict)
+    consumed_seconds: int = 0  # Usage in 28-day rolling window
+    detailed_usage: InstanceDetailedUsage | None = None
+
+    @property
+    def usage(self) -> InstanceDetailedUsage:
+        if self.detailed_usage is None:
+            raise AssertionError("Instance.detailed_usage accessed before it was populated")
+        return self.detailed_usage
 
     @property
     def fairness(self) -> float:
@@ -109,14 +120,14 @@ class Instance:
         """
         score: float = 0.0
         bias: float = 2.0
-        if self.consumed_24h > 0:
-            score += (self.consumed_24h / 1.0) * (bias**5.0)
-        if self.consumed_3day > 0:
-            score += (self.consumed_3day / 3.0) * (bias**4.0)
-        if self.consumed_7day > 0:
-            score += (self.consumed_7day / 7.0) * (bias**3.0)
-        if self.consumed_14day > 0:
-            score += (self.consumed_14day / 14.0) * (bias**2.0)
+        if self.usage.consumed_24h > 0:
+            score += (self.usage.consumed_24h / 1.0) * (bias**5.0)
+        if self.usage.consumed_3day > 0:
+            score += (self.usage.consumed_3day / 3.0) * (bias**4.0)
+        if self.usage.consumed_7day > 0:
+            score += (self.usage.consumed_7day / 7.0) * (bias**3.0)
+        if self.usage.consumed_14day > 0:
+            score += (self.usage.consumed_14day / 14.0) * (bias**2.0)
         if self.consumed_seconds > 0:
             score += (self.consumed_seconds / 28.0) * (bias**1.0)
         return score
@@ -129,7 +140,7 @@ class Instance:
             True if consumed_balance_period exceeds target_usage_seconds, False otherwise
         """
         if self.target_usage_seconds > 0:
-            return self.consumed_balance_period >= self.target_usage_seconds
+            return self.usage.consumed_balance_period >= self.target_usage_seconds
         return False
 
 
