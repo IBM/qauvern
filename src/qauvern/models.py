@@ -178,14 +178,3 @@ class OptimizationResult:
     def additions(self) -> list[OptimizationRecommendation]:
         """Get recommendations that increase allocation (change > 0)."""
         return [rec for rec in self.recommendations if rec.change > 0]
-
-    def add_recommendation(self, instance_crn: str, current_allocation: int, new_allocation: int, reason: str) -> None:
-        """Add a recommendation to the results."""
-        self.recommendations.append(
-            OptimizationRecommendation(
-                instance_crn=instance_crn,
-                current_allocation=current_allocation,
-                new_allocation=new_allocation,
-                reason=reason,
-            )
-        )
