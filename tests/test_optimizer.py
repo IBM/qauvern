@@ -155,9 +155,7 @@ def test_analyze_generates_recommendations(
     """Test that analyze generates recommendations."""
     optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
     result = optimizer.analyze()
-
     assert len(result.recommendations) > 0
-    assert result.account == optimizer_account
 
 
 def test_optimize_generates_recommendations(

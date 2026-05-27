@@ -166,7 +166,6 @@ class OptimizationRecommendation:
 class OptimizationResult:
     """Results from optimization algorithm."""
 
-    account: Account
     recommendations: list[OptimizationRecommendation]
 
     @property

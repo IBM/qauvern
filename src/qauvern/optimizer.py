@@ -105,10 +105,7 @@ class AllocationOptimizer:
         Returns:
             OptimizationResult with recommendations but no changes applied
         """
-        result = OptimizationResult(
-            account=self.account,
-            recommendations=[],
-        )
+        result = OptimizationResult(recommendations=[])
 
         # Step 1: Categorize instances by activity score
         print("\n=== Step 1: Categorizing Instances ===")
