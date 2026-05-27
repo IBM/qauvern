@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 from click.testing import CliRunner, Result
+from datetime import timezone
 
 from qauvern.cli import main
 from qauvern.commands.configure import build_configure_yaml, build_instance_summary_table
@@ -23,6 +24,8 @@ from qauvern.config import ConfigParser
 from qauvern.models import InstanceState
 from qauvern.plan import Plan
 from tests.mock_api import MockIBMQuantumAPIClient
+
+UTC = timezone.utc
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +110,8 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     cfg = ConfigParser(str(path))
     assert cfg.account_id == "acct"
     assert cfg.plan == Plan.INTERNAL
-    assert cfg.balance_period["start_date"] == datetime(2026, 1, 1, 0, 0, 0)
-    assert cfg.balance_period["end_date"] == datetime(2026, 12, 31, 23, 59, 59)
+    assert cfg.balance_period["start_date"] == datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+    assert cfg.balance_period["end_date"] == datetime(2026, 12, 31, 23, 59, 59, tzinfo=UTC)
     assert len(cfg.instance_configs) == 1
     assert cfg.instance_configs[0].crn == "crn:test:rt"
     assert cfg.instance_configs[0].target_usage_seconds == 36000
@@ -133,7 +136,7 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     assert cfg.instance_configs[0].target_limit_seconds == 80000
     assert len(cfg.instance_configs[0].net_grants) == 1
     assert cfg.instance_configs[0].net_grants[0].net_grant_seconds == 180000
-    assert cfg.instance_configs[0].net_grants[0].end_date == datetime(2026, 5, 29)
+    assert cfg.instance_configs[0].net_grants[0].end_date == datetime(2026, 5, 29, tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------

@@ -13,7 +13,7 @@
 import functools
 import sys
 from collections.abc import Sequence
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import click
@@ -39,7 +39,9 @@ def enrich_instances_with_usage_data(
         try:
             # Usage since balance period start (if config found)
             consumed_balance_period = (
-                client.get_instance_usage_seconds(instance.crn, config.start_date, datetime.now(), account.account_id)
+                client.get_instance_usage_seconds(
+                    instance.crn, config.start_date, datetime.now(tz=timezone.utc), account.account_id
+                )
                 if config and config.start_date
                 else 0
             )

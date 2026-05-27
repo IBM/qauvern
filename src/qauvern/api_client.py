@@ -12,7 +12,7 @@
 
 import os
 from collections.abc import Sequence
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -215,9 +215,9 @@ class IBMQuantumAPIClient:
         """
         url = f"{self._get_regional_base_url(instance_crn)}/v1/analytics/usage"
         params = {
-            "instance": instance_crn,  # Pass full CRN directly (requests will handle array serialization)
-            "interval_start": (start_date.isoformat() + "Z" if not start_date.tzinfo else start_date.isoformat()),
-            "interval_end": (end_date.isoformat() + "Z" if not end_date.tzinfo else end_date.isoformat()),
+            "instance": instance_crn,
+            "interval_start": start_date.isoformat(),
+            "interval_end": end_date.isoformat(),
         }
         data = self._request_json("GET", url, account_id=account_id, params=params)
 
@@ -238,7 +238,7 @@ class IBMQuantumAPIClient:
         Returns:
             Dictionary with keys: consumed_14day, consumed_7day, consumed_3day, consumed_24h
         """
-        end_date = datetime.now()
+        end_date = datetime.now(tz=timezone.utc)
 
         return {
             "consumed_14day": self.get_instance_usage_seconds(
@@ -268,8 +268,8 @@ class IBMQuantumAPIClient:
         params = {
             "group_by": "instance",
             "instance": instance_crn,
-            "interval_start": datetime.combine(start_date, datetime.min.time()).isoformat() + "Z",
-            "interval_end": datetime.combine(end_date, datetime.min.time()).isoformat() + "Z",
+            "interval_start": datetime.combine(start_date, time.min, timezone.utc).isoformat(),
+            "interval_end": datetime.combine(end_date, time.min, timezone.utc).isoformat(),
         }
         data = self._request_json("GET", url, account_id=account_id, params=params)
 

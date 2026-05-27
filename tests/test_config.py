@@ -12,12 +12,14 @@
 
 import os
 import tempfile
-from datetime import datetime as dt
+from datetime import datetime as dt, timezone
 
 import pytest
 import yaml
 
 from qauvern.config import ConfigParser
+
+UTC = timezone.utc
 
 
 # -------------------------------------------------------------------
@@ -271,8 +273,8 @@ instances:
     try:
         parser = ConfigParser(path)
         cfg = parser.instance_configs[0]
-        assert cfg.start_date == dt(2026, 1, 1)
-        assert cfg.end_date == dt(2026, 12, 31, 23, 59, 59)
+        assert cfg.start_date == dt(2026, 1, 1, tzinfo=UTC)
+        assert cfg.end_date == dt(2026, 12, 31, 23, 59, 59, tzinfo=UTC)
     finally:
         os.unlink(path)
 
@@ -294,8 +296,8 @@ instances:
     try:
         parser = ConfigParser(path)
         cfg = parser.instance_configs[0]
-        assert cfg.start_date == dt(2026, 3, 1)
-        assert cfg.end_date == dt(2026, 9, 30, 23, 59, 59)
+        assert cfg.start_date == dt(2026, 3, 1, tzinfo=UTC)
+        assert cfg.end_date == dt(2026, 9, 30, 23, 59, 59, tzinfo=UTC)
     finally:
         os.unlink(path)
 
@@ -483,7 +485,7 @@ instances:
 """)
     try:
         parser = ConfigParser(path)
-        assert parser.instance_configs[0].net_grants[0].end_date == dt(2026, 6, 15)
+        assert parser.instance_configs[0].net_grants[0].end_date == dt(2026, 6, 15, tzinfo=UTC)
     finally:
         os.unlink(path)
 
@@ -507,6 +509,6 @@ instances:
 """)
     try:
         parser = ConfigParser(path)
-        assert parser.instance_configs[0].net_grants[0].end_date == dt(2026, 5, 29)
+        assert parser.instance_configs[0].net_grants[0].end_date == dt(2026, 5, 29, tzinfo=UTC)
     finally:
         os.unlink(path)

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fix calculation of the 28-day consumption to consistently use IBM's official window, rather than using qauvern's own window.
+- Fix naive timezone handling, which could skew usage windows.
 
 ## [0.3.0] - 2026-05-26
 

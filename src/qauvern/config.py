@@ -10,7 +10,7 @@
 
 """Configuration file parser for qauvern."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from pathlib import Path
 
@@ -74,8 +74,8 @@ class ConfigParser:
     def balance_period(self) -> dict[str, datetime]:
         period = self.config_data["balance_period"]
         return {
-            "start_date": datetime.fromisoformat(period["start_date"]),
-            "end_date": datetime.fromisoformat(period["end_date"]),
+            "start_date": datetime.fromisoformat(period["start_date"]).replace(tzinfo=timezone.utc),
+            "end_date": datetime.fromisoformat(period["end_date"]).replace(tzinfo=timezone.utc),
         }
 
     @cached_property
@@ -89,14 +89,22 @@ class ConfigParser:
                 if field not in entry:
                     raise ValueError(f"Instance config missing required field: {field}")
 
-            start_date = datetime.fromisoformat(entry["start_date"]) if "start_date" in entry else period["start_date"]
-            end_date = datetime.fromisoformat(entry["end_date"]) if "end_date" in entry else period["end_date"]
+            start_date = (
+                datetime.fromisoformat(entry["start_date"]).replace(tzinfo=timezone.utc)
+                if "start_date" in entry
+                else period["start_date"]
+            )
+            end_date = (
+                datetime.fromisoformat(entry["end_date"]).replace(tzinfo=timezone.utc)
+                if "end_date" in entry
+                else period["end_date"]
+            )
 
             net_grants = []
             for grant_data in entry.get("net_grants", []):
-                grant_start = datetime.fromisoformat(grant_data["start_date"])
+                grant_start = datetime.fromisoformat(grant_data["start_date"]).replace(tzinfo=timezone.utc)
                 grant_end = (
-                    datetime.fromisoformat(grant_data["end_date"])
+                    datetime.fromisoformat(grant_data["end_date"]).replace(tzinfo=timezone.utc)
                     if "end_date" in grant_data
                     else grant_start + timedelta(days=28)
                 )
