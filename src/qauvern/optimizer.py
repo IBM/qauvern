@@ -13,7 +13,7 @@
 from datetime import date
 
 from .limit_resolver import LimitResolver
-from .models import Account, Instance, InstanceConfig, OptimizationResult
+from .models import Account, Instance, InstanceConfig, OptimizationRecommendation, OptimizationResult
 
 
 class AllocationOptimizer:
@@ -107,7 +107,6 @@ class AllocationOptimizer:
         """
         result = OptimizationResult(
             account=self.account,
-            instance_configs=self.instance_configs,
             recommendations=[],
         )
 
@@ -146,11 +145,13 @@ class AllocationOptimizer:
         exhausted_count = 0
         for instance in exhausted:
             if instance.allocation_seconds > 0 or (instance.limit_seconds is None or instance.limit_seconds != 1):
-                result.add_recommendation(
-                    instance_crn=instance.crn,
-                    current_allocation=instance.allocation_seconds,
-                    new_allocation=0,
-                    reason="Instance has exhausted allocation for accounting period",
+                result.recommendations.append(
+                    OptimizationRecommendation(
+                        instance_crn=instance.crn,
+                        current_allocation=instance.allocation_seconds,
+                        new_allocation=0,
+                        reason="Instance has exhausted allocation for accounting period",
+                    )
                 )
                 exhausted_count += 1
         print(f"  Recommendations for exhausted instances: {exhausted_count}")
@@ -167,21 +168,25 @@ class AllocationOptimizer:
             if instance.allocation_seconds > min_allocation:
                 freed = instance.allocation_seconds - min_allocation
                 freed_allocation += freed
-                result.add_recommendation(
-                    instance_crn=instance.crn,
-                    current_allocation=instance.allocation_seconds,
-                    new_allocation=min_allocation,
-                    reason=f"No recent activity (score=0), reducing to minimum (cannot go below 28d usage: {instance.consumed_seconds}s)",
+                result.recommendations.append(
+                    OptimizationRecommendation(
+                        instance_crn=instance.crn,
+                        current_allocation=instance.allocation_seconds,
+                        new_allocation=min_allocation,
+                        reason=f"No recent activity (score=0), reducing to minimum (cannot go below 28d usage: {instance.consumed_seconds}s)",
+                    )
                 )
                 inactive_reduced += 1
             elif instance.allocation_seconds < min_allocation:
                 # Need to increase allocation to meet minimum (28d usage floor)
                 additional = min_allocation - instance.allocation_seconds
-                result.add_recommendation(
-                    instance_crn=instance.crn,
-                    current_allocation=instance.allocation_seconds,
-                    new_allocation=min_allocation,
-                    reason=f"Allocation below 28d usage floor, increasing to minimum: {instance.consumed_seconds}s",
+                result.recommendations.append(
+                    OptimizationRecommendation(
+                        instance_crn=instance.crn,
+                        current_allocation=instance.allocation_seconds,
+                        new_allocation=min_allocation,
+                        reason=f"Allocation below 28d usage floor, increasing to minimum: {instance.consumed_seconds}s",
+                    )
                 )
                 freed_allocation -= additional  # This reduces available allocation
                 inactive_increased += 1
@@ -258,11 +263,13 @@ class AllocationOptimizer:
 
                     # Only create recommendation if allocation changes
                     if new_allocation != instance.allocation_seconds:
-                        result.add_recommendation(
-                            instance_crn=instance.crn,
-                            current_allocation=instance.allocation_seconds,
-                            new_allocation=new_allocation,
-                            reason=f"Active instance (activity score: {score:.1f}, fairness: {instance.fairness:.2f})",
+                        result.recommendations.append(
+                            OptimizationRecommendation(
+                                instance_crn=instance.crn,
+                                current_allocation=instance.allocation_seconds,
+                                new_allocation=new_allocation,
+                                reason=f"Active instance (activity score: {score:.1f}, fairness: {instance.fairness:.2f})",
+                            )
                         )
                         active_recommendations += 1
 
@@ -299,13 +306,15 @@ class AllocationOptimizer:
                 if existing_rec:
                     existing_rec.new_limit = new_limit
                 else:
-                    result.add_recommendation(
-                        instance_crn=instance.crn,
-                        current_allocation=instance.allocation_seconds,
-                        new_allocation=instance.allocation_seconds,
-                        reason="Updating limit via LimitResolver",
+                    result.recommendations.append(
+                        OptimizationRecommendation(
+                            instance_crn=instance.crn,
+                            current_allocation=instance.allocation_seconds,
+                            new_allocation=instance.allocation_seconds,
+                            reason="Updating limit via LimitResolver",
+                            new_limit=new_limit,
+                        )
                     )
-                    result.recommendations[-1].new_limit = new_limit
 
         return result
 

@@ -323,26 +323,10 @@ def opt_result_account() -> Account:
     )
 
 
-@pytest.fixture
-def opt_result_instance_configs() -> list[InstanceConfig]:
-    return [
-        InstanceConfig(
-            name="Instance 1",
-            crn="crn:test:1",
-            target_usage_seconds=50000,
-            start_date=datetime(2026, 1, 1),
-            end_date=datetime(2026, 12, 31),
-        )
-    ]
-
-
-def test_result_reductions_property(
-    opt_result_account: Account, opt_result_instance_configs: list[InstanceConfig]
-) -> None:
+def test_result_reductions_property(opt_result_account: Account) -> None:
     """Test that reductions property filters correctly."""
     result = OptimizationResult(
         account=opt_result_account,
-        instance_configs=opt_result_instance_configs,
         recommendations=[
             OptimizationRecommendation(
                 instance_crn="crn:1",
@@ -370,13 +354,10 @@ def test_result_reductions_property(
     assert all(rec.change < 0 for rec in reductions)
 
 
-def test_result_additions_property(
-    opt_result_account: Account, opt_result_instance_configs: list[InstanceConfig]
-) -> None:
+def test_result_additions_property(opt_result_account: Account) -> None:
     """Test that additions property filters correctly."""
     result = OptimizationResult(
         account=opt_result_account,
-        instance_configs=opt_result_instance_configs,
         recommendations=[
             OptimizationRecommendation(
                 instance_crn="crn:1",
@@ -404,13 +385,10 @@ def test_result_additions_property(
     assert all(rec.change > 0 for rec in additions)
 
 
-def test_result_no_change_recommendations(
-    opt_result_account: Account, opt_result_instance_configs: list[InstanceConfig]
-) -> None:
+def test_result_no_change_recommendations(opt_result_account: Account) -> None:
     """Test result with no-change recommendations."""
     result = OptimizationResult(
         account=opt_result_account,
-        instance_configs=opt_result_instance_configs,
         recommendations=[
             OptimizationRecommendation(
                 instance_crn="crn:1",
