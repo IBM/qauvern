@@ -13,6 +13,7 @@
 from functools import cached_property
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from typing import Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -52,8 +53,16 @@ class InstanceConfig:
 
 
 @dataclass(frozen=True)
-class InstanceIdentifier:
-    """Minimal identity record from the Resource Controller API."""
+class DiscoveredInstance:
+    """Returned by `discover_instances`. Prefer `InstanceConfig` elsewhere."""
+
+    crn: str
+    name: str
+
+
+@runtime_checkable
+class InstanceRef(Protocol):
+    """Identity fields shared by `InstanceConfig` and `DiscoveredInstance`."""
 
     crn: str
     name: str

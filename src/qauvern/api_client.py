@@ -11,13 +11,14 @@
 """API client for IBM Quantum and Resource Controller services."""
 
 import os
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
-from .models import Account, Instance, InstanceIdentifier
+from .models import Account, DiscoveredInstance, Instance, InstanceRef
 from .plan import Plan, plan_id_for
 
 QUANTUM_COMPUTING_RESOURCE_ID = "b6049020-80f4-11eb-a0f7-e35ec9b4054f"
@@ -182,16 +183,16 @@ class IBMQuantumAPIClient:
             )
             raise Exception(details) from e
 
-    def get_instance(self, *, crn: str, name: str) -> Instance:
+    def get_instance(self, ref: InstanceRef) -> Instance:
         """Get instance configuration including allocation and limits."""
-        url = f"{self._get_regional_base_url(crn)}/v1/instance"
-        data = self._request_json("GET", url, crn=crn)
+        url = f"{self._get_regional_base_url(ref.crn)}/v1/instance"
+        data = self._request_json("GET", url, crn=ref.crn)
 
         # Map API response fields to Instance model
         # API returns: instance_limit_seconds, usage_allocation_seconds, backends, plan_id
         return Instance(
-            crn=crn,
-            name=name,
+            crn=ref.crn,
+            name=ref.name,
             allocation_seconds=int(data.get("usage_allocation_seconds", 0)),
             limit_seconds=(
                 int(float(data.get("instance_limit_seconds", 0))) if data.get("instance_limit_seconds") else None
@@ -370,7 +371,12 @@ class IBMQuantumAPIClient:
 
         return self._request_json("POST", url, json=payload)
 
-    def list_instances(self, account_id: str, plan: Plan) -> list[InstanceIdentifier]:
+    def discover_instances(self, account_id: str, plan: Plan) -> list[DiscoveredInstance]:
+        """Find all live instances for the account_id and plan.
+
+        Usually, commands should instead read the instances from ConfigParser.instance_configs,
+        rather than using this live value.
+        """
         url = f"{self.resource_controller_url}/v2/resource_instances"
         params: dict[str, Any] = {
             "resource_id": QUANTUM_COMPUTING_RESOURCE_ID,
@@ -385,7 +391,7 @@ class IBMQuantumAPIClient:
                 crn = resource.get("id")
                 name = resource.get("name", "")
                 if crn:
-                    instances.append(InstanceIdentifier(crn=crn, name=name))
+                    instances.append(DiscoveredInstance(crn=crn, name=name))
 
             next_url = data.get("next_url")
             if not next_url:
@@ -398,7 +404,7 @@ class IBMQuantumAPIClient:
 
         return instances
 
-    def get_account(self, account_id: str, plan: Plan) -> Account:
+    def get_account(self, account_id: str, plan: Plan, instance_refs: Sequence[InstanceRef]) -> Account:
         """Get account with instances filtered by plan, populated with full data."""
         plan_id = plan_id_for(plan)
         url = f"{self.base_url}/v1/accounts/{account_id}"
@@ -409,23 +415,22 @@ class IBMQuantumAPIClient:
             raise ValueError(f"No plan found for plan {plan.value} (plan_id {plan_id})")
         api_plan = plans[0]
 
-        identifiers = self.list_instances(account_id, plan)
         instances = []
-        for identifier in identifiers:
+        for ref in instance_refs:
             try:
-                full = self.get_instance(crn=identifier.crn, name=identifier.name)
-                consumed = self.get_rolling_window_seconds(identifier.crn, account_id)
+                full = self.get_instance(ref)
+                consumed = self.get_rolling_window_seconds(ref.crn, account_id)
                 instances.append(
                     Instance(
-                        crn=identifier.crn,
-                        name=identifier.name,
+                        crn=ref.crn,
+                        name=ref.name,
                         allocation_seconds=full.allocation_seconds,
                         limit_seconds=full.limit_seconds,
                         consumed_seconds=consumed,
                     )
                 )
             except Exception as e:
-                print(f"Warning: Could not fetch full data for instance `{identifier.name}`, so skipping: {e}")
+                print(f"Warning: Could not fetch full data for instance `{ref.name}`, so skipping: {e}")
 
         return Account(
             account_id=account_id,

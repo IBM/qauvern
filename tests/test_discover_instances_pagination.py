@@ -8,7 +8,7 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Tests for list_instances pagination in IBMQuantumAPIClient."""
+"""Tests for discover_instances pagination in IBMQuantumAPIClient."""
 
 from unittest.mock import MagicMock, patch
 
@@ -50,7 +50,7 @@ def test_single_page_no_next_url(client: IBMQuantumAPIClient) -> None:
         ]
     )
     with patch.object(client.session, "request", return_value=page) as mock_get:
-        result = client.list_instances("acct-1", Plan.PREMIUM)
+        result = client.discover_instances("acct-1", Plan.PREMIUM)
     assert len(result) == 2
     assert result[0].crn == "crn:1"
     assert result[1].crn == "crn:2"
@@ -65,7 +65,7 @@ def test_two_pages(client: IBMQuantumAPIClient) -> None:
     )
     page2 = _make_response([_resource("crn:2", "inst-2")])
     with patch.object(client.session, "request", side_effect=[page1, page2]) as mock_get:
-        result = client.list_instances("acct-1", Plan.PREMIUM)
+        result = client.discover_instances("acct-1", Plan.PREMIUM)
     assert len(result) == 2
     assert [i.crn for i in result] == ["crn:1", "crn:2"]
     assert mock_get.call_count == 2
@@ -85,7 +85,7 @@ def test_three_pages(client: IBMQuantumAPIClient) -> None:
     )
     page3 = _make_response([_resource("crn:3", "inst-3")])
     with patch.object(client.session, "request", side_effect=[page1, page2, page3]) as mock_get:
-        result = client.list_instances("acct-1", Plan.PREMIUM)
+        result = client.discover_instances("acct-1", Plan.PREMIUM)
     assert len(result) == 3
     assert mock_get.call_count == 3
 
@@ -102,7 +102,7 @@ def test_http_error_on_second_page_raises(client: IBMQuantumAPIClient) -> None:
     error_resp.json.return_value = {"message": "internal error"}
     with patch.object(client.session, "request", side_effect=[page1, error_resp]):
         with pytest.raises(requests.HTTPError):
-            client.list_instances("acct-1", Plan.PREMIUM)
+            client.discover_instances("acct-1", Plan.PREMIUM)
 
 
 def test_account_id_and_plan_filter_across_pages(client: IBMQuantumAPIClient) -> None:
@@ -120,7 +120,7 @@ def test_account_id_and_plan_filter_across_pages(client: IBMQuantumAPIClient) ->
         ]
     )
     with patch.object(client.session, "request", side_effect=[page1, page2]) as mock_get:
-        result = client.list_instances("acct-1", Plan.PREMIUM)
+        result = client.discover_instances("acct-1", Plan.PREMIUM)
     assert len(result) == 3
     assert {i.crn for i in result} == {"crn:1", "crn:2", "crn:3"}
     from qauvern.plan import plan_id_for

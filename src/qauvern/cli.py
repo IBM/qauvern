@@ -386,7 +386,8 @@ def show(ctx, config: str, api_key: str | None):
     plan = config_parser.plan
 
     click.echo(f"Fetching account information for plan {plan.value}...")
-    account = client.get_account(account_id, plan)
+    instance_refs = client.discover_instances(account_id, plan)
+    account = client.get_account(account_id, plan, instance_refs)
 
     click.echo("\n" + "=" * 80)
     click.echo("ACCOUNT SUMMARY")
@@ -434,7 +435,7 @@ def instances(ctx, config: str, api_key: str | None):
     instances_data = []
     for instance_config in config_parser.instance_configs:
         try:
-            instance = client.get_instance(crn=instance_config.crn, name=instance_config.name)
+            instance = client.get_instance(instance_config)
 
             # Fetch 28-day usage data using /v1/instances/usage endpoint
             # This endpoint does not require admin privileges
@@ -505,7 +506,8 @@ def analyze(ctx, config: str, api_key: str | None):
     instance_configs = config_parser.instance_configs
 
     click.echo(f"Fetching account information for plan {plan.value}...")
-    account = client.get_account(account_id, plan)
+    instance_refs = client.discover_instances(account_id, plan)
+    account = client.get_account(account_id, plan, instance_refs)
 
     # Enrich instances with target usage and detailed usage data
     click.echo("Fetching usage data for different time periods...")
@@ -620,7 +622,8 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     instance_configs = config_parser.instance_configs
 
     click.echo(f"Fetching account information for plan {plan.value}...")
-    account = client.get_account(account_id, plan)
+    instance_refs = client.discover_instances(account_id, plan)
+    account = client.get_account(account_id, plan, instance_refs)
 
     # Enrich instances with target usage (no detailed usage needed for optimize)
     enrich_instances_with_usage_data(account, instance_configs, client)
@@ -778,7 +781,8 @@ def configure(
     client = _build_client(ctx, api_key)
 
     click.echo("Fetching instances...")
-    instances = client.get_account(account_id, plan).instances
+    instance_refs = client.discover_instances(account_id, plan)
+    instances = client.get_account(account_id, plan, instance_refs).instances
 
     if not instances:
         click.echo("⚠ No instances found in this account.", err=True)
