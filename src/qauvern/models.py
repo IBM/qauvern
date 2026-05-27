@@ -60,6 +60,18 @@ class DiscoveredInstance:
     name: str
 
 
+@dataclass(frozen=True)
+class InstanceNameDrift:
+    """An instance whose configured name no longer matches the live API name."""
+
+    crn: str
+    config_name: str
+    api_name: str
+
+    def __str__(self) -> str:
+        return f'"{self.config_name}" -> "{self.api_name}" (crn: {self.crn})'
+
+
 @runtime_checkable
 class InstanceRef(Protocol):
     """Identity fields shared by `InstanceConfig` and `DiscoveredInstance`."""

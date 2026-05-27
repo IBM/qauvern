@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 import yaml
 
-from .models import InstanceConfig, NetGrant
+from .models import InstanceConfig, InstanceNameDrift, NetGrant
 from .plan import Plan, plan_from_name
 
 if TYPE_CHECKING:
@@ -153,17 +153,24 @@ class ConfigParser:
 
         return configs
 
-    def validate_instances_against_api(self, client: "IBMQuantumAPIClient") -> None:
+    def validate_instances_against_api(self, client: "IBMQuantumAPIClient") -> list[InstanceNameDrift]:
         """Verify every configured instance exists on the API for this account+plan.
 
         Raises ValueError if any configured CRN is not returned by discover_instances.
+        Returns a list of name drifts for configured instances whose CRN matches
+        but whose name no longer matches the live API name.
         """
         discovered = client.discover_instances(self.account_id, self.plan)
-        discovered_crns = {d.crn for d in discovered}
-        unrecognized = [cfg for cfg in self.instance_configs if cfg.crn not in discovered_crns]
+        discovered_by_crn = {d.crn: d.name for d in discovered}
+        unrecognized = [cfg for cfg in self.instance_configs if cfg.crn not in discovered_by_crn]
         if unrecognized:
             bullets = "\n".join(f"  - {cfg.name}, {cfg.crn}" for cfg in unrecognized)
             raise ValueError(
                 f"Config file contains instances not found in account "
                 f"{self.account_id} on plan {self.plan.value}:\n{bullets}"
             )
+        return [
+            InstanceNameDrift(crn=cfg.crn, config_name=cfg.name, api_name=discovered_by_crn[cfg.crn])
+            for cfg in self.instance_configs
+            if cfg.name != discovered_by_crn[cfg.crn]
+        ]

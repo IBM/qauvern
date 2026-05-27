@@ -18,6 +18,8 @@ import pytest
 import yaml
 
 from qauvern.config import ConfigParser
+from qauvern.models import InstanceNameDrift
+from tests.mock_api import MockIBMQuantumAPIClient
 
 
 # -------------------------------------------------------------------
@@ -550,9 +552,7 @@ instances:
 
 
 def test_validate_instances_against_api_passes_when_all_configs_match() -> None:
-    """All configured CRNs are present on the API → no error."""
-    from tests.mock_api import MockIBMQuantumAPIClient
-
+    """All configured CRNs are present on the API and names match → no drift."""
     client = MockIBMQuantumAPIClient()
     client.setup_account("acc-1", target_usage_seconds=0)
     client.setup_instance("crn:test:1", "Project A", allocation_seconds=0, account_id="acc-1")
@@ -563,15 +563,13 @@ def test_validate_instances_against_api_passes_when_all_configs_match() -> None:
     path = _write_config(_two_instance_config())
     try:
         parser = ConfigParser(path)
-        parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+        assert parser.validate_instances_against_api(client) == []  # ty: ignore[invalid-argument-type]
     finally:
         os.unlink(path)
 
 
 def test_validate_instances_against_api_raises_on_unrecognized_crn() -> None:
     """A config CRN that's not on the API → ValueError naming the instance."""
-    from tests.mock_api import MockIBMQuantumAPIClient
-
     client = MockIBMQuantumAPIClient()
     client.setup_account("acc-1", target_usage_seconds=0)
     client.setup_instance("crn:test:1", "Project A", allocation_seconds=0, account_id="acc-1")
@@ -591,8 +589,6 @@ def test_validate_instances_against_api_raises_on_unrecognized_crn() -> None:
 
 def test_validate_instances_against_api_passes_with_empty_config_instances() -> None:
     """A config with no instances has nothing to mismatch."""
-    from tests.mock_api import MockIBMQuantumAPIClient
-
     client = MockIBMQuantumAPIClient()
     client.setup_account("acc-1", target_usage_seconds=0)
 
@@ -606,6 +602,47 @@ instances: []
 """)
     try:
         parser = ConfigParser(path)
-        parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+        assert parser.validate_instances_against_api(client) == []  # ty: ignore[invalid-argument-type]
+    finally:
+        os.unlink(path)
+
+
+def test_validate_instances_against_api_returns_drift_when_name_differs() -> None:
+    """All configured names differ from live names → all collected in returned list."""
+    client = MockIBMQuantumAPIClient()
+    client.setup_account("acc-1", target_usage_seconds=0)
+    client.setup_instance("crn:test:1", "Alpha", allocation_seconds=0, account_id="acc-1")
+    client.setup_instance("crn:test:2", "Beta", allocation_seconds=0, account_id="acc-1")
+
+    path = _write_config(_two_instance_config())
+    try:
+        parser = ConfigParser(path)
+        drifts = parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+        assert drifts == [
+            InstanceNameDrift(crn="crn:test:1", config_name="Project A", api_name="Alpha"),
+            InstanceNameDrift(crn="crn:test:2", config_name="Project B", api_name="Beta"),
+        ]
+        assert [str(d) for d in drifts] == [
+            '"Project A" -> "Alpha" (crn: crn:test:1)',
+            '"Project B" -> "Beta" (crn: crn:test:2)',
+        ]
+    finally:
+        os.unlink(path)
+
+
+def test_validate_instances_against_api_unrecognized_takes_priority_over_drift() -> None:
+    """Unrecognized CRN raises before drift is reported, even if other configs are drifted."""
+    client = MockIBMQuantumAPIClient()
+    client.setup_account("acc-1", target_usage_seconds=0)
+    # crn:test:1 is on the API but with a different name (would-be drift).
+    client.setup_instance("crn:test:1", "Alpha", allocation_seconds=0, account_id="acc-1")
+    # crn:test:2 is not on the API at all — unrecognized.
+
+    path = _write_config(_two_instance_config())
+    try:
+        parser = ConfigParser(path)
+        with pytest.raises(ValueError) as excinfo:
+            parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+        assert "Project B, crn:test:2" in str(excinfo.value)
     finally:
         os.unlink(path)
