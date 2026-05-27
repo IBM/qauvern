@@ -182,23 +182,16 @@ class IBMQuantumAPIClient:
             )
             raise Exception(details) from e
 
-    def get_instance(self, instance_crn: str) -> Instance:
-        """Get instance configuration including allocation and limits.
-
-        Args:
-            instance_crn: The CRN of the service instance
-
-        Returns:
-            Instance object with current configuration
-        """
-        url = f"{self._get_regional_base_url(instance_crn)}/v1/instance"
-        data = self._request_json("GET", url, crn=instance_crn)
+    def get_instance(self, *, crn: str, name: str) -> Instance:
+        """Get instance configuration including allocation and limits."""
+        url = f"{self._get_regional_base_url(crn)}/v1/instance"
+        data = self._request_json("GET", url, crn=crn)
 
         # Map API response fields to Instance model
         # API returns: instance_limit_seconds, usage_allocation_seconds, backends, plan_id
         return Instance(
-            crn=instance_crn,
-            name=data.get("name", ""),
+            crn=crn,
+            name=name,
             allocation_seconds=int(data.get("usage_allocation_seconds", 0)),
             limit_seconds=(
                 int(float(data.get("instance_limit_seconds", 0))) if data.get("instance_limit_seconds") else None
@@ -420,7 +413,7 @@ class IBMQuantumAPIClient:
         instances = []
         for identifier in identifiers:
             try:
-                full = self.get_instance(identifier.crn)
+                full = self.get_instance(crn=identifier.crn, name=identifier.name)
                 consumed = self.get_rolling_window_seconds(identifier.crn, account_id)
                 instances.append(
                     Instance(

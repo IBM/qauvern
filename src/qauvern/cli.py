@@ -434,8 +434,7 @@ def instances(ctx, config: str, api_key: str | None):
     instances_data = []
     for instance_config in config_parser.instance_configs:
         try:
-            instance = client.get_instance(instance_config.crn)
-            instance.name = instance_config.name
+            instance = client.get_instance(crn=instance_config.crn, name=instance_config.name)
 
             # Fetch 28-day usage data using /v1/instances/usage endpoint
             # This endpoint does not require admin privileges
