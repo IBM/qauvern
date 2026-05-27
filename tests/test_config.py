@@ -527,3 +527,85 @@ instances:
         assert parser.instance_configs[0].net_grants[0].end_date == dt(2026, 5, 29, tzinfo=timezone.utc)
     finally:
         os.unlink(path)
+
+
+# -------------------------------------------------------------------
+# validate_instances_against_api
+# -------------------------------------------------------------------
+
+
+def _two_instance_config() -> str:
+    return """
+account_id: "acc-1"
+plan: "internal"
+balance_period:
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
+instances:
+  - name: "Project A"
+    crn: "crn:test:1"
+  - name: "Project B"
+    crn: "crn:test:2"
+"""
+
+
+def test_validate_instances_against_api_passes_when_all_configs_match() -> None:
+    """All configured CRNs are present on the API → no error."""
+    from tests.mock_api import MockIBMQuantumAPIClient
+
+    client = MockIBMQuantumAPIClient()
+    client.setup_account("acc-1", target_usage_seconds=0)
+    client.setup_instance("crn:test:1", "Project A", allocation_seconds=0, account_id="acc-1")
+    client.setup_instance("crn:test:2", "Project B", allocation_seconds=0, account_id="acc-1")
+    # Extra instance on the API that's not in config — fine, only configs must be a subset.
+    client.setup_instance("crn:test:3", "Project C", allocation_seconds=0, account_id="acc-1")
+
+    path = _write_config(_two_instance_config())
+    try:
+        parser = ConfigParser(path)
+        parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+    finally:
+        os.unlink(path)
+
+
+def test_validate_instances_against_api_raises_on_unrecognized_crn() -> None:
+    """A config CRN that's not on the API → ValueError naming the instance."""
+    from tests.mock_api import MockIBMQuantumAPIClient
+
+    client = MockIBMQuantumAPIClient()
+    client.setup_account("acc-1", target_usage_seconds=0)
+    client.setup_instance("crn:test:1", "Project A", allocation_seconds=0, account_id="acc-1")
+    # crn:test:2 is in the config but NOT on the API.
+
+    path = _write_config(_two_instance_config())
+    try:
+        parser = ConfigParser(path)
+        with pytest.raises(ValueError) as excinfo:
+            parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+        assert str(excinfo.value) == (
+            "Config file contains instances not found in account acc-1 on plan internal:\n  - Project B, crn:test:2"
+        )
+    finally:
+        os.unlink(path)
+
+
+def test_validate_instances_against_api_passes_with_empty_config_instances() -> None:
+    """A config with no instances has nothing to mismatch."""
+    from tests.mock_api import MockIBMQuantumAPIClient
+
+    client = MockIBMQuantumAPIClient()
+    client.setup_account("acc-1", target_usage_seconds=0)
+
+    path = _write_config("""
+account_id: "acc-1"
+plan: "internal"
+balance_period:
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
+instances: []
+""")
+    try:
+        parser = ConfigParser(path)
+        parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+    finally:
+        os.unlink(path)
