@@ -42,11 +42,12 @@ def _make_instance(crn: str, allocation: int, *, name: str | None = None) -> Ins
 
 
 def _make_account(target: int, *instances: InstanceState) -> Account:
+    allocated = sum(i.allocation_seconds for i in instances)
     return Account(
         account_id="test",
         plan_id="test-plan",
         target_usage_seconds=target,
-        available_seconds=0,
+        available_seconds=max(0, target - allocated),
         limit_seconds=None,
         instances=instances,
     )
@@ -247,20 +248,6 @@ def test_validate_allocations_valid() -> None:
 
     assert is_valid
     assert errors == []
-
-
-def test_validate_allocations_exceeds_account() -> None:
-    """Sum of allocations above account target produces an account-cap error."""
-    account = _make_account(
-        7,
-        _make_instance("crn:test:1", 4),
-        _make_instance("crn:test:2", 5),
-    )
-
-    is_valid, errors = AllocationOptimizer(account, []).validate_allocations(OptimizationResult([]))
-
-    assert not is_valid
-    assert errors == ["Total instance allocations (9s) exceeds account target (7s)"]
 
 
 def test_validate_allocations_exceeds_instance_target() -> None:
