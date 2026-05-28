@@ -38,7 +38,6 @@ def build_configure_yaml(
             {
                 "name": inst.name or f"Instance {i}",
                 "crn": inst.crn,
-                "target_usage_seconds": inst.allocation_seconds or 96000,
                 **({"limit_seconds": inst.limit_seconds} if inst.limit_seconds is not None else {}),
             }
             for i, inst in enumerate(sorted(instances, key=lambda x: (x.name == "", x.name)), 1)

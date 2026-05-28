@@ -64,16 +64,10 @@ def test_build_configure_yaml_multiple_instances() -> None:
     assert [p["crn"] for p in parsed["instances"]] == ["crn:a", "crn:b", "crn:c"]
 
 
-def test_build_configure_yaml_uses_allocation_for_target() -> None:
+def test_build_configure_yaml_omits_target_usage_seconds() -> None:
     instances = [_make_instance(allocation_seconds=12345)]
     parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances, "s", "e"))
-    assert parsed["instances"][0]["target_usage_seconds"] == 12345
-
-
-def test_build_configure_yaml_defaults_target_when_allocation_is_zero() -> None:
-    instances = [_make_instance(allocation_seconds=0)]
-    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances, "s", "e"))
-    assert parsed["instances"][0]["target_usage_seconds"] == 96000
+    assert "target_usage_seconds" not in parsed["instances"][0]
 
 
 def test_build_configure_yaml_includes_limit_seconds_when_set() -> None:
@@ -114,7 +108,7 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     assert cfg.balance_period["end_date"] == datetime(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
     assert len(cfg.instance_configs) == 1
     assert cfg.instance_configs[0].crn == "crn:test:rt"
-    assert cfg.instance_configs[0].target_usage_seconds == 36000
+    assert cfg.instance_configs[0].target_usage_seconds is None
 
     # Then: simulate the user editing the file (changing plan, tweaking the
     # instance, adding net_grants, setting a custom minimum) and confirm it
@@ -223,7 +217,7 @@ def test_configure_happy_path(runner: CliRunner, tmp_path: Path) -> None:
     assert len(parsed["instances"]) == 1
     instance = parsed["instances"][0]
     assert instance["crn"] == "crn:test:i-1"
-    assert instance["target_usage_seconds"] == 36000
+    assert "target_usage_seconds" not in instance
     assert instance["limit_seconds"] == 72000
 
     assert "Configuration file created" in result.output
