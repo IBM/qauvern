@@ -14,7 +14,14 @@ from datetime import datetime
 
 import pytest
 
-from qauvern.models import Account, InstanceState, InstanceConfig, InstanceDetailedUsage
+from qauvern.models import (
+    Account,
+    InstanceState,
+    InstanceConfig,
+    InstanceDetailedUsage,
+    OptimizationRecommendation,
+    OptimizationResult,
+)
 from qauvern.optimizer import AllocationOptimizer
 
 
@@ -35,11 +42,12 @@ def _make_instance(crn: str, allocation: int, *, name: str | None = None) -> Ins
 
 
 def _make_account(target: int, *instances: InstanceState) -> Account:
+    allocated = sum(i.allocation_seconds for i in instances)
     return Account(
         account_id="test",
         plan_id="test-plan",
         target_usage_seconds=target,
-        available_seconds=0,
+        available_seconds=max(0, target - allocated),
         limit_seconds=None,
         instances=instances,
     )
@@ -236,24 +244,10 @@ def test_validate_allocations_valid() -> None:
     account = _make_account(10, _make_instance("crn:test:1", 5))
     cfg = _make_config("crn:test:1", target=8)
 
-    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations()
+    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult([]))
 
     assert is_valid
     assert errors == []
-
-
-def test_validate_allocations_exceeds_account() -> None:
-    """Sum of allocations above account target produces an account-cap error."""
-    account = _make_account(
-        7,
-        _make_instance("crn:test:1", 4),
-        _make_instance("crn:test:2", 5),
-    )
-
-    is_valid, errors = AllocationOptimizer(account, []).validate_allocations()
-
-    assert not is_valid
-    assert errors == ["Total instance allocations (9s) exceeds account target (7s)"]
 
 
 def test_validate_allocations_exceeds_instance_target() -> None:
@@ -261,7 +255,7 @@ def test_validate_allocations_exceeds_instance_target() -> None:
     account = _make_account(20, _make_instance("crn:test:1", 12))
     cfg = _make_config("crn:test:1", target=10, name="Test Instance")
 
-    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations()
+    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult([]))
 
     assert not is_valid
     assert errors == ["Instance 'Test Instance' total allocation (12s) exceeds target (10s)"]
@@ -272,10 +266,79 @@ def test_validate_skips_config_without_target() -> None:
     account = _make_account(20, _make_instance("crn:test:1", 15))
     cfg = _make_config("crn:test:1", target=None, name="No Target")
 
-    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations()
+    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult([]))
 
     assert is_valid
     assert errors == []
+
+
+def test_validate_allocations_uses_result_overrides() -> None:
+    """A recommendation that pushes a clean state past the cap is flagged."""
+    account = _make_account(5, _make_instance("crn:test:1", 4))
+    optimizer = AllocationOptimizer(account, [])
+
+    # Current state is valid (4 <= 5).
+    is_valid, _ = optimizer.validate_allocations(OptimizationResult([]))
+    assert is_valid
+
+    # Bumping to 6 projects the total over the cap.
+    over_cap = OptimizationResult(
+        recommendations=[
+            OptimizationRecommendation(
+                instance_crn="crn:test:1",
+                current_allocation=4,
+                new_allocation=6,
+                reason="test",
+            )
+        ]
+    )
+    is_valid, errors = optimizer.validate_allocations(over_cap)
+    assert not is_valid
+    assert errors == ["Total instance allocations (6s) exceeds account target (5s)"]
+
+
+def test_validate_allocations_includes_unconfigured() -> None:
+    """Allocation held by instances not loaded must still count toward the cap."""
+    # target=10, available=1, loaded holds 4 → 5 sits on instances we did not load.
+    account = Account(
+        account_id="test",
+        plan_id="test-plan",
+        target_usage_seconds=10,
+        available_seconds=1,
+        limit_seconds=None,
+        instances=(_make_instance("crn:test:1", 4),),
+    )
+    assert account.unconfigured_allocation_seconds == 5
+    optimizer = AllocationOptimizer(account, [])
+
+    # Bumping the loaded instance to 5 fits the cap exactly (5 + 5 unconfigured = 10).
+    fits = OptimizationResult(
+        recommendations=[
+            OptimizationRecommendation(
+                instance_crn="crn:test:1",
+                current_allocation=4,
+                new_allocation=5,
+                reason="test",
+            )
+        ]
+    )
+    is_valid, _ = optimizer.validate_allocations(fits)
+    assert is_valid
+
+    # Bumping to 6 overflows: 6 + 5 unconfigured > 10.
+    over = OptimizationResult(
+        recommendations=[
+            OptimizationRecommendation(
+                instance_crn="crn:test:1",
+                current_allocation=4,
+                new_allocation=6,
+                reason="test",
+            )
+        ]
+    )
+    is_valid, errors = optimizer.validate_allocations(over)
+    assert not is_valid
+    assert errors == ["Total instance allocations (11s) exceeds account target (10s)"]
 
 
 # ---------------------------------------------------------------------------

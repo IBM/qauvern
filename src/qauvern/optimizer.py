@@ -315,27 +315,33 @@ class AllocationOptimizer:
 
         return result
 
-    def validate_allocations(self) -> tuple[bool, list[str]]:
-        """Validate that current allocations are within constraints.
+    def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
+        """Check that applying `result` would not exceed the account cap or any per-instance config target.
+
+        The check includes allocation held by instances missing from
+        `self.account.instances` via `Account.unconfigured_allocation_seconds`,
+        so the cap math is correct when only a subset of instances are loaded.
 
         Returns:
             Tuple of (is_valid, list of error messages)
         """
         errors = []
 
-        # Check that sum of allocations doesn't exceed account target
-        total_allocated = sum(inst.allocation_seconds for inst in self.account.instances)
+        projected = {inst.crn: inst.allocation_seconds for inst in self.account.instances}
+        for rec in result.recommendations:
+            projected[rec.instance_crn] = rec.new_allocation
+
+        total_allocated = sum(projected.values()) + self.account.unconfigured_allocation_seconds
         if total_allocated > self.account.target_usage_seconds:
             errors.append(
                 f"Total instance allocations ({total_allocated}s) exceeds "
                 f"account target ({self.account.target_usage_seconds}s)"
             )
 
-        # Check that each instance config's allocation doesn't exceed its target
         for config in self.instance_configs:
             if config.target_usage_seconds is None:
                 continue
-            allocated = sum(inst.allocation_seconds for inst in self.account.instances if inst.crn == config.crn)
+            allocated = projected.get(config.crn, 0)
             if allocated > config.target_usage_seconds:
                 errors.append(
                     f"Instance '{config.name}' total allocation ({allocated}s) "
