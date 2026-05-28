@@ -5,15 +5,15 @@ All notable changes to qauvern will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2026-05-xx
+## [0.4.0] - 2026-05-28
 
 ### Changed
 
-- Dates in the config file must now set the UTC timezone offset in the ISO 8601 format, e.g. `2026-06-15T00:00:00+00:00`.
 - `qauvern` only runs on the instances in your config file, whereas it would previously run on all instances in your account and plan. `optimize` and `analyze` will still take into consideration any unconfigured instances, but it will not touch their allocations or limits.
   - Caveat: with `optimize` and `analyze`, the configured instances will absorb all the available account allocation, which leaves no available allocation for the unconfigured instances. For example, if you configure 2 of 10 instances, those 2 will claim every spare second on the account and the remaining 8 are left with no buffer to expand into. We will add a buffer mechanism in the future.
 - Output now uses the instance name you set in your config file with the `instances.name` key. Previously, it would use the live API name. The program will warn you if the names ever drift between your config file and the live API.
 - `qauvern configure` no longer auto-populates `target_usage_seconds` for each instance. Auto-populating the optional field resulted in a bug where the optimizer could not increase allocations beyond the initial allocation. You can still manually configure `target_usage_seconds`.
+- Dates in the config file must now set the UTC timezone offset in the ISO 8601 format, e.g. `2026-06-15T00:00:00+00:00`.
 
 ### Added
 
@@ -22,9 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `optimize` and `analyze` commands now validate that the proposed changes do not not exceed the account cap or any per-instance config target.
 - Fix naive timezone handling, which could skew usage windows.
 - Fix calculation of the 28-day consumption to consistently use IBM's official window, rather than using qauvern's own window.
-- The `optimize` and `analyze` commands now validate that the proposed changes do not not exceed the account cap or any per-instance config target.
 
 ## [0.3.0] - 2026-05-26
 
