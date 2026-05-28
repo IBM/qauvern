@@ -520,8 +520,8 @@ def analyze(ctx, config: str, api_key: str | None):
     )
     result = optimizer.optimize()
 
-    # Validate current allocations
-    is_valid, errors = optimizer.validate_allocations()
+    # Validate the proposed post-rebalance state
+    is_valid, errors = optimizer.validate_allocations(result)
 
     if not is_valid:
         click.echo("\n" + "=" * 80)
@@ -633,6 +633,13 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
     )
     result = optimizer.optimize()
+
+    is_valid, errors = optimizer.validate_allocations(result)
+    if not is_valid:
+        click.echo("\nVALIDATION ERRORS", err=True)
+        for err in errors:
+            click.echo(f"❌ {err}", err=True)
+        raise click.ClickException("Validation failed; refusing to apply changes.")
 
     if not result.recommendations:
         click.echo("✓ No optimization needed. Allocations are already optimal.")

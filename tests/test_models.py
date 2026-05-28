@@ -248,3 +248,37 @@ def test_account_consumed_seconds_is_sum_of_instances() -> None:
         instances=(i1, i2),
     )
     assert account.consumed_seconds == 250000
+
+
+def test_account_unconfigured_allocation_seconds() -> None:
+    """target − available − sum(loaded allocations) = allocation held by unloaded instances."""
+    loaded = InstanceState(
+        crn="crn:test:1",
+        name="Loaded",
+        allocation_seconds=400000,
+        consumed_seconds=0,
+        limit_seconds=None,
+        detailed_usage=None,
+    )
+    # 1_000_000 target, 100_000 still unallocated, loaded instance holds 400_000,
+    # so 500_000 must be on instances that were not loaded.
+    partial = Account(
+        account_id="test-account",
+        plan_id="test-plan",
+        target_usage_seconds=1000000,
+        available_seconds=100000,
+        limit_seconds=None,
+        instances=(loaded,),
+    )
+    assert partial.unconfigured_allocation_seconds == 500000
+
+    # When every instance is present (target − available == sum of allocations) it is 0.
+    fully_loaded = Account(
+        account_id="test-account",
+        plan_id="test-plan",
+        target_usage_seconds=1000000,
+        available_seconds=600000,
+        limit_seconds=None,
+        instances=(loaded,),
+    )
+    assert fully_loaded.unconfigured_allocation_seconds == 0
