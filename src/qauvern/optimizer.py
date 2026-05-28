@@ -316,13 +316,11 @@ class AllocationOptimizer:
         return result
 
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
-        """Validate the post-rebalance state against account and per-instance caps.
+        """Check that applying `result` would not exceed the account cap or any per-instance config target.
 
-        Each recommendation's `new_allocation` is substituted for the matching
-        instance's current allocation before validating. Allocation held by
-        instances NOT in `self.account.instances` is included via
-        `Account.unconfigured_allocation_seconds`, so the cap check stays
-        correct when only a subset of instances are loaded.
+        The check includes allocation held by instances missing from
+        `self.account.instances` via `Account.unconfigured_allocation_seconds`,
+        so the cap math is correct when only a subset of instances are loaded.
 
         Returns:
             Tuple of (is_valid, list of error messages)

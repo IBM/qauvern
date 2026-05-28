@@ -520,7 +520,6 @@ def analyze(ctx, config: str, api_key: str | None):
     )
     result = optimizer.optimize()
 
-    # Validate the proposed post-rebalance state
     is_valid, errors = optimizer.validate_allocations(result)
 
     if not is_valid:
