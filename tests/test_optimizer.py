@@ -18,6 +18,48 @@ from qauvern.models import Account, InstanceState, InstanceConfig, InstanceDetai
 from qauvern.optimizer import AllocationOptimizer
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_instance(crn: str, allocation: int, *, name: str | None = None) -> InstanceState:
+    return InstanceState(
+        crn=crn,
+        name=name or crn,
+        allocation_seconds=allocation,
+        limit_seconds=None,
+        consumed_seconds=0,
+        detailed_usage=None,
+    )
+
+
+def _make_account(target: int, *instances: InstanceState) -> Account:
+    return Account(
+        account_id="test",
+        plan_id="test-plan",
+        target_usage_seconds=target,
+        available_seconds=0,
+        limit_seconds=None,
+        instances=instances,
+    )
+
+
+def _make_config(crn: str, *, target: int | None = None, name: str | None = None) -> InstanceConfig:
+    return InstanceConfig(
+        name=name or crn,
+        crn=crn,
+        target_usage_seconds=target,
+        start_date=datetime(2026, 1, 1),
+        end_date=datetime(2026, 12, 31),
+    )
+
+
+# ---------------------------------------------------------------------------
+# analyze / optimize
+# ---------------------------------------------------------------------------
+
+
 @pytest.fixture
 def optimizer_account() -> Account:
     instance1 = InstanceState(
@@ -184,132 +226,61 @@ def test_optimize_generates_recommendations(
     assert has_limits
 
 
+# ---------------------------------------------------------------------------
+# validate_allocations
+# ---------------------------------------------------------------------------
+
+
 def test_validate_allocations_valid() -> None:
-    """Test validation with valid allocations."""
-    instance1 = InstanceState(
-        crn="crn:test:1",
-        name="Test1",
-        allocation_seconds=500000,
-        consumed_seconds=100000,
-        limit_seconds=None,
-        detailed_usage=None,
-    )
-    instance2 = InstanceState(
-        crn="crn:test:2",
-        name="Test2",
-        allocation_seconds=500000,
-        consumed_seconds=100000,
-        limit_seconds=None,
-        detailed_usage=None,
-    )
-    account = Account(
-        account_id="test",
-        plan_id="test-plan",
-        target_usage_seconds=2000000,
-        available_seconds=0,
-        limit_seconds=None,
-        instances=(instance1, instance2),
-    )
+    """Allocation under both account and per-instance targets passes."""
+    account = _make_account(10, _make_instance("crn:test:1", 5))
+    cfg = _make_config("crn:test:1", target=8)
 
-    cfg = InstanceConfig(
-        name="Test Instance",
-        crn="crn:test:1",
-        target_usage_seconds=1500000,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-
-    optimizer = AllocationOptimizer(account, [cfg])
-    is_valid, errors = optimizer.validate_allocations()
+    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations()
 
     assert is_valid
-    assert len(errors) == 0
+    assert errors == []
 
 
 def test_validate_allocations_exceeds_account() -> None:
-    """Test validation when allocations exceed account limit."""
-    instance1 = InstanceState(
-        crn="crn:test:1",
-        name="Test1",
-        allocation_seconds=400000,
-        consumed_seconds=100000,
-        limit_seconds=None,
-        detailed_usage=None,
-    )
-    instance2 = InstanceState(
-        crn="crn:test:2",
-        name="Test2",
-        allocation_seconds=300000,
-        consumed_seconds=100000,
-        limit_seconds=None,
-        detailed_usage=None,
-    )
-    account = Account(
-        account_id="test",
-        plan_id="test-plan",
-        target_usage_seconds=500000,  # Too small
-        available_seconds=0,
-        limit_seconds=None,
-        instances=(instance1, instance2),
+    """Sum of allocations above account target produces an account-cap error."""
+    account = _make_account(
+        7,
+        _make_instance("crn:test:1", 4),
+        _make_instance("crn:test:2", 5),
     )
 
-    cfg = InstanceConfig(
-        name="Test Instance",
-        crn="crn:test:1",
-        target_usage_seconds=1000000,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-
-    optimizer = AllocationOptimizer(account, [cfg])
-    is_valid, errors = optimizer.validate_allocations()
+    is_valid, errors = AllocationOptimizer(account, []).validate_allocations()
 
     assert not is_valid
-    assert len(errors) > 0
-    assert "exceeds account target" in errors[0]
+    assert errors == ["Total instance allocations (9s) exceeds account target (7s)"]
 
 
 def test_validate_allocations_exceeds_instance_target() -> None:
-    """Test validation when allocations exceed cfg limit."""
-    instance1 = InstanceState(
-        crn="crn:test:1",
-        name="Test1",
-        allocation_seconds=600000,
-        consumed_seconds=100000,
-        limit_seconds=None,
-        detailed_usage=None,
-    )
-    instance2 = InstanceState(
-        crn="crn:test:1",
-        name="Test2",
-        allocation_seconds=600000,
-        consumed_seconds=100000,
-        limit_seconds=None,
-        detailed_usage=None,
-    )
-    account = Account(
-        account_id="test",
-        plan_id="test-plan",
-        target_usage_seconds=2000000,
-        available_seconds=0,
-        limit_seconds=None,
-        instances=(instance1, instance2),
-    )
+    """An instance allocated above its config target produces a per-config error."""
+    account = _make_account(20, _make_instance("crn:test:1", 12))
+    cfg = _make_config("crn:test:1", target=10, name="Test Instance")
 
-    cfg = InstanceConfig(
-        name="Test Instance",
-        crn="crn:test:1",
-        target_usage_seconds=1000000,  # Less than total allocation (1200000)
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-
-    optimizer = AllocationOptimizer(account, [cfg])
-    is_valid, errors = optimizer.validate_allocations()
+    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations()
 
     assert not is_valid
-    assert len(errors) > 0
-    assert "exceeds target" in errors[0]
+    assert errors == ["Instance 'Test Instance' total allocation (12s) exceeds target (10s)"]
+
+
+def test_validate_skips_config_without_target() -> None:
+    """A config with target_usage_seconds=None is not gated against the instance allocation."""
+    account = _make_account(20, _make_instance("crn:test:1", 15))
+    cfg = _make_config("crn:test:1", target=None, name="No Target")
+
+    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations()
+
+    assert is_valid
+    assert errors == []
+
+
+# ---------------------------------------------------------------------------
+# Reserve, limits, and no-target handling
+# ---------------------------------------------------------------------------
 
 
 def _make_account_and_config() -> tuple[Account, InstanceConfig]:
@@ -529,35 +500,3 @@ def test_no_target_instance_never_exhausted() -> None:
     rec = next((r for r in result.recommendations if r.instance_crn == "crn:test:1"), None)
     if rec is not None:
         assert rec.new_allocation > 0
-
-
-def test_validate_skips_config_without_target() -> None:
-    """Validation skips instance configs without target_usage_seconds."""
-    instance = InstanceState(
-        crn="crn:test:1",
-        name="Instance",
-        allocation_seconds=999999,
-        limit_seconds=1000000,
-        consumed_seconds=0,
-        detailed_usage=None,
-    )
-    account = Account(
-        account_id="test-account",
-        plan_id="test-plan",
-        target_usage_seconds=2000000,
-        available_seconds=2000000,
-        limit_seconds=None,
-        instances=(instance,),
-    )
-
-    cfg = InstanceConfig(
-        name="No Target",
-        crn="crn:test:1",
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-
-    optimizer = AllocationOptimizer(account, [cfg])
-    is_valid, errors = optimizer.validate_allocations()
-    # Should not error about exceeding cfg target
-    assert not any("No Target" in e for e in errors)
