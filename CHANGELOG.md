@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix naive timezone handling, which could skew usage windows.
 - Fix calculation of the 28-day consumption to consistently use IBM's official window, rather than using qauvern's own window.
-- THe `optimize` and `analyze` commands now properly validate that the proposed changes do not not exceed the account cap or any per-instance config target.
+- The `optimize` and `analyze` commands now properly validate that the proposed changes do not not exceed the account cap or any per-instance config target.
 
 ## [0.3.0] - 2026-05-26
 
