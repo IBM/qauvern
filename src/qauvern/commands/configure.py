@@ -41,7 +41,7 @@ def build_configure_yaml(
                 "target_usage_seconds": inst.allocation_seconds or 96000,
                 **({"limit_seconds": inst.limit_seconds} if inst.limit_seconds is not None else {}),
             }
-            for i, inst in enumerate(instances, 1)
+            for i, inst in enumerate(sorted(instances, key=lambda x: (x.name == "", x.name)), 1)
         ],
     }
 
@@ -62,6 +62,6 @@ def build_instance_summary_table(instances: Sequence[InstanceState]) -> tuple[li
             format_seconds(inst.consumed_seconds),
             format_fairness(inst.fairness),
         ]
-        for inst in instances
+        for inst in sorted(instances, key=lambda x: x.name)
     ]
     return rows, headers

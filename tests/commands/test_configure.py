@@ -55,9 +55,9 @@ def _make_instance(
 
 def test_build_configure_yaml_multiple_instances() -> None:
     instances = [
-        _make_instance(crn="crn:a", name="A"),
-        _make_instance(crn="crn:b", name="B"),
         _make_instance(crn="crn:c", name=""),
+        _make_instance(crn="crn:b", name="B"),
+        _make_instance(crn="crn:a", name="A"),
     ]
     parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances, "s", "e"))
     assert [p["name"] for p in parsed["instances"]] == ["A", "B", "Instance 3"]
@@ -149,11 +149,11 @@ def test_summary_table_headers() -> None:
     assert headers == ["Instance Name", "Allocation", "Limit", "Consumed", "Fairness"]
 
 
-def test_summary_table_preserves_order_and_count() -> None:
+def test_summary_table_sorted_by_name() -> None:
     instances = [
+        _make_instance(crn="crn:c", name="Charlie"),
         _make_instance(crn="crn:a", name="Alpha"),
         _make_instance(crn="crn:b", name="Bravo"),
-        _make_instance(crn="crn:c", name="Charlie"),
     ]
     rows, _ = build_instance_summary_table(instances)
     assert len(rows) == 3
