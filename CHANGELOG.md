@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `qauvern` now eagerly validates that all instances in the config file exist and still belong to your account and plan. This is to ensure that `qauvern` never runs on instances you do not expect.
+- The `configure` command sorts instances by name.
 
 ### Fixed
 
