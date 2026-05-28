@@ -281,3 +281,15 @@ def test_account_unconfigured_allocation_seconds() -> None:
         instances=(loaded,),
     )
     assert fully_loaded.unconfigured_allocation_seconds == 0
+
+    # An inconsistent snapshot (configured + available > target) is clamped at 0
+    # rather than reported as negative — negative would falsely create cap headroom.
+    inconsistent = Account(
+        account_id="test-account",
+        plan_id="test-plan",
+        target_usage_seconds=10,
+        available_seconds=8,
+        limit_seconds=None,
+        instances=(loaded,),
+    )
+    assert inconsistent.unconfigured_allocation_seconds == 0

@@ -10,11 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Dates in the config file must now set the UTC timezone offset in the ISO 8601 format, e.g. `2026-06-15T00:00:00+00:00`.
+- `qauvern` only runs on the instances in your config file, whereas it would previously run on all instances in your account and plan. `optimize` and `analyze` will still take into consideration any unconfigured instances, but it will not touch their allocations or limits.
+- Output now uses the instance name you set in your config file with the `instances.name` key. Previously, it would use the live API name. The program will warn you if the names ever drift between your config file and the live API.
 
 ### Added
 
 - `qauvern` now eagerly validates that all instances in the config file exist and still belong to your account and plan. This is to ensure that `qauvern` never runs on instances you do not expect.
-- `qauvern` warns when the name of instances in your config file differs from the instance name in IBM Quantum Platform.
 
 ### Fixed
 

@@ -173,9 +173,14 @@ class Account:
         Lets the optimizer validate against the account-wide cap when only
         a subset of instances are loaded. Returns 0 when every instance is
         present.
+
+        Clamped at 0: a negative result means the snapshot is internally
+        inconsistent (e.g. allocations changed mid-fetch). Pretending there is
+        spare cap headroom would let validation pass an over-cap projection,
+        so we treat that as "no unconfigured allocation" instead.
         """
         configured = sum(i.allocation_seconds for i in self.instances)
-        return self.target_usage_seconds - self.available_seconds - configured
+        return max(0, self.target_usage_seconds - self.available_seconds - configured)
 
     @property
     def utilization(self) -> float:

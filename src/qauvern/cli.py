@@ -398,11 +398,17 @@ def main(ctx, staging):
 @click.pass_context
 @handle_errors
 def show(ctx, config: str, api_key: str | None):
-    """Show current account and instance allocations, including admin info."""
+    """Show current account and instance allocations, including admin info.
+
+    Account totals (target, available, limit) are account-wide. Per-instance
+    rows and the "Consumed (configured)" line cover only instances listed in
+    the config file; allocation held by unconfigured instances is reported
+    separately so the cap math is transparent.
+    """
     config_parser, client = _load_config_and_client(ctx, config, api_key)
 
     click.echo(
-        f"Fetching account information and {len(config_parser.instance_configs)} instances from config file {config}..."
+        f"Fetching account information and {len(config_parser.instance_configs)} configured instances from {config}..."
     )
     account = client.get_account(config_parser.account_id, config_parser.plan, config_parser.instance_configs)
 
@@ -412,17 +418,22 @@ def show(ctx, config: str, api_key: str | None):
     click.echo(f"Account ID: {account.account_id}")
     click.echo(f"Plan: {config_parser.plan.value}")
     click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
-    click.echo(f"Consumed: {format_seconds(account.consumed_seconds)}")
+    click.echo(f"Consumed (configured): {format_seconds(account.consumed_seconds)}")
     click.echo(f"Available: {format_seconds(account.available_seconds)}")
+    if account.unconfigured_allocation_seconds > 0:
+        click.echo(
+            f"Held by unconfigured instances: {format_seconds(account.unconfigured_allocation_seconds)} "
+            "(not shown below; counted against cap)"
+        )
     if config_parser.allocation_reserve_percent > 0:
         click.echo(format_reserve_summary(account.available_seconds, config_parser.allocation_reserve_percent))
     limit_display = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
     click.echo(f"Limit: {limit_display}")
-    click.echo(f"Utilization: {account.utilization:.1f}%")
+    click.echo(f"Utilization (configured / target): {account.utilization:.1f}%")
 
     # Display instance details using utility function
     click.echo("\n" + "=" * 80)
-    click.echo("INSTANCE USAGE SUMMARY")
+    click.echo(f"INSTANCE USAGE SUMMARY ({len(account.instances)} configured)")
     click.echo("=" * 80)
 
     columns = ["name", "allocation", "consumed", "utilization", "limit", "fairness"]
@@ -437,11 +448,16 @@ def show(ctx, config: str, api_key: str | None):
 @click.pass_context
 @handle_errors
 def instances(ctx, config: str, api_key: str | None):
-    """Show instance usage summary, without requiring admin privileges."""
+    """Show instance usage summary, without requiring admin privileges.
+
+    Only instances listed in the config file are queried. Account-wide
+    totals (and unconfigured-instance allocation) are not available here
+    because that data requires admin access — use `show` for that view.
+    """
     config_parser, client = _load_config_and_client(ctx, config, api_key)
 
     click.echo(
-        f"Fetching usage information for {len(config_parser.instance_configs)} instances from config file {config}"
+        f"Fetching usage information for {len(config_parser.instance_configs)} configured instances from {config}"
     )
 
     instances_data = []
@@ -472,19 +488,19 @@ def instances(ctx, config: str, api_key: str | None):
     total_allocation = sum(inst.allocation_seconds for inst in instances_data)
     total_consumed = sum(inst.consumed_seconds for inst in instances_data)
 
-    # Display totals
+    # Display totals (configured instances only — account-wide cap is not visible without admin)
     click.echo("\n" + "=" * 80)
-    click.echo("TOTALS")
+    click.echo("TOTALS (configured instances)")
     click.echo("=" * 80)
-    click.echo(f"Total Instances: {len(instances_data)}")
+    click.echo(f"Configured Instances: {len(instances_data)}")
     click.echo(f"Total Allocation: {format_seconds(total_allocation)}")
     click.echo(f"Total Consumed: {format_seconds(total_consumed)}")
     if total_allocation > 0:
         utilization = (total_consumed / total_allocation) * 100
-        click.echo(f"Overall Utilization: {utilization:.1f}%")
+        click.echo(f"Utilization (consumed / allocation): {utilization:.1f}%")
 
     click.echo("\nNote: This command does not require admin privileges.")
-    click.echo("Use 'show' command for full account-level information (requires admin access).")
+    click.echo("Use 'show' for account-wide totals and unconfigured allocation (requires admin access).")
 
 
 @main.command()
@@ -493,15 +509,19 @@ def instances(ctx, config: str, api_key: str | None):
 @click.pass_context
 @handle_errors
 def analyze(ctx, config: str, api_key: str | None):
-    """Analyze allocations and show optimization recommendations."""
+    """Analyze allocations and show optimization recommendations.
+
+    Only instances listed in the config file are analyzed and modified.
+    Allocation held by unconfigured instances is preserved as-is and
+    counted toward the account cap.
+    """
     config_parser, client = _load_config_and_client(ctx, config, api_key)
     account_id = config_parser.account_id
     plan = config_parser.plan
     instance_configs = config_parser.instance_configs
 
-    click.echo(f"Fetching account information for plan {plan.value}...")
-    instance_refs = client.discover_instances(account_id, plan)
-    account = client.get_account(account_id, plan, instance_refs)
+    click.echo(f"Fetching account information for {len(instance_configs)} configured instances on plan {plan.value}...")
+    account = client.get_account(account_id, plan, instance_configs)
 
     # Enrich instances with target usage and detailed usage data
     click.echo("Fetching usage data for different time periods...")
@@ -536,21 +556,27 @@ def analyze(ctx, config: str, api_key: str | None):
     click.echo(f"Plan: {plan.value}")
     click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
 
-    # Calculate target usage percentage for balance period
+    # Calculate target usage percentage for balance period (configured instances only)
     target_percentage = 0.0
     if account.target_usage_seconds > 0:
         total_balance_consumed = sum(inst.usage.consumed_balance_period for inst in account.instances)
         target_percentage = (total_balance_consumed / account.target_usage_seconds) * 100
 
     click.echo(
-        f"Consumed (Balance Period): {format_seconds(sum(inst.usage.consumed_balance_period for inst in account.instances))} ({target_percentage:.1f}% of target)"
+        f"Consumed (Balance Period, configured): {format_seconds(sum(inst.usage.consumed_balance_period for inst in account.instances))} ({target_percentage:.1f}% of target)"
     )
-    click.echo(f"Consumed (28-day): {format_seconds(account.consumed_seconds)}")
+    click.echo(f"Consumed (28-day, configured): {format_seconds(account.consumed_seconds)}")
     click.echo(f"Available: {format_seconds(account.available_seconds)}")
+    if account.unconfigured_allocation_seconds > 0:
+        click.echo(
+            f"Held by unconfigured instances: {format_seconds(account.unconfigured_allocation_seconds)} "
+            "(not modified; counted against cap)"
+        )
     if config_parser.allocation_reserve_percent > 0:
         click.echo(format_reserve_summary(account.available_seconds, config_parser.allocation_reserve_percent))
     limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
     click.echo(f"Limit: {limit_str}")
+    click.echo(f"Configured instances analyzed: {len(instance_configs)}")
 
     # Display instance analysis table (show ALL instances) using utility function
     click.echo("\n" + "=" * 80)
@@ -604,7 +630,12 @@ def analyze(ctx, config: str, api_key: str | None):
 @click.pass_context
 @handle_errors
 def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
-    """Optimize instance allocations and apply changes for a specific plan."""
+    """Optimize instance allocations and apply changes for a specific plan.
+
+    Only instances listed in the config file are modified. Allocation held
+    by unconfigured instances is preserved and counted toward the account
+    cap so we never overcommit.
+    """
     if not dry_run:
         click.confirm("Are you sure you want to optimize allocations?", abort=True)
 
@@ -613,9 +644,8 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     plan = config_parser.plan
     instance_configs = config_parser.instance_configs
 
-    click.echo(f"Fetching account information for plan {plan.value}...")
-    instance_refs = client.discover_instances(account_id, plan)
-    account = client.get_account(account_id, plan, instance_refs)
+    click.echo(f"Fetching account information for {len(instance_configs)} configured instances on plan {plan.value}...")
+    account = client.get_account(account_id, plan, instance_configs)
 
     # Enrich instances with target usage (no detailed usage needed for optimize)
     enrich_instances_with_usage_data(account, instance_configs, client)
@@ -648,6 +678,12 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     click.echo("\n" + "=" * 80)
     click.echo("CHANGES TO BE APPLIED")
     click.echo("=" * 80)
+    click.echo(f"Scope: {len(instance_configs)} configured instances (others left untouched)")
+    if account.unconfigured_allocation_seconds > 0:
+        click.echo(
+            f"Held by unconfigured instances: {format_seconds(account.unconfigured_allocation_seconds)} "
+            "(reserved against the account cap)"
+        )
 
     # Build a map of CRN to instance name
     instance_map = {inst.crn: inst.name for inst in account.instances}

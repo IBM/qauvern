@@ -179,6 +179,8 @@ qauvern analyze --config config.yaml
 
 This command identifies underutilized instances, calculates optimal reallocations, and shows what changes would be made. The output includes a **Cur Limit** column (the live API value) and a **New Limit** column (what the optimizer would set). A `(+grant)` annotation indicates an active net grant is boosting the limit; `!` indicates the instance is in debt.
 
+> **Scope:** `analyze` only considers instances listed in your config file. Allocation held by unconfigured instances on the same account+plan is left untouched, but it is counted against the account cap so the recommendations never overcommit. The summary block reports it on the `Held by unconfigured instances` line.
+
 #### Optimize Allocations
 
 Apply optimization recommendations to update instance allocations:
@@ -196,6 +198,8 @@ This command will:
 4. Apply allocation and limit updates via API
 
 Use `--dry-run` to compute and display changes without applying them.
+
+> **Scope:** Like `analyze`, `optimize` only modifies instances listed in your config file. Unconfigured instances keep their existing allocation and limit; their allocation is reserved against the account cap when computing the new distribution. To bring an instance under management, add it to the config (or regenerate via `qauvern configure`).
 
 #### Create Instance
 
@@ -239,6 +243,20 @@ The `--staging` flag is a global option and applies to all commands.
 4. **Enforce limits** using `limit_seconds` and any active `net_grants`
 
 The optimizer targets low fairness values (< 0.5) to ensure instances receive scheduling priority from IBM Quantum's fair-share system. See the `net_grants` field in [Configuration](#configuration) for details on how grant rolloff works.
+
+### Configured vs. Unconfigured Instances
+
+`analyze` and `optimize` only operate on instances listed in your config file. Any other instance that exists on the same account and plan is **unconfigured** and is left exactly as-is — its allocation and limit are never touched.
+
+Unconfigured instances still consume from the account-wide cap, so the optimizer subtracts their allocation before deciding how much to redistribute. Concretely:
+
+```
+redistributable = account.target_usage_seconds
+                  − sum(unconfigured allocations)   ← reserved, untouched
+                  − sum(28-day usage of configured) ← the floor we never go under
+```
+
+This means you can safely manage a subset of an account's instances with qauvern: anything you leave out of the config file is opaque to the optimizer except as a fixed reservation. To bring an instance under management, add it to the config (or regenerate with `qauvern configure`).
 
 ## Examples
 
