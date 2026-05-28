@@ -429,7 +429,6 @@ def show(ctx, config: str, api_key: str | None):
         click.echo(format_reserve_summary(account.available_seconds, config_parser.allocation_reserve_percent))
     limit_display = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
     click.echo(f"Limit: {limit_display}")
-    click.echo(f"Utilization (configured / target): {account.utilization:.1f}%")
 
     # Display instance details using utility function
     click.echo("\n" + "=" * 80)
@@ -556,15 +555,8 @@ def analyze(ctx, config: str, api_key: str | None):
     click.echo(f"Plan: {plan.value}")
     click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
 
-    # Calculate target usage percentage for balance period (configured instances only)
-    target_percentage = 0.0
-    if account.target_usage_seconds > 0:
-        total_balance_consumed = sum(inst.usage.consumed_balance_period for inst in account.instances)
-        target_percentage = (total_balance_consumed / account.target_usage_seconds) * 100
-
-    click.echo(
-        f"Consumed (Balance Period, configured): {format_seconds(sum(inst.usage.consumed_balance_period for inst in account.instances))} ({target_percentage:.1f}% of target)"
-    )
+    total_balance_consumed = sum(inst.usage.consumed_balance_period for inst in account.instances)
+    click.echo(f"Consumed (Balance Period, configured): {format_seconds(total_balance_consumed)}")
     click.echo(f"Consumed (28-day, configured): {format_seconds(account.consumed_seconds)}")
     click.echo(f"Available: {format_seconds(account.available_seconds)}")
     if account.unconfigured_allocation_seconds > 0:
