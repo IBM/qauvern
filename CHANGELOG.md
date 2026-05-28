@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Dates in the config file must now set the UTC timezone offset in the ISO 8601 format, e.g. `2026-06-15T00:00:00+00:00`.
 - `qauvern` only runs on the instances in your config file, whereas it would previously run on all instances in your account and plan. `optimize` and `analyze` will still take into consideration any unconfigured instances, but it will not touch their allocations or limits.
+  - Caveat: with `optimize` and `analyze`, the configured instances will absorb all the available account allocation, which leaves no available allocation for the unconfigured instances. For example, if you configure 2 of 10 instances, those 2 will claim every spare second on the account and the remaining 8 are left with no buffer to expand into. We will add a buffer mechanism in the future.
 - Output now uses the instance name you set in your config file with the `instances.name` key. Previously, it would use the live API name. The program will warn you if the names ever drift between your config file and the live API.
 
 ### Added

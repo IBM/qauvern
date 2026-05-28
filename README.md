@@ -258,6 +258,8 @@ redistributable = account.target_usage_seconds
 
 This means you can safely manage a subset of an account's instances with qauvern: anything you leave out of the config file is opaque to the optimizer except as a fixed reservation. To bring an instance under management, add it to the config (or regenerate with `qauvern configure`).
 
+**Caveat:** the configured instances will absorb all the available account allocation, which leaves no available allocation for the unconfigured instances. For example, if you configure 2 of 10 instances, those 2 will claim every spare second on the account and the remaining 8 are left with no buffer to expand into. We will add a buffer mechanism in the future.
+
 ## Examples
 
 ### Basic Workflow
