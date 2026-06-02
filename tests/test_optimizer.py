@@ -164,25 +164,6 @@ def test_optimizer_initialization(optimizer_account: Account, optimizer_instance
     assert len(optimizer._config_by_crn) == 3  # One CRN per cfg
 
 
-def test_get_active_instances(optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]) -> None:
-    """Test identifying active instances."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
-    active = optimizer._get_active_instances(threshold_seconds=3600)
-
-    assert len(active) == 2  # instance1 and instance3
-    assert any(inst.crn == "crn:test:1" for inst in active)
-    assert any(inst.crn == "crn:test:3" for inst in active)
-
-
-def test_get_inactive_instances(optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]) -> None:
-    """Test identifying inactive instances."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
-    inactive = optimizer._get_inactive_instances(threshold_seconds=3600)
-
-    assert len(inactive) == 1
-    assert inactive[0].crn == "crn:test:2"
-
-
 def test_consumption_for_config(optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]) -> None:
     """Test calculating cfg consumption."""
     optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)

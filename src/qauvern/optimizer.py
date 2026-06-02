@@ -65,28 +65,6 @@ class AllocationOptimizer:
         consumed = self._consumption_for(config)
         return max(0, config.target_usage_seconds - consumed)
 
-    def _get_active_instances(self, threshold_seconds: int = 3600) -> list[InstanceState]:
-        """Get instances that have been used recently.
-
-        Args:
-            threshold_seconds: Minimum usage to consider active (default: 1 hour)
-
-        Returns:
-            List of active instances
-        """
-        return [inst for inst in self.account.instances if inst.consumed_seconds >= threshold_seconds]
-
-    def _get_inactive_instances(self, threshold_seconds: int = 3600) -> list[InstanceState]:
-        """Get instances that have minimal or no usage.
-
-        Args:
-            threshold_seconds: Maximum usage to consider inactive (default: 1 hour)
-
-        Returns:
-            List of inactive instances
-        """
-        return [inst for inst in self.account.instances if inst.consumed_seconds < threshold_seconds]
-
     def analyze(self) -> OptimizationResult:
         """Analyze current allocations and provide recommendations based on core algorithm.
 
