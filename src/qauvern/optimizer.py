@@ -65,8 +65,8 @@ class AllocationOptimizer:
         consumed = self._consumption_for(config)
         return max(0, config.target_usage_seconds - consumed)
 
-    def analyze(self) -> OptimizationResult:
-        """Analyze current allocations and provide recommendations based on core algorithm.
+    def optimize(self) -> OptimizationResult:
+        """Compute allocation and limit recommendations based on core algorithm.
 
         Core Algorithm (from Design.md):
         1. Get detailed usage for all instances
@@ -79,9 +79,10 @@ class AllocationOptimizer:
         5. Instances with score=0 → minimal allocation
         6. Temporarily reduce active instances to their 28-day usage to free up allocation
         7. Redistribute all available allocation to active instances proportionally by activity score
+        8. Resolve effective limits via LimitResolver (net grants, rolloff, exhaustion)
 
         Returns:
-            OptimizationResult with recommendations but no changes applied
+            OptimizationResult with recommendations; no changes are applied
         """
         recommendations: list[OptimizationRecommendation] = []
 
@@ -252,23 +253,9 @@ class AllocationOptimizer:
         else:
             print("  No active instances or no allocation to distribute")
 
-        print("\n=== Analysis Complete ===")
-        print(f"Total recommendations: {len(recommendations)}")
-
-        return OptimizationResult(recommendations)
-
-    def optimize(self) -> OptimizationResult:
-        """Optimize allocations and calculate new limits.
-
-        This method calculates optimal allocations but does not apply them.
-        Use the apply() method to actually update the instances.
-
-        Returns:
-            OptimizationResult with optimized allocations
-        """
-        result = self.analyze()
-
-        # Calculate new limits for each instance using LimitResolver
+        # Step 7: Resolve effective limits for each instance
+        print("\n=== Step 7: Resolving Limits ===")
+        limit_updates = 0
         for instance in self.account.instances:
             config = self._config_for(instance)
             if not config:
@@ -277,11 +264,11 @@ class AllocationOptimizer:
             new_limit = self._limit_resolver.resolve(config, instance, self.today)
 
             if new_limit is not None and new_limit != instance.limit_seconds:
-                existing_rec = next((rec for rec in result.recommendations if rec.instance_crn == instance.crn), None)
+                existing_rec = next((rec for rec in recommendations if rec.instance_crn == instance.crn), None)
                 if existing_rec:
                     existing_rec.new_limit = new_limit
                 else:
-                    result.recommendations.append(
+                    recommendations.append(
                         OptimizationRecommendation(
                             instance_crn=instance.crn,
                             current_allocation=instance.allocation_seconds,
@@ -290,8 +277,13 @@ class AllocationOptimizer:
                             new_limit=new_limit,
                         )
                     )
+                limit_updates += 1
+        print(f"  Limit updates: {limit_updates}")
 
-        return result
+        print("\n=== Optimization Complete ===")
+        print(f"Total recommendations: {len(recommendations)}")
+
+        return OptimizationResult(recommendations)
 
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
         """Check that applying `result` would not exceed the account cap or any per-instance config target.
