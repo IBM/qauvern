@@ -192,15 +192,6 @@ def test_remaining_for_config(optimizer_account: Account, optimizer_instance_con
     assert cfg3_remaining == 250000  # 400000 - 150000
 
 
-def test_analyze_generates_recommendations(
-    optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]
-) -> None:
-    """Test that analyze generates recommendations."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
-    result = optimizer.analyze()
-    assert len(result.recommendations) > 0
-
-
 def test_optimize_generates_recommendations(
     optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]
 ) -> None:
@@ -373,8 +364,8 @@ def _make_account_and_config() -> tuple[Account, InstanceConfig]:
 def test_reserve_reduces_available_allocation() -> None:
     """With 20% reserve, new allocation is measurably lower than with 0% reserve."""
     account, cfg = _make_account_and_config()
-    result_with = AllocationOptimizer(account, [cfg], allocation_reserve_percent=20.0).analyze()
-    result_without = AllocationOptimizer(account, [cfg], allocation_reserve_percent=0.0).analyze()
+    result_with = AllocationOptimizer(account, [cfg], allocation_reserve_percent=20.0).optimize()
+    result_without = AllocationOptimizer(account, [cfg], allocation_reserve_percent=0.0).optimize()
 
     alloc_with = next(r.new_allocation for r in result_with.recommendations if r.instance_crn == "crn:test:reserve:1")
     alloc_without = next(
@@ -387,8 +378,8 @@ def test_zero_reserve_is_deterministic() -> None:
     """Two runs with 0% reserve on identical fixtures produce identical recommendations."""
     account, cfg = _make_account_and_config()
 
-    result_a = AllocationOptimizer(account, [cfg], allocation_reserve_percent=0.0).analyze()
-    result_b = AllocationOptimizer(account, [cfg], allocation_reserve_percent=0.0).analyze()
+    result_a = AllocationOptimizer(account, [cfg], allocation_reserve_percent=0.0).optimize()
+    result_b = AllocationOptimizer(account, [cfg], allocation_reserve_percent=0.0).optimize()
 
     recs_a = {r.instance_crn: r.new_allocation for r in result_a.recommendations}
     recs_b = {r.instance_crn: r.new_allocation for r in result_b.recommendations}
@@ -496,7 +487,7 @@ def test_no_target_usage_caps_at_limit() -> None:
     )
 
     optimizer = AllocationOptimizer(account, [cfg])
-    result = optimizer.analyze()
+    result = optimizer.optimize()
 
     rec = next((r for r in result.recommendations if r.instance_crn == "crn:test:1"), None)
     assert rec is not None
@@ -538,7 +529,7 @@ def test_no_target_instance_never_exhausted() -> None:
     )
 
     optimizer = AllocationOptimizer(account, [cfg])
-    result = optimizer.analyze()
+    result = optimizer.optimize()
 
     # Should NOT be treated as exhausted (no allocation=0 recommendation)
     rec = next((r for r in result.recommendations if r.instance_crn == "crn:test:1"), None)
