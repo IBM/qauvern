@@ -111,7 +111,6 @@ def cfg1(instance1: InstanceState) -> InstanceConfig:
     return InstanceConfig(
         name="Instance 1",
         crn=instance1.crn,
-        target_usage_seconds=5000,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
     )
@@ -122,7 +121,6 @@ def cfg2(instance2: InstanceState) -> InstanceConfig:
     return InstanceConfig(
         name="Instance 2",
         crn=instance2.crn,
-        target_usage_seconds=10000,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
     )
@@ -160,21 +158,6 @@ def test_format_basic_columns(instance1: InstanceState, instance2: InstanceState
     assert "Instance" in headers
     assert "Allocation" in headers
     assert "Consumed" in headers
-
-
-def test_format_with_instance_configs(
-    instance1: InstanceState, instance2: InstanceState, cfg1: InstanceConfig, cfg2: InstanceConfig
-) -> None:
-    """Test formatting with instance config information."""
-    instances = [instance1, instance2]
-    instance_configs = [cfg1, cfg2]
-    columns = ["name", "target", "target_pct"]
-
-    table_data, headers = format_instance_table(instances, instance_configs=instance_configs, columns=columns)
-
-    assert len(table_data) == 2
-    assert "Target" in headers
-    assert "Target%" in headers  # No space in actual header
 
 
 def test_format_with_recommendations(

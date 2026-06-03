@@ -39,13 +39,10 @@ class InstanceConfig:
     crn: str
     start_date: datetime
     end_date: datetime
-    target_usage_seconds: int | None = None
     target_limit_seconds: int | None = None
     net_grants: tuple[NetGrant, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.target_usage_seconds is not None and self.target_usage_seconds <= 0:
-            raise ValueError("target_usage_seconds must be positive")
         if self.start_date >= self.end_date:
             raise ValueError("start_date must be before end_date")
         if not self.crn:
@@ -150,12 +147,6 @@ class InstanceState:
         if self.consumed_seconds > 0:
             score += (self.consumed_seconds / 28.0) * (bias**1.0)
         return score
-
-    def exhausted(self, target_usage_seconds: int | None) -> bool:
-        """Check if instance has exhausted its target usage for the balance period."""
-        if target_usage_seconds is None:
-            return False
-        return self.usage.consumed_balance_period >= target_usage_seconds
 
 
 @dataclass(frozen=True)

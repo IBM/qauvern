@@ -29,17 +29,11 @@ instances:
   - name: "Quantum Chemistry Research"
     # Service instance CRN
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-1::"
-    # Optional: Total allocation target for this instance in seconds (balance period).
-    # When set, the instance is marked "exhausted" once consumed_balance_period exceeds this value,
-    # and the optimizer caps allocation at this target.
-    # When omitted, allocation is optimized between minimum_allocation_seconds and limit_seconds.
-    # Example: 50 hours = 50 * 3600 = 180000 seconds (~1.875 QAU)
-    target_usage_seconds: 180000
     # Optional: Override balance period for this instance
     # start_date: "2026-01-01T00:00:00+00:00"
     # end_date: "2026-06-30T23:59:59+00:00"
 
-    # Optional: Base limit for this instance. Must be >= target_usage_seconds (if set).
+    # Optional: Base limit for this instance.
     # When set, the optimizer applies this limit on every run.
     # limit_seconds: 216000  # 60 hours
 
@@ -56,13 +50,11 @@ instances:
 
   - name: "Quantum Machine Learning"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-2::"
-    target_usage_seconds: 108000  # 30 hours (~0.625 QAU)
+    limit_seconds: 108000  # 30 hours (~0.625 QAU)
 
   - name: "Quantum Optimization"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-3::"
-    target_usage_seconds: 72000  # 20 hours (~0.417 QAU)
+    limit_seconds: 72000  # 20 hours (~0.417 QAU)
 
   - name: "Educational Projects"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-4::"
-    target_usage_seconds: 36000  # 10 hours (~0.208 QAU)
-

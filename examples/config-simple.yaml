@@ -15,10 +15,8 @@ balance_period:
 instances:
   - name: "Research Project A"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/123:inst-a1::"
-    # 30 hours = 30 * 3600 = 108000 seconds (~0.625 QAU)
-    target_usage_seconds: 108000
 
   - name: "Research Project B"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/123:inst-b1::"
-    # 20 hours = 20 * 3600 = 72000 seconds (~0.417 QAU)
-    target_usage_seconds: 72000
+    # Optional: hard cap applied on every run (30 hours)
+    limit_seconds: 108000

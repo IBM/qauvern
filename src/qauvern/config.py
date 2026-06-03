@@ -125,25 +125,14 @@ class ConfigParser:
                     )
                 )
 
-            target_usage_seconds = entry.get("target_usage_seconds")
-            limit_seconds = entry.get("limit_seconds")
-
             config = InstanceConfig(
                 name=entry["name"],
                 crn=entry["crn"],
-                target_usage_seconds=target_usage_seconds,
                 start_date=start_date,
                 end_date=end_date,
-                target_limit_seconds=limit_seconds,
+                target_limit_seconds=entry.get("limit_seconds"),
                 net_grants=tuple(net_grants),
             )
-
-            if limit_seconds is not None and target_usage_seconds is not None:
-                if limit_seconds < target_usage_seconds:
-                    raise ValueError(
-                        f"Instance '{entry['name']}': limit_seconds ({limit_seconds}) "
-                        f"must be >= target_usage_seconds ({target_usage_seconds})"
-                    )
             configs.append(config)
 
         return configs
