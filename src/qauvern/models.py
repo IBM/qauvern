@@ -56,13 +56,15 @@ class InstanceConfig:
 class DiscoveredInstance:
     crn: str
     name: str
+    allocation_seconds: int
+    limit_seconds: int | None
 
 
 @dataclass(frozen=True)
 class DiscoveredInstances:
-    """Result of discover_instances, split into live and archived collections."""
+    """Result of discover_instances, split into active and archived collections."""
 
-    live: tuple[DiscoveredInstance, ...]
+    active: tuple[DiscoveredInstance, ...]
     archived: tuple[DiscoveredInstance, ...]
 
 

@@ -21,7 +21,7 @@ from tabulate import tabulate
 
 from .api_client import IBMQuantumAPIClient
 from .config import parse_utc_datetime
-from .commands.configure import build_configure_yaml, build_instance_summary_table
+from .commands.configure import build_configure_yaml
 from .config import ConfigParser
 from .formatting import format_fairness, format_limit, format_seconds
 from .models import Account, InstanceState, InstanceConfig, InstanceDetailedUsage, OptimizationRecommendation
@@ -815,29 +815,22 @@ def configure(
     if discovered.archived:
         click.echo(f"Skipping {len(discovered.archived)} archived instance(s)", err=True)
 
-    instances = client.get_account(account_id, plan, discovered.live).instances
-    if not instances:
-        click.echo("⚠ No instances found in this account.", err=True)
+    if not discovered.active:
+        click.echo("⚠ No active instances found in this account.", err=True)
         sys.exit(1)
 
-    click.echo(f"Found {len(instances)} instance(s)")
+    click.echo(f"Found {len(discovered.active)} instance(s)")
     click.echo("\nGenerating configuration file...")
 
     output_path = Path(output)
-    output_path.write_text(build_configure_yaml(account_id, plan, instances, balance_start, balance_end))
+    output_path.write_text(build_configure_yaml(account_id, plan, discovered.active, balance_start, balance_end))
 
     click.echo(f"\n✓ Configuration file created: {output_path}")
     click.echo("\nNext steps:")
     click.echo(f"1. Edit {output_path} to customize instance allocations")
-    click.echo("2. Run 'qauvern analyze' to see optimization recommendations")
-    click.echo("3. Run 'qauvern optimize' to apply optimizations")
-
-    click.echo("\n" + "=" * 80)
-    click.echo("INSTANCE SUMMARY")
-    click.echo("=" * 80)
-
-    rows, headers = build_instance_summary_table(instances)
-    click.echo(tabulate(rows, headers=headers, tablefmt="grid"))
+    click.echo("2. Run `qauvern show` or `qauvern instances` for usage information (`show` requires admin permissions)")
+    click.echo("3. Run 'qauvern analyze' to see optimization recommendations")
+    click.echo("4. Run 'qauvern optimize' to apply optimizations")
 
 
 @main.command()

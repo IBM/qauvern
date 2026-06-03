@@ -157,12 +157,18 @@ class MockIBMQuantumAPIClient:
         for crn in self._account_instances.get(account_id, []):
             if crn not in self.instances:
                 continue
-            instance = DiscoveredInstance(crn=crn, name=self.instances[crn].name)
+            src = self.instances[crn]
+            instance = DiscoveredInstance(
+                crn=crn,
+                name=src.name,
+                allocation_seconds=src.allocation_seconds,
+                limit_seconds=src.limit_seconds,
+            )
             if crn in self._archived_crns:
                 archived.append(instance)
             else:
                 live.append(instance)
-        return DiscoveredInstances(live=tuple(live), archived=tuple(archived))
+        return DiscoveredInstances(active=tuple(live), archived=tuple(archived))
 
     def get_account(
         self,

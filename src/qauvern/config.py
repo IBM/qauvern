@@ -156,9 +156,9 @@ class ConfigParser:
         Returns a list of name drifts for configured instances whose CRN matches a live
         instance but whose name no longer matches the live API name.
         """
-        live_by_crn = {d.crn: d.name for d in discovered.live}
+        active_by_crn = {d.crn: d.name for d in discovered.active}
         archived_by_crn = {d.crn: d.name for d in discovered.archived}
-        all_by_crn = {**live_by_crn, **archived_by_crn}
+        all_by_crn = {**active_by_crn, **archived_by_crn}
 
         unrecognized = [cfg for cfg in self.instance_configs if cfg.crn not in all_by_crn]
         archived = [cfg for cfg in self.instance_configs if cfg.crn in archived_by_crn]
@@ -177,7 +177,7 @@ class ConfigParser:
             raise ValueError("\n\n".join(errors))
 
         return [
-            InstanceNameDrift(crn=cfg.crn, config_name=cfg.name, api_name=live_by_crn[cfg.crn])
+            InstanceNameDrift(crn=cfg.crn, config_name=cfg.name, api_name=active_by_crn[cfg.crn])
             for cfg in self.instance_configs
-            if cfg.name != live_by_crn[cfg.crn]
+            if cfg.name != active_by_crn[cfg.crn]
         ]
