@@ -346,7 +346,8 @@ def _load_config_and_client(
 ) -> tuple[ConfigParser, IBMQuantumAPIClient]:
     config_parser = ConfigParser(config)
     client = _build_client(ctx, api_key)
-    name_drifts = config_parser.validate_instances_against_api(client)
+    discovered = client.discover_instances(config_parser.account_id, config_parser.plan)
+    name_drifts = config_parser.validate_instances_against_api(discovered)
     if name_drifts:
         bullets = "\n".join(f"  - {d}" for d in name_drifts)
         click.echo(
