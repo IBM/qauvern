@@ -15,63 +15,54 @@ from datetime import date, timedelta
 from .models import InstanceState, InstanceConfig
 
 
-class LimitResolver:
-    """Resolves the effective instance limit from instance config and runtime state.
+def resolve_limit(instance_config: InstanceConfig, instance_state: InstanceState, today: date) -> int | None:
+    """Return the effective limit in seconds for the given instance today.
 
-    Net grants are additive boosts above ``InstanceConfig.limit_seconds`` valid for
-    28 days from start_date. As pre-grant usage days scroll out of the rolling
-    28-day window, the effective limit decreases by that day's usage (rolloff).
-    This ensures headroom decays as old usage leaves the window.
+    Resolution order:
+    1. Active net grants with rolloff -> base + sum(each grant's contribution)
+    2. Base limit only -> instance_config.limit_seconds
+    3. No limit -> None
+
+    Grant contribution = max(0, net_grant_seconds - rolloff)
+    where rolloff = sum(usage on days that were in the 28-day window at grant
+    start but have since exited, and are strictly before grant start).
     """
+    base_limit = instance_config.target_limit_seconds
 
-    def resolve(self, instance_config: InstanceConfig, instance_state: InstanceState, today: date) -> int | None:
-        """Return the effective limit in seconds for the given instance today.
+    if not instance_config.net_grants:
+        return base_limit
 
-        Resolution order:
-        1. Active net grants with rolloff -> base + sum(each grant's contribution)
-        2. Base limit only -> instance_config.limit_seconds
-        3. No limit -> None
+    total_grant_contribution = 0
+    any_active = False
 
-        Grant contribution = max(0, net_grant_seconds - rolloff)
-        where rolloff = sum(usage on days that were in the 28-day window at grant
-        start but have since exited, and are strictly before grant start).
-        """
-        base_limit = instance_config.target_limit_seconds
+    for grant in instance_config.net_grants:
+        grant_start = grant.start_date.date()
+        grant_end = grant.end_date.date()
 
-        if not instance_config.net_grants:
-            return base_limit
+        if not (grant_start <= today < grant_end):
+            continue
 
-        total_grant_contribution = 0
-        any_active = False
+        any_active = True
 
-        for grant in instance_config.net_grants:
-            grant_start = grant.start_date.date()
-            grant_end = grant.end_date.date()
+        # Pre-grant exit set: days that were in the 28-day window at grant_start
+        # and have since exited the current 28-day window.
+        # Was in window at grant_start: d >= grant_start - 27
+        # Has since exited: d < today - 28
+        # Is pre-grant: d < grant_start
+        window_floor_at_grant = grant_start - timedelta(days=27)
+        current_window_floor = today - timedelta(days=28)
 
-            if not (grant_start <= today < grant_end):
-                continue
+        rolloff = sum(
+            seconds
+            for day, seconds in instance_state.usage.daily_usage.items()
+            if day < grant_start and day >= window_floor_at_grant and day < current_window_floor
+        )
 
-            any_active = True
+        contribution = max(0, grant.net_grant_seconds - rolloff)
+        total_grant_contribution += contribution
 
-            # Pre-grant exit set: days that were in the 28-day window at grant_start
-            # and have since exited the current 28-day window.
-            # Was in window at grant_start: d >= grant_start - 27
-            # Has since exited: d < today - 28
-            # Is pre-grant: d < grant_start
-            window_floor_at_grant = grant_start - timedelta(days=27)
-            current_window_floor = today - timedelta(days=28)
+    if not any_active:
+        return base_limit
 
-            rolloff = sum(
-                seconds
-                for day, seconds in instance_state.usage.daily_usage.items()
-                if day < grant_start and day >= window_floor_at_grant and day < current_window_floor
-            )
-
-            contribution = max(0, grant.net_grant_seconds - rolloff)
-            total_grant_contribution += contribution
-
-        if not any_active:
-            return base_limit
-
-        effective_base = base_limit if base_limit is not None else 0
-        return effective_base + total_grant_contribution
+    effective_base = base_limit if base_limit is not None else 0
+    return effective_base + total_grant_contribution
