@@ -12,7 +12,7 @@
 
 from datetime import date
 
-from .limit_resolver import LimitResolver
+from .limit_resolver import resolve_limit
 from .models import Account, InstanceState, InstanceConfig, OptimizationRecommendation, OptimizationResult
 
 
@@ -42,7 +42,6 @@ class AllocationOptimizer:
         self.allocation_reserve_percent = allocation_reserve_percent
         self.today = today or date.today()
         self._config_by_crn = {config.crn: config for config in instance_configs}
-        self._limit_resolver = LimitResolver()
 
     def _config_for(self, instance: InstanceState) -> InstanceConfig | None:
         """Get the instance config for a runtime instance."""
@@ -218,7 +217,7 @@ class AllocationOptimizer:
             if not config:
                 continue
 
-            new_limit = self._limit_resolver.resolve(config, instance, self.today)
+            new_limit = resolve_limit(config, instance, self.today)
 
             if new_limit is not None and new_limit != instance.limit_seconds:
                 existing_rec = next((rec for rec in recommendations if rec.instance_crn == instance.crn), None)
