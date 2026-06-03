@@ -503,7 +503,7 @@ instances:
 def test_validate_instances_against_api_passes_when_all_configs_match() -> None:
     """All configured CRNs are present on the API and names match → no drift."""
     client = MockIBMQuantumAPIClient()
-    client.setup_account("acc-1", target_usage_seconds=0)
+    client.setup_account("acc-1", allocation_budget_seconds=0)
     client.setup_instance("crn:test:1", "Project A", allocation_seconds=0, account_id="acc-1")
     client.setup_instance("crn:test:2", "Project B", allocation_seconds=0, account_id="acc-1")
     # Extra instance on the API that's not in config — fine, only configs must be a subset.
@@ -520,7 +520,7 @@ def test_validate_instances_against_api_passes_when_all_configs_match() -> None:
 def test_validate_instances_against_api_raises_on_unrecognized_crn() -> None:
     """A config CRN that's not on the API → ValueError naming the instance."""
     client = MockIBMQuantumAPIClient()
-    client.setup_account("acc-1", target_usage_seconds=0)
+    client.setup_account("acc-1", allocation_budget_seconds=0)
     client.setup_instance("crn:test:1", "Project A", allocation_seconds=0, account_id="acc-1")
     # crn:test:2 is in the config but NOT on the API.
 
@@ -539,7 +539,7 @@ def test_validate_instances_against_api_raises_on_unrecognized_crn() -> None:
 def test_validate_instances_against_api_passes_with_empty_config_instances() -> None:
     """A config with no instances has nothing to mismatch."""
     client = MockIBMQuantumAPIClient()
-    client.setup_account("acc-1", target_usage_seconds=0)
+    client.setup_account("acc-1", allocation_budget_seconds=0)
 
     path = _write_config("""
 account_id: "acc-1"
@@ -559,7 +559,7 @@ instances: []
 def test_validate_instances_against_api_returns_drift_when_name_differs() -> None:
     """All configured names differ from live names → all collected in returned list."""
     client = MockIBMQuantumAPIClient()
-    client.setup_account("acc-1", target_usage_seconds=0)
+    client.setup_account("acc-1", allocation_budget_seconds=0)
     client.setup_instance("crn:test:1", "Alpha", allocation_seconds=0, account_id="acc-1")
     client.setup_instance("crn:test:2", "Beta", allocation_seconds=0, account_id="acc-1")
 
@@ -582,7 +582,7 @@ def test_validate_instances_against_api_returns_drift_when_name_differs() -> Non
 def test_validate_instances_against_api_unrecognized_takes_priority_over_drift() -> None:
     """Unrecognized CRN raises before drift is reported, even if other configs are drifted."""
     client = MockIBMQuantumAPIClient()
-    client.setup_account("acc-1", target_usage_seconds=0)
+    client.setup_account("acc-1", allocation_budget_seconds=0)
     # crn:test:1 is on the API but with a different name (would-be drift).
     client.setup_instance("crn:test:1", "Alpha", allocation_seconds=0, account_id="acc-1")
     # crn:test:2 is not on the API at all — unrecognized.
@@ -600,7 +600,7 @@ def test_validate_instances_against_api_unrecognized_takes_priority_over_drift()
 def test_validate_instances_against_api_raises_on_archived_instance() -> None:
     """A config CRN that is archived → ValueError naming the archived instance."""
     client = MockIBMQuantumAPIClient()
-    client.setup_account("acc-1", target_usage_seconds=0)
+    client.setup_account("acc-1", allocation_budget_seconds=0)
     client.setup_instance("crn:test:1", "Project A", allocation_seconds=0, account_id="acc-1")
     client.setup_instance("crn:test:2", "Project B", allocation_seconds=0, account_id="acc-1", archived=True)
 

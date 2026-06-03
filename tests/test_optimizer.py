@@ -46,8 +46,8 @@ def _make_account(target: int, *instances: InstanceState) -> Account:
     return Account(
         account_id="test",
         plan_id="test-plan",
-        target_usage_seconds=target,
-        available_seconds=max(0, target - allocated),
+        allocation_budget_seconds=target,
+        unallocated_seconds=max(0, target - allocated),
         limit_seconds=None,
         instances=instances,
     )
@@ -117,8 +117,8 @@ def optimizer_account() -> Account:
     return Account(
         account_id="test-account",
         plan_id="test-plan",
-        target_usage_seconds=2000000,
-        available_seconds=700000,  # 2000000 - 1300000 (total allocated)
+        allocation_budget_seconds=2000000,
+        unallocated_seconds=700000,  # 2000000 - 1300000 (total allocated)
         limit_seconds=None,
         instances=(instance1, instance2, instance3),
     )
@@ -226,24 +226,24 @@ def test_validate_allocations_uses_result_overrides() -> None:
     )
     is_valid, errors = optimizer.validate_allocations(over_cap)
     assert not is_valid
-    assert errors == ["Total instance allocations (6s) exceeds account target (5s)"]
+    assert errors == ["Total instance allocations (6s) exceeds account budget (5s)"]
 
 
-def test_validate_allocations_includes_unconfigured() -> None:
+def test_validate_allocations_includes_unmanaged() -> None:
     """Allocation held by instances not loaded must still count toward the cap."""
     # target=10, available=1, loaded holds 4 → 5 sits on instances we did not load.
     account = Account(
         account_id="test",
         plan_id="test-plan",
-        target_usage_seconds=10,
-        available_seconds=1,
+        allocation_budget_seconds=10,
+        unallocated_seconds=1,
         limit_seconds=None,
         instances=(_make_instance("crn:test:1", 4),),
     )
-    assert account.unconfigured_allocation_seconds == 5
+    assert account.unmanaged_allocation_seconds == 5
     optimizer = AllocationOptimizer(account, [])
 
-    # Bumping the loaded instance to 5 fits the cap exactly (5 + 5 unconfigured = 10).
+    # Bumping the loaded instance to 5 fits the cap exactly (5 + 5 unmanaged = 10).
     fits = OptimizationResult(
         recommendations=(
             OptimizationRecommendation(
@@ -257,7 +257,7 @@ def test_validate_allocations_includes_unconfigured() -> None:
     is_valid, _ = optimizer.validate_allocations(fits)
     assert is_valid
 
-    # Bumping to 6 overflows: 6 + 5 unconfigured > 10.
+    # Bumping to 6 overflows: 6 + 5 unmanaged > 10.
     over = OptimizationResult(
         recommendations=(
             OptimizationRecommendation(
@@ -270,7 +270,7 @@ def test_validate_allocations_includes_unconfigured() -> None:
     )
     is_valid, errors = optimizer.validate_allocations(over)
     assert not is_valid
-    assert errors == ["Total instance allocations (11s) exceeds account target (10s)"]
+    assert errors == ["Total instance allocations (11s) exceeds account budget (10s)"]
 
 
 # ---------------------------------------------------------------------------
@@ -306,8 +306,8 @@ def _make_account_and_config() -> tuple[Account, InstanceConfig]:
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
-        target_usage_seconds=5000000,
-        available_seconds=500000,
+        allocation_budget_seconds=5000000,
+        unallocated_seconds=500000,
         limit_seconds=None,
         instances=(instance,),
     )
@@ -365,8 +365,8 @@ def lr_account_and_config() -> tuple[Account, InstanceConfig]:
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
-        target_usage_seconds=1000000,
-        available_seconds=200000,
+        allocation_budget_seconds=1000000,
+        unallocated_seconds=200000,
         limit_seconds=None,
         instances=(instance,),
     )
@@ -430,8 +430,8 @@ def test_no_target_usage_caps_at_limit() -> None:
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
-        target_usage_seconds=2000000,
-        available_seconds=500000,
+        allocation_budget_seconds=2000000,
+        unallocated_seconds=500000,
         limit_seconds=None,
         instances=(instance,),
     )

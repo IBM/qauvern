@@ -20,7 +20,7 @@ from tests.mock_api import MockIBMQuantumAPIClient
 @pytest.fixture
 def daily_usage_client() -> MockIBMQuantumAPIClient:
     client = MockIBMQuantumAPIClient()
-    client.setup_account("acct-1", target_usage_seconds=1000000)
+    client.setup_account("acct-1", allocation_budget_seconds=1000000)
     client.setup_instance("crn:test:1", "Test", 100000, account_id="acct-1")
     return client
 

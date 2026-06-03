@@ -155,8 +155,8 @@ class Account:
 
     account_id: str
     plan_id: str
-    target_usage_seconds: int
-    available_seconds: int
+    allocation_budget_seconds: int
+    unallocated_seconds: int
     limit_seconds: int | None
     instances: tuple[InstanceState, ...]
 
@@ -165,10 +165,10 @@ class Account:
         return sum(i.consumed_seconds for i in self.instances)
 
     @cached_property
-    def unconfigured_allocation_seconds(self) -> int:
+    def unmanaged_allocation_seconds(self) -> int:
         """Allocation held by instances not present in `self.instances`.
 
-        Derived as `target − available − sum(loaded instance allocations)`.
+        Derived as `budget − unallocated − sum(loaded instance allocations)`.
         Lets the optimizer validate against the account-wide cap when only
         a subset of instances are loaded. Returns 0 when every instance is
         present.
@@ -176,16 +176,10 @@ class Account:
         Clamped at 0: a negative result means the snapshot is internally
         inconsistent (e.g. allocations changed mid-fetch). Pretending there is
         spare cap headroom would let validation pass an over-cap projection,
-        so we treat that as "no unconfigured allocation" instead.
+        so we treat that as "no unmanaged allocation" instead.
         """
         configured = sum(i.allocation_seconds for i in self.instances)
-        return max(0, self.target_usage_seconds - self.available_seconds - configured)
-
-    @property
-    def utilization(self) -> float:
-        if self.target_usage_seconds > 0:
-            return (self.consumed_seconds / self.target_usage_seconds) * 100
-        return 0.0
+        return max(0, self.allocation_budget_seconds - self.unallocated_seconds - configured)
 
 
 @dataclass
