@@ -13,15 +13,10 @@
 from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
-
 import yaml
 
-from .models import InstanceConfig, InstanceNameDrift, NetGrant
+from .models import DiscoveredInstances, InstanceConfig, InstanceNameDrift, NetGrant
 from .plan import Plan, plan_from_name
-
-if TYPE_CHECKING:
-    from .api_client import IBMQuantumAPIClient
 
 
 def parse_utc_datetime(s: str, *, provenance: str) -> datetime:
@@ -153,15 +148,14 @@ class ConfigParser:
 
         return configs
 
-    def validate_instances_against_api(self, client: "IBMQuantumAPIClient") -> list[InstanceNameDrift]:
-        """Verify every configured instance exists on the API for this account+plan.
+    def validate_instances_against_api(self, discovered: DiscoveredInstances) -> list[InstanceNameDrift]:
+        """Verify every configured instance exists in the discovered set.
 
         Raises ValueError if any configured CRN is not found or is archived.
 
         Returns a list of name drifts for configured instances whose CRN matches a live
         instance but whose name no longer matches the live API name.
         """
-        discovered = client.discover_instances(self.account_id, self.plan)
         live_by_crn = {d.crn: d.name for d in discovered.live}
         archived_by_crn = {d.crn: d.name for d in discovered.archived}
         all_by_crn = {**live_by_crn, **archived_by_crn}

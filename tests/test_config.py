@@ -563,7 +563,7 @@ def test_validate_instances_against_api_passes_when_all_configs_match() -> None:
     path = _write_config(_two_instance_config())
     try:
         parser = ConfigParser(path)
-        assert parser.validate_instances_against_api(client) == []  # ty: ignore[invalid-argument-type]
+        assert parser.validate_instances_against_api(client.discover_instances("acc-1")) == []
     finally:
         os.unlink(path)
 
@@ -579,7 +579,7 @@ def test_validate_instances_against_api_raises_on_unrecognized_crn() -> None:
     try:
         parser = ConfigParser(path)
         with pytest.raises(ValueError) as excinfo:
-            parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+            parser.validate_instances_against_api(client.discover_instances("acc-1"))
         assert str(excinfo.value) == (
             "Config file contains instances not found in account acc-1 on plan internal:\n  - Project B, crn:test:2"
         )
@@ -602,7 +602,7 @@ instances: []
 """)
     try:
         parser = ConfigParser(path)
-        assert parser.validate_instances_against_api(client) == []  # ty: ignore[invalid-argument-type]
+        assert parser.validate_instances_against_api(client.discover_instances("acc-1")) == []
     finally:
         os.unlink(path)
 
@@ -617,7 +617,7 @@ def test_validate_instances_against_api_returns_drift_when_name_differs() -> Non
     path = _write_config(_two_instance_config())
     try:
         parser = ConfigParser(path)
-        drifts = parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+        drifts = parser.validate_instances_against_api(client.discover_instances("acc-1"))
         assert drifts == [
             InstanceNameDrift(crn="crn:test:1", config_name="Project A", api_name="Alpha"),
             InstanceNameDrift(crn="crn:test:2", config_name="Project B", api_name="Beta"),
@@ -642,7 +642,7 @@ def test_validate_instances_against_api_unrecognized_takes_priority_over_drift()
     try:
         parser = ConfigParser(path)
         with pytest.raises(ValueError) as excinfo:
-            parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+            parser.validate_instances_against_api(client.discover_instances("acc-1"))
         assert "Project B, crn:test:2" in str(excinfo.value)
     finally:
         os.unlink(path)
@@ -659,7 +659,7 @@ def test_validate_instances_against_api_raises_on_archived_instance() -> None:
     try:
         parser = ConfigParser(path)
         with pytest.raises(ValueError) as excinfo:
-            parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+            parser.validate_instances_against_api(client.discover_instances("acc-1"))
         assert "archived" in str(excinfo.value)
         assert "Project B, crn:test:2" in str(excinfo.value)
     finally:
