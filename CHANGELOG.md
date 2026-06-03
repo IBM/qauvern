@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - 2026-06-xx
 
-## Changed
+### Changed
 
 - `qauvern` now eagerly errors if the config file has any archived instances.
 
-## Fixed
+### Fixed
 
 - `qauvern configure` no longer includes archived instances.
 

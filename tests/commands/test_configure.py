@@ -19,9 +19,9 @@ from click.testing import CliRunner, Result
 from datetime import timezone
 
 from qauvern.cli import main
-from qauvern.commands.configure import build_configure_yaml, build_instance_summary_table
+from qauvern.commands.configure import build_configure_yaml
 from qauvern.config import ConfigParser
-from qauvern.models import InstanceState
+from qauvern.models import DiscoveredInstance
 from qauvern.plan import Plan
 from tests.mock_api import MockIBMQuantumAPIClient
 
@@ -35,16 +35,13 @@ def _make_instance(
     crn: str = "crn:test:i-1",
     name: str = "Instance 1",
     allocation_seconds: int = 36000,
-    consumed_seconds: int = 0,
     limit_seconds: int | None = None,
-) -> InstanceState:
-    return InstanceState(
+) -> DiscoveredInstance:
+    return DiscoveredInstance(
         crn=crn,
         name=name,
         allocation_seconds=allocation_seconds,
         limit_seconds=limit_seconds,
-        consumed_seconds=consumed_seconds,
-        detailed_usage=None,
     )
 
 
@@ -134,39 +131,6 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# build_instance_summary_table
-# ---------------------------------------------------------------------------
-
-
-def test_summary_table_headers() -> None:
-    _rows, headers = build_instance_summary_table([_make_instance()])
-    assert headers == ["Instance Name", "Allocation", "Limit", "Consumed", "Fairness"]
-
-
-def test_summary_table_sorted_by_name() -> None:
-    instances = [
-        _make_instance(crn="crn:c", name="Charlie"),
-        _make_instance(crn="crn:a", name="Alpha"),
-        _make_instance(crn="crn:b", name="Bravo"),
-    ]
-    rows, _ = build_instance_summary_table(instances)
-    assert len(rows) == 3
-    assert [row[0] for row in rows] == ["Alpha", "Bravo", "Charlie"]
-
-
-def test_summary_table_truncates_long_names() -> None:
-    long_name = "x" * 80
-    rows, _ = build_instance_summary_table([_make_instance(name=long_name)])
-    assert rows[0][0] == "x" * 40
-
-
-def test_summary_table_uses_format_seconds() -> None:
-    rows, _ = build_instance_summary_table([_make_instance(allocation_seconds=36000, consumed_seconds=18000)])
-    assert rows[0][1] == "10.0h"
-    assert rows[0][3] == "5.0h"
-
-
-# ---------------------------------------------------------------------------
 # CLI integration
 # ---------------------------------------------------------------------------
 
@@ -221,7 +185,6 @@ def test_configure_happy_path(runner: CliRunner, tmp_path: Path) -> None:
     assert instance["limit_seconds"] == 72000
 
     assert "Configuration file created" in result.output
-    assert "My Instance" in result.output
 
 
 def test_configure_empty_instances_exits_with_error(runner: CliRunner, tmp_path: Path) -> None:
@@ -245,7 +208,7 @@ def test_configure_empty_instances_exits_with_error(runner: CliRunner, tmp_path:
     )
 
     assert result.exit_code == 1
-    assert "No instances found" in result.output
+    assert "No active instances found" in result.output
     assert not output.exists()
 
 

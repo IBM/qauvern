@@ -358,14 +358,16 @@ class IBMQuantumAPIClient:
         while True:
             data = self._request_json("GET", url, params=params)
             for resource in data["resources"]:
-                crn = resource["id"]
-                name = resource["name"]
-                if crn:
-                    allocation = resource["extensions"]["usage_allocation_seconds"]
-                    if allocation == 0:
-                        archived.append(DiscoveredInstance(crn=crn, name=name))
-                    else:
-                        live.append(DiscoveredInstance(crn=crn, name=name))
+                allocation = resource["extensions"]["usage_allocation_seconds"]
+                raw_limit = resource["extensions"]["instance_limit_seconds"]
+                limit = int(raw_limit) if raw_limit is not None else None
+                instance = DiscoveredInstance(
+                    crn=resource["id"], name=resource["name"], allocation_seconds=allocation, limit_seconds=limit
+                )
+                if allocation == 0:
+                    archived.append(instance)
+                else:
+                    live.append(instance)
 
             next_url = data.get("next_url")
             if not next_url:
@@ -376,7 +378,7 @@ class IBMQuantumAPIClient:
                 break
             params["start"] = start_token
 
-        return DiscoveredInstances(live=tuple(live), archived=tuple(archived))
+        return DiscoveredInstances(active=tuple(live), archived=tuple(archived))
 
     def get_account(self, account_id: str, plan: Plan, instance_refs: Sequence[InstanceRef]) -> Account:
         """Get account with instances filtered by plan, populated with full data."""
