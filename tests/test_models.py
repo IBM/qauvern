@@ -162,28 +162,8 @@ def test_activity_score_recent_outweighs_old() -> None:
 
 
 # -------------------------------------------------------------------
-# Account — validation and utilization
+# Account — validation
 # -------------------------------------------------------------------
-
-
-def test_account_utilization() -> None:
-    instance = InstanceState(
-        crn="crn:test:1",
-        name="Test",
-        allocation_seconds=1000000,
-        consumed_seconds=250000,
-        limit_seconds=None,
-        detailed_usage=None,
-    )
-    account = Account(
-        account_id="test-account",
-        plan_id="test-plan",
-        target_usage_seconds=1000000,
-        available_seconds=0,
-        limit_seconds=None,
-        instances=(instance,),
-    )
-    assert account.utilization == 25.0
 
 
 def test_account_consumed_seconds_is_sum_of_instances() -> None:
@@ -206,15 +186,15 @@ def test_account_consumed_seconds_is_sum_of_instances() -> None:
     account = Account(
         account_id="test-account",
         plan_id="test-plan",
-        target_usage_seconds=1000000,
-        available_seconds=0,
+        allocation_budget_seconds=1000000,
+        unallocated_seconds=0,
         limit_seconds=None,
         instances=(i1, i2),
     )
     assert account.consumed_seconds == 250000
 
 
-def test_account_unconfigured_allocation_seconds() -> None:
+def test_account_unmanaged_allocation_seconds() -> None:
     """target − available − sum(loaded allocations) = allocation held by unloaded instances."""
     loaded = InstanceState(
         crn="crn:test:1",
@@ -228,32 +208,32 @@ def test_account_unconfigured_allocation_seconds() -> None:
     partial = Account(
         account_id="test-account",
         plan_id="test-plan",
-        target_usage_seconds=10,
-        available_seconds=1,
+        allocation_budget_seconds=10,
+        unallocated_seconds=1,
         limit_seconds=None,
         instances=(loaded,),
     )
-    assert partial.unconfigured_allocation_seconds == 5
+    assert partial.unmanaged_allocation_seconds == 5
 
     # When every instance is present (target − available == sum of allocations) it is 0.
     fully_loaded = Account(
         account_id="test-account",
         plan_id="test-plan",
-        target_usage_seconds=10,
-        available_seconds=6,
+        allocation_budget_seconds=10,
+        unallocated_seconds=6,
         limit_seconds=None,
         instances=(loaded,),
     )
-    assert fully_loaded.unconfigured_allocation_seconds == 0
+    assert fully_loaded.unmanaged_allocation_seconds == 0
 
     # An inconsistent snapshot (configured + available > target) is clamped at 0
     # rather than reported as negative — negative would falsely create cap headroom.
     inconsistent = Account(
         account_id="test-account",
         plan_id="test-plan",
-        target_usage_seconds=10,
-        available_seconds=8,
+        allocation_budget_seconds=10,
+        unallocated_seconds=8,
         limit_seconds=None,
         instances=(loaded,),
     )
-    assert inconsistent.unconfigured_allocation_seconds == 0
+    assert inconsistent.unmanaged_allocation_seconds == 0

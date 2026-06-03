@@ -138,7 +138,7 @@ def _invoke_configure(runner: CliRunner, mock_client: MockIBMQuantumAPIClient, a
 
 def test_configure_happy_path(runner: CliRunner, tmp_path: Path) -> None:
     mock_client = MockIBMQuantumAPIClient()
-    mock_client.setup_account(account_id="acct-1", target_usage_seconds=0)
+    mock_client.setup_account(account_id="acct-1", allocation_budget_seconds=0)
     mock_client.setup_instance(
         crn="crn:test:i-1",
         name="My Instance",
@@ -179,7 +179,7 @@ def test_configure_happy_path(runner: CliRunner, tmp_path: Path) -> None:
 
 def test_configure_empty_instances_exits_with_error(runner: CliRunner, tmp_path: Path) -> None:
     mock_client = MockIBMQuantumAPIClient()
-    mock_client.setup_account(account_id="acct-empty", target_usage_seconds=0)
+    mock_client.setup_account(account_id="acct-empty", allocation_budget_seconds=0)
 
     output = tmp_path / "config.yaml"
     result = _invoke_configure(
@@ -204,7 +204,7 @@ def test_configure_empty_instances_exits_with_error(runner: CliRunner, tmp_path:
 
 def test_configure_excludes_archived_instances(runner: CliRunner, tmp_path: Path) -> None:
     mock_client = MockIBMQuantumAPIClient()
-    mock_client.setup_account(account_id="acct-1", target_usage_seconds=0)
+    mock_client.setup_account(account_id="acct-1", allocation_budget_seconds=0)
     mock_client.setup_instance(
         crn="crn:test:live",
         name="Live Instance",

@@ -390,7 +390,7 @@ def show(ctx, config: str, api_key: str | None):
 
     Account totals (target, available, limit) are account-wide. Per-instance
     rows and the "Consumed (configured)" line cover only instances listed in
-    the config file; allocation held by unconfigured instances is reported
+    the config file; allocation held by unmanaged instances is reported
     separately so the cap math is transparent.
     """
     config_parser, client = _load_config_and_client(ctx, config, api_key)
@@ -405,16 +405,16 @@ def show(ctx, config: str, api_key: str | None):
     click.echo("=" * 80)
     click.echo(f"Account ID: {account.account_id}")
     click.echo(f"Plan: {config_parser.plan.value}")
-    click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
-    click.echo(f"Consumed (configured): {format_seconds(account.consumed_seconds)}")
-    click.echo(f"Available: {format_seconds(account.available_seconds)}")
-    if account.unconfigured_allocation_seconds > 0:
+    click.echo(f"Allocation budget: {format_seconds(account.allocation_budget_seconds)}")
+    click.echo(f"Unallocated: {format_seconds(account.unallocated_seconds)}")
+    click.echo(f"Consumed (configured instances): {format_seconds(account.consumed_seconds)}")
+    if account.unmanaged_allocation_seconds > 0:
         click.echo(
-            f"Held by unconfigured instances: {format_seconds(account.unconfigured_allocation_seconds)} "
+            f"Held by unconfigured instances: {format_seconds(account.unmanaged_allocation_seconds)} "
             "(not shown below; counted against cap)"
         )
     if config_parser.allocation_reserve_percent > 0:
-        click.echo(format_reserve_summary(account.available_seconds, config_parser.allocation_reserve_percent))
+        click.echo(format_reserve_summary(account.unallocated_seconds, config_parser.allocation_reserve_percent))
     limit_display = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
     click.echo(f"Limit: {limit_display}")
 
@@ -438,7 +438,7 @@ def instances(ctx, config: str, api_key: str | None):
     """Show instance usage summary, without requiring admin privileges.
 
     Only instances listed in the config file are queried. Account-wide
-    totals (and unconfigured-instance allocation) are not available here
+    totals (and unmanaged-instance allocation) are not available here
     because that data requires admin access — use `show` for that view.
     """
     config_parser, client = _load_config_and_client(ctx, config, api_key)
@@ -487,7 +487,7 @@ def instances(ctx, config: str, api_key: str | None):
         click.echo(f"Utilization (consumed / allocation): {utilization:.1f}%")
 
     click.echo("\nNote: This command does not require admin privileges.")
-    click.echo("Use 'show' for account-wide totals and unconfigured allocation (requires admin access).")
+    click.echo("Use 'show' for account-wide totals (requires admin access).")
 
 
 @main.command()
@@ -499,7 +499,7 @@ def analyze(ctx, config: str, api_key: str | None):
     """Analyze allocations and show optimization recommendations.
 
     Only instances listed in the config file are analyzed and modified.
-    Allocation held by unconfigured instances is preserved as-is and
+    Allocation held by unmanaged instances is preserved as-is and
     counted toward the account cap.
     """
     config_parser, client = _load_config_and_client(ctx, config, api_key)
@@ -541,19 +541,19 @@ def analyze(ctx, config: str, api_key: str | None):
     click.echo("ACCOUNT PLAN ALLOCATION SUMMARY")
     click.echo("=" * 80)
     click.echo(f"Plan: {plan.value}")
-    click.echo(f"Target Usage: {format_seconds(account.target_usage_seconds)}")
+    click.echo(f"Allocation budget: {format_seconds(account.allocation_budget_seconds)}")
+    click.echo(f"Unallocated: {format_seconds(account.unallocated_seconds)}")
 
     total_balance_consumed = sum(inst.usage.consumed_balance_period for inst in account.instances)
     click.echo(f"Consumed (Balance Period, configured): {format_seconds(total_balance_consumed)}")
     click.echo(f"Consumed (28-day, configured): {format_seconds(account.consumed_seconds)}")
-    click.echo(f"Available: {format_seconds(account.available_seconds)}")
-    if account.unconfigured_allocation_seconds > 0:
+    if account.unmanaged_allocation_seconds > 0:
         click.echo(
-            f"Held by unconfigured instances: {format_seconds(account.unconfigured_allocation_seconds)} "
+            f"Held by unconfigured instances: {format_seconds(account.unmanaged_allocation_seconds)} "
             "(not modified; counted against cap)"
         )
     if config_parser.allocation_reserve_percent > 0:
-        click.echo(format_reserve_summary(account.available_seconds, config_parser.allocation_reserve_percent))
+        click.echo(format_reserve_summary(account.unallocated_seconds, config_parser.allocation_reserve_percent))
     limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
     click.echo(f"Limit: {limit_str}")
     click.echo(f"Configured instances analyzed: {len(instance_configs)}")
@@ -611,7 +611,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     """Optimize instance allocations and apply changes for a specific plan.
 
     Only instances listed in the config file are modified. Allocation held
-    by unconfigured instances is preserved and counted toward the account
+    by unmanaged instances is preserved and counted toward the account
     cap so we never overcommit.
     """
     if not dry_run:
@@ -657,9 +657,9 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     click.echo("CHANGES TO BE APPLIED")
     click.echo("=" * 80)
     click.echo(f"Scope: {len(instance_configs)} configured instances (others left untouched)")
-    if account.unconfigured_allocation_seconds > 0:
+    if account.unmanaged_allocation_seconds > 0:
         click.echo(
-            f"Held by unconfigured instances: {format_seconds(account.unconfigured_allocation_seconds)} "
+            f"Held by unconfigured instances: {format_seconds(account.unmanaged_allocation_seconds)} "
             "(reserved against the account cap)"
         )
 

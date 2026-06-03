@@ -152,10 +152,10 @@ class AllocationOptimizer:
         # Use ALL available allocation (freed + account available)
         print("\n=== Step 4: Calculating Total Available Allocation ===")
         reserve_factor = 1.0 - (self.allocation_reserve_percent / 100.0)
-        total_to_allocate = int((freed_allocation + self.account.available_seconds) * reserve_factor)
+        total_to_allocate = int((freed_allocation + self.account.unallocated_seconds) * reserve_factor)
         print(f"  Freed from inactive: {freed_allocation - active_freed}s")
         print(f"  Freed from active (temporary reduction): {active_freed}s")
-        print(f"  Account available: {self.account.available_seconds}s")
+        print(f"  Account available: {self.account.unallocated_seconds}s")
         print(f"  Total to allocate: {total_to_allocate}s")
 
         # Step 5: Distribute allocation to active instances
@@ -245,7 +245,7 @@ class AllocationOptimizer:
         """Check that applying `result` would not exceed the account cap.
 
         The check includes allocation held by instances missing from
-        `self.account.instances` via `Account.unconfigured_allocation_seconds`,
+        `self.account.instances` via `Account.unmanaged_allocation_seconds`,
         so the cap math is correct when only a subset of instances are loaded.
 
         Returns:
@@ -257,11 +257,11 @@ class AllocationOptimizer:
         for rec in result.recommendations:
             projected[rec.instance_crn] = rec.new_allocation
 
-        total_allocated = sum(projected.values()) + self.account.unconfigured_allocation_seconds
-        if total_allocated > self.account.target_usage_seconds:
+        total_allocated = sum(projected.values()) + self.account.unmanaged_allocation_seconds
+        if total_allocated > self.account.allocation_budget_seconds:
             errors.append(
                 f"Total instance allocations ({total_allocated}s) exceeds "
-                f"account target ({self.account.target_usage_seconds}s)"
+                f"account budget ({self.account.allocation_budget_seconds}s)"
             )
 
         return len(errors) == 0, errors
