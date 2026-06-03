@@ -151,6 +151,6 @@ def test_archived_instance_split(client: IBMQuantumAPIClient) -> None:
     with patch.object(client.session, "request", return_value=page):
         result = client.discover_instances("acct-1", Plan.PREMIUM)
     assert len(result.live) == 1
-    assert result.archived[0].crn == "crn:live"
+    assert result.live[0].crn == "crn:live"
     assert len(result.archived) == 1
     assert result.archived[0].crn == "crn:archived"
