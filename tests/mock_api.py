@@ -10,11 +10,12 @@
 
 """Mock API client for testing."""
 
+import dataclasses
 from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Any
 
-from qauvern.models import Account, DiscoveredInstance, InstanceState, InstanceRef
+from qauvern.models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState, InstanceRef
 from qauvern.plan import Plan, plan_id_for
 
 
@@ -34,6 +35,7 @@ class MockIBMQuantumAPIClient:
 
         self._account_params: dict[str, dict] = {}
         self._account_instances: dict[str, list[str]] = {}
+        self._archived_crns: set[str] = set()
         self.instances: dict[str, InstanceState] = {}
         self.usage_data: dict[str, dict] = {}
         self.daily_usage_data: dict[str, dict[date, int]] = {}
@@ -69,6 +71,7 @@ class MockIBMQuantumAPIClient:
         consumed_seconds: int = 0,
         limit_seconds: int | None = None,
         account_id: str | None = None,
+        archived: bool = False,
     ) -> InstanceState:
         """Setup a mock instance for testing."""
         instance = InstanceState(
@@ -80,6 +83,8 @@ class MockIBMQuantumAPIClient:
             detailed_usage=None,
         )
         self.instances[crn] = instance
+        if archived:
+            self._archived_crns.add(crn)
         if account_id:
             self._account_instances.setdefault(account_id, []).append(crn)
         return instance
@@ -139,19 +144,25 @@ class MockIBMQuantumAPIClient:
         self.instances[instance_crn].limit_seconds = limit_seconds
         return True
 
-    def discover_instances(self, account_id: str, plan: Plan | None = None) -> list[DiscoveredInstance]:
-        """List mock instances for an account.
+    def discover_instances(self, account_id: str, plan: Plan | None = None) -> DiscoveredInstances:
+        """List mock instances for an account, split into live and archived.
 
         `plan` is accepted to match the real client signature; the mock does
         not filter by plan since each test scenario sets up instances directly.
         """
         if account_id not in self._account_params:
             raise ValueError(f"Account {account_id} not found")
-        return [
-            DiscoveredInstance(crn=crn, name=self.instances[crn].name)
-            for crn in self._account_instances.get(account_id, [])
-            if crn in self.instances
-        ]
+        live = []
+        archived = []
+        for crn in self._account_instances.get(account_id, []):
+            if crn not in self.instances:
+                continue
+            instance = DiscoveredInstance(crn=crn, name=self.instances[crn].name)
+            if crn in self._archived_crns:
+                archived.append(instance)
+            else:
+                live.append(instance)
+        return DiscoveredInstances(live=tuple(live), archived=tuple(archived))
 
     def get_account(
         self,
@@ -159,13 +170,12 @@ class MockIBMQuantumAPIClient:
         plan: Plan | None = None,
         instance_refs: Sequence[InstanceRef] | None = None,
     ) -> Account:
-        """Get mock account with all instances populated.
-
-        `plan` and `instance_refs` are accepted to match the real client signature;
-        the mock does not filter by plan since each test scenario sets up
-        instances directly.
-        """
-        return self._build_account(account_id)
+        """Get mock account, optionally filtered to the given instance refs."""
+        account = self._build_account(account_id)
+        if instance_refs is not None:
+            ref_crns = {ref.crn for ref in instance_refs}
+            return dataclasses.replace(account, instances=tuple(i for i in account.instances if i.crn in ref_crns))
+        return account
 
     def create_instance(
         self,

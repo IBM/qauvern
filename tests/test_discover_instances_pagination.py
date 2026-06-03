@@ -31,8 +31,13 @@ def _make_response(resources: list[dict], next_url: str | None = None) -> MagicM
     return resp
 
 
-def _resource(crn: str, name: str, account_id: str = "acct-1") -> dict:
-    return {"id": crn, "name": name, "account_id": account_id}
+def _resource(crn: str, name: str, account_id: str = "acct-1", *, allocation: int | None = None) -> dict:
+    return {
+        "id": crn,
+        "name": name,
+        "account_id": account_id,
+        "extensions": {"usage_allocation_seconds": allocation if allocation is not None else 1},
+    }
 
 
 @pytest.fixture
@@ -51,9 +56,10 @@ def test_single_page_no_next_url(client: IBMQuantumAPIClient) -> None:
     )
     with patch.object(client.session, "request", return_value=page) as mock_get:
         result = client.discover_instances("acct-1", Plan.PREMIUM)
-    assert len(result) == 2
-    assert result[0].crn == "crn:1"
-    assert result[1].crn == "crn:2"
+    assert len(result.live) == 2
+    assert result.live[0].crn == "crn:1"
+    assert result.live[1].crn == "crn:2"
+    assert result.archived == ()
     assert mock_get.call_count == 1
 
 
@@ -66,8 +72,8 @@ def test_two_pages(client: IBMQuantumAPIClient) -> None:
     page2 = _make_response([_resource("crn:2", "inst-2")])
     with patch.object(client.session, "request", side_effect=[page1, page2]) as mock_get:
         result = client.discover_instances("acct-1", Plan.PREMIUM)
-    assert len(result) == 2
-    assert [i.crn for i in result] == ["crn:1", "crn:2"]
+    assert len(result.live) == 2
+    assert [i.crn for i in result.live] == ["crn:1", "crn:2"]
     assert mock_get.call_count == 2
     # Second call must include the start token
     assert mock_get.call_args_list[1].kwargs["params"]["start"] == "token-abc"
@@ -86,7 +92,7 @@ def test_three_pages(client: IBMQuantumAPIClient) -> None:
     page3 = _make_response([_resource("crn:3", "inst-3")])
     with patch.object(client.session, "request", side_effect=[page1, page2, page3]) as mock_get:
         result = client.discover_instances("acct-1", Plan.PREMIUM)
-    assert len(result) == 3
+    assert len(result.live) == 3
     assert mock_get.call_count == 3
 
 
@@ -121,8 +127,8 @@ def test_account_id_and_plan_filter_across_pages(client: IBMQuantumAPIClient) ->
     )
     with patch.object(client.session, "request", side_effect=[page1, page2]) as mock_get:
         result = client.discover_instances("acct-1", Plan.PREMIUM)
-    assert len(result) == 3
-    assert {i.crn for i in result} == {"crn:1", "crn:2", "crn:3"}
+    assert len(result.live) == 3
+    assert {i.crn for i in result.live} == {"crn:1", "crn:2", "crn:3"}
     from qauvern.plan import plan_id_for
 
     premium_id = plan_id_for(Plan.PREMIUM)
@@ -132,3 +138,19 @@ def test_account_id_and_plan_filter_across_pages(client: IBMQuantumAPIClient) ->
     # Verify account_id and resource_plan_id were passed in params on second call
     assert mock_get.call_args_list[1].kwargs["params"]["account_id"] == "acct-1"
     assert mock_get.call_args_list[1].kwargs["params"]["resource_plan_id"] == premium_id
+
+
+def test_archived_instance_split(client: IBMQuantumAPIClient) -> None:
+    """Instance with extensions.usage_allocation_seconds == 0 goes to archived, others to live."""
+    page = _make_response(
+        [
+            _resource("crn:live", "live-inst", allocation=3600),
+            _resource("crn:archived", "archived-inst", allocation=0),
+        ]
+    )
+    with patch.object(client.session, "request", return_value=page):
+        result = client.discover_instances("acct-1", Plan.PREMIUM)
+    assert len(result.live) == 1
+    assert result.archived[0].crn == "crn:live"
+    assert len(result.archived) == 1
+    assert result.archived[0].crn == "crn:archived"

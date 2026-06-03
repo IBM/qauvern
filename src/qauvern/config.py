@@ -156,21 +156,34 @@ class ConfigParser:
     def validate_instances_against_api(self, client: "IBMQuantumAPIClient") -> list[InstanceNameDrift]:
         """Verify every configured instance exists on the API for this account+plan.
 
-        Raises ValueError if any configured CRN is not returned by discover_instances.
-        Returns a list of name drifts for configured instances whose CRN matches
-        but whose name no longer matches the live API name.
+        Raises ValueError if any configured CRN is not found or is archived.
+
+        Returns a list of name drifts for configured instances whose CRN matches a live
+        instance but whose name no longer matches the live API name.
         """
         discovered = client.discover_instances(self.account_id, self.plan)
-        discovered_by_crn = {d.crn: d.name for d in discovered}
-        unrecognized = [cfg for cfg in self.instance_configs if cfg.crn not in discovered_by_crn]
+        live_by_crn = {d.crn: d.name for d in discovered.live}
+        archived_by_crn = {d.crn: d.name for d in discovered.archived}
+        all_by_crn = {**live_by_crn, **archived_by_crn}
+
+        unrecognized = [cfg for cfg in self.instance_configs if cfg.crn not in all_by_crn]
+        archived = [cfg for cfg in self.instance_configs if cfg.crn in archived_by_crn]
+
+        errors = []
         if unrecognized:
             bullets = "\n".join(f"  - {cfg.name}, {cfg.crn}" for cfg in unrecognized)
-            raise ValueError(
+            errors.append(
                 f"Config file contains instances not found in account "
                 f"{self.account_id} on plan {self.plan.value}:\n{bullets}"
             )
+        if archived:
+            bullets = "\n".join(f"  - {cfg.name}, {cfg.crn}" for cfg in archived)
+            errors.append(f"Config file contains archived instances:\n{bullets}")
+        if errors:
+            raise ValueError("\n\n".join(errors))
+
         return [
-            InstanceNameDrift(crn=cfg.crn, config_name=cfg.name, api_name=discovered_by_crn[cfg.crn])
+            InstanceNameDrift(crn=cfg.crn, config_name=cfg.name, api_name=live_by_crn[cfg.crn])
             for cfg in self.instance_configs
-            if cfg.name != discovered_by_crn[cfg.crn]
+            if cfg.name != live_by_crn[cfg.crn]
         ]

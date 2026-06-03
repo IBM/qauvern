@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
-from .models import Account, DiscoveredInstance, InstanceState, InstanceRef
+from .models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState, InstanceRef
 from .plan import Plan, plan_id_for
 
 QUANTUM_COMPUTING_RESOURCE_ID = "b6049020-80f4-11eb-a0f7-e35ec9b4054f"
@@ -340,8 +340,8 @@ class IBMQuantumAPIClient:
 
         return self._request_json("POST", url, json=payload)
 
-    def discover_instances(self, account_id: str, plan: Plan) -> list[DiscoveredInstance]:
-        """Find all live instances for the account_id and plan.
+    def discover_instances(self, account_id: str, plan: Plan) -> DiscoveredInstances:
+        """Find all instances for the account_id and plan, split into live and archived.
 
         Usually, commands should instead read the instances from ConfigParser.instance_configs,
         rather than using this live value.
@@ -353,14 +353,19 @@ class IBMQuantumAPIClient:
             "resource_plan_id": plan_id_for(plan),
         }
 
-        instances = []
+        live: list[DiscoveredInstance] = []
+        archived: list[DiscoveredInstance] = []
         while True:
             data = self._request_json("GET", url, params=params)
-            for resource in data.get("resources", []):
-                crn = resource.get("id")
-                name = resource.get("name", "")
+            for resource in data["resources"]:
+                crn = resource["id"]
+                name = resource["name"]
                 if crn:
-                    instances.append(DiscoveredInstance(crn=crn, name=name))
+                    allocation = resource["extensions"]["usage_allocation_seconds"]
+                    if allocation == 0:
+                        archived.append(DiscoveredInstance(crn=crn, name=name))
+                    else:
+                        live.append(DiscoveredInstance(crn=crn, name=name))
 
             next_url = data.get("next_url")
             if not next_url:
@@ -371,7 +376,7 @@ class IBMQuantumAPIClient:
                 break
             params["start"] = start_token
 
-        return instances
+        return DiscoveredInstances(live=tuple(live), archived=tuple(archived))
 
     def get_account(self, account_id: str, plan: Plan, instance_refs: Sequence[InstanceRef]) -> Account:
         """Get account with instances filtered by plan, populated with full data."""

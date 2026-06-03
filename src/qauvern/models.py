@@ -54,10 +54,16 @@ class InstanceConfig:
 
 @dataclass(frozen=True)
 class DiscoveredInstance:
-    """Returned by `discover_instances`. Prefer `InstanceConfig` elsewhere."""
-
     crn: str
     name: str
+
+
+@dataclass(frozen=True)
+class DiscoveredInstances:
+    """Result of discover_instances, split into live and archived collections."""
+
+    live: tuple[DiscoveredInstance, ...]
+    archived: tuple[DiscoveredInstance, ...]
 
 
 @dataclass(frozen=True)
