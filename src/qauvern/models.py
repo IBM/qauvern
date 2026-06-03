@@ -205,11 +205,11 @@ class OptimizationRecommendation:
         return self.new_allocation - self.current_allocation
 
 
-@dataclass
+@dataclass(frozen=True)
 class OptimizationResult:
     """Results from optimization algorithm."""
 
-    recommendations: list[OptimizationRecommendation]
+    recommendations: tuple[OptimizationRecommendation, ...]
 
     @property
     def reductions(self) -> list[OptimizationRecommendation]:
