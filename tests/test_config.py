@@ -219,7 +219,6 @@ balance_period:
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    target_usage_seconds: 30000
 """)
     try:
         parser = ConfigParser(path)
@@ -240,7 +239,6 @@ balance_period:
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    target_usage_seconds: 30000
 """)
     try:
         parser = ConfigParser(path)
@@ -261,7 +259,6 @@ balance_period:
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    target_usage_seconds: 30000
 """)
     try:
         with pytest.raises(ValueError, match="allocation_reserve_percent"):
@@ -319,26 +316,6 @@ instances:
         os.unlink(path)
 
 
-def test_instance_without_target_usage_seconds() -> None:
-    """Test that entry without target_usage_seconds parses with None."""
-    path = _write_config("""
-account_id: "acc-1"
-plan: "internal"
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
-instances:
-  - name: "Project A"
-    crn: "crn:test:1"
-    limit_seconds: 50000
-""")
-    try:
-        parser = ConfigParser(path)
-        assert parser.instance_configs[0].target_usage_seconds is None
-    finally:
-        os.unlink(path)
-
-
 def test_limit_seconds_parsed() -> None:
     """Test that limit_seconds YAML key parses to limit_seconds."""
     path = _write_config("""
@@ -350,33 +327,11 @@ balance_period:
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    target_usage_seconds: 30000
     limit_seconds: 50000
 """)
     try:
         parser = ConfigParser(path)
         assert parser.instance_configs[0].target_limit_seconds == 50000
-    finally:
-        os.unlink(path)
-
-
-def test_limit_below_target_raises() -> None:
-    """Test that limit_seconds < target_usage_seconds raises ValueError."""
-    path = _write_config("""
-account_id: "acc-1"
-plan: "internal"
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
-instances:
-  - name: "Project A"
-    crn: "crn:test:1"
-    target_usage_seconds: 50000
-    limit_seconds: 30000
-""")
-    try:
-        with pytest.raises(ValueError, match="limit_seconds"):
-            ConfigParser(path)
     finally:
         os.unlink(path)
 
@@ -397,7 +352,6 @@ balance_period:
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    target_usage_seconds: 30000
 """)
     try:
         parser = ConfigParser(path)
@@ -417,7 +371,6 @@ balance_period:
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    target_usage_seconds: 30000
     limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00+00:00"
@@ -442,7 +395,6 @@ balance_period:
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    target_usage_seconds: 30000
     limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00+00:00"
@@ -469,7 +421,6 @@ balance_period:
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    target_usage_seconds: 30000
     limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00+00:00"
@@ -493,7 +444,6 @@ balance_period:
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    target_usage_seconds: 30000
     limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00+00:00"
@@ -518,7 +468,6 @@ balance_period:
 instances:
   - name: "Project A"
     crn: "crn:test:1"
-    target_usage_seconds: 30000
     limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00+00:00"

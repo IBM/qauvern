@@ -61,12 +61,6 @@ def test_build_configure_yaml_multiple_instances() -> None:
     assert [p["crn"] for p in parsed["instances"]] == ["crn:a", "crn:b", "crn:c"]
 
 
-def test_build_configure_yaml_omits_target_usage_seconds() -> None:
-    instances = [_make_instance(allocation_seconds=12345)]
-    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances, "s", "e"))
-    assert "target_usage_seconds" not in parsed["instances"][0]
-
-
 def test_build_configure_yaml_includes_limit_seconds_when_set() -> None:
     instances = [_make_instance(limit_seconds=50000)]
     parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances, "s", "e"))
@@ -105,7 +99,6 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     assert cfg.balance_period["end_date"] == datetime(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
     assert len(cfg.instance_configs) == 1
     assert cfg.instance_configs[0].crn == "crn:test:rt"
-    assert cfg.instance_configs[0].target_usage_seconds is None
 
     # Then: simulate the user editing the file (changing plan, tweaking the
     # instance, adding net_grants, setting a custom minimum) and confirm it
@@ -113,7 +106,6 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     parsed = yaml.safe_load(text)
     parsed["plan"] = "premium"
     parsed["minimum_allocation_seconds"] = 120
-    parsed["instances"][0]["target_usage_seconds"] = 50000
     parsed["instances"][0]["limit_seconds"] = 80000
     parsed["instances"][0]["net_grants"] = [
         {"start_date": "2026-05-01T00:00:00+00:00", "net_grant_seconds": 180000},
@@ -123,7 +115,6 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     cfg = ConfigParser(str(path))
     assert cfg.plan == Plan.PREMIUM
     assert cfg.minimum_allocation_seconds == 120
-    assert cfg.instance_configs[0].target_usage_seconds == 50000
     assert cfg.instance_configs[0].target_limit_seconds == 80000
     assert len(cfg.instance_configs[0].net_grants) == 1
     assert cfg.instance_configs[0].net_grants[0].net_grant_seconds == 180000
@@ -181,7 +172,6 @@ def test_configure_happy_path(runner: CliRunner, tmp_path: Path) -> None:
     assert len(parsed["instances"]) == 1
     instance = parsed["instances"][0]
     assert instance["crn"] == "crn:test:i-1"
-    assert "target_usage_seconds" not in instance
     assert instance["limit_seconds"] == 72000
 
     assert "Configuration file created" in result.output

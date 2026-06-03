@@ -83,23 +83,11 @@ def test_net_grant_end_date_equals_start_raises() -> None:
 # -------------------------------------------------------------------
 
 
-def test_instance_config_invalid_allocation() -> None:
-    with pytest.raises(ValueError, match="target_usage_seconds must be positive"):
-        InstanceConfig(
-            name="Test",
-            crn="crn:test:1",
-            target_usage_seconds=-1000,
-            start_date=datetime(2026, 1, 1),
-            end_date=datetime(2026, 12, 31),
-        )
-
-
 def test_instance_config_invalid_dates() -> None:
     with pytest.raises(ValueError, match="start_date must be before end_date"):
         InstanceConfig(
             name="Test",
             crn="crn:test:1",
-            target_usage_seconds=1000,
             start_date=datetime(2026, 12, 31),
             end_date=datetime(2026, 1, 1),
         )
@@ -110,7 +98,6 @@ def test_instance_config_empty_crn() -> None:
         InstanceConfig(
             name="Test",
             crn="",
-            target_usage_seconds=1000,
             start_date=datetime(2026, 1, 1),
             end_date=datetime(2026, 12, 31),
         )
@@ -172,29 +159,6 @@ def test_activity_score_recent_outweighs_old() -> None:
     recent = _instance(detailed_usage=_usage(consumed_24h=100))
     old = _instance(consumed_seconds=100 * 28, detailed_usage=_usage())  # same average daily rate over 28d
     assert recent.activity_score > old.activity_score
-
-
-# -------------------------------------------------------------------
-# Instance — exhausted
-# -------------------------------------------------------------------
-
-
-def test_exhausted_no_target() -> None:
-    """target_usage_seconds=None means no cap — never exhausted regardless of consumption."""
-    assert not _instance(detailed_usage=_usage(consumed_balance_period=999999)).exhausted(None)
-
-
-def test_exhausted_under_target() -> None:
-    assert not _instance(detailed_usage=_usage(consumed_balance_period=999)).exhausted(1000)
-
-
-def test_exhausted_at_target() -> None:
-    """Boundary: >= means exactly hitting the target counts as exhausted."""
-    assert _instance(detailed_usage=_usage(consumed_balance_period=1000)).exhausted(1000)
-
-
-def test_exhausted_over_target() -> None:
-    assert _instance(detailed_usage=_usage(consumed_balance_period=1001)).exhausted(1000)
 
 
 # -------------------------------------------------------------------

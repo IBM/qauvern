@@ -183,8 +183,6 @@ def format_instance_table(
     # Column header mapping
     header_map = {
         "name": "Instance",
-        "target": "Target",
-        "target_pct": "Target%",
         "period": "Period",
         "28d": "28d",
         "14d": "14d",
@@ -213,17 +211,6 @@ def format_instance_table(
         for col in columns:
             if col == "name":
                 row.append(instance.name[:35] if len(instance.name) > 35 else instance.name)
-            elif col == "target":
-                if config and config.target_usage_seconds is not None:
-                    row.append(format_seconds(config.target_usage_seconds))
-                else:
-                    row.append("-")
-            elif col == "target_pct":
-                if config and config.target_usage_seconds:
-                    pct = (instance.usage.consumed_balance_period / config.target_usage_seconds) * 100
-                    row.append(f"{pct:.1f}%")
-                else:
-                    row.append("-")
             elif col == "period":
                 row.append(format_seconds(instance.usage.consumed_balance_period))
             elif col == "28d":
@@ -584,8 +571,6 @@ def analyze(ctx, config: str, api_key: str | None):
     # Use utility function with all analysis columns
     columns = [
         "name",
-        "target",
-        "target_pct",
         "period",
         "28d",
         "14d",

@@ -21,12 +21,10 @@ from qauvern.models import InstanceState, InstanceConfig, InstanceDetailedUsage,
 def make_instance_config(
     limit_seconds: int | None = None,
     net_grants: list[NetGrant] | None = None,
-    target_usage_seconds: int = 30000,
 ) -> InstanceConfig:
     return InstanceConfig(
         name="Test",
         crn="crn:test:1",
-        target_usage_seconds=target_usage_seconds,
         start_date=datetime(2026, 1, 1),
         end_date=datetime(2026, 12, 31),
         target_limit_seconds=limit_seconds,
@@ -71,18 +69,6 @@ def test_base_limit_only_returns_base(resolver: LimitResolver) -> None:
     cfg = make_instance_config(limit_seconds=50000)
     instance = make_instance()
     assert resolver.resolve(cfg, instance, date(2026, 4, 27)) == 50000
-
-
-def test_exhausted_returns_one(resolver: LimitResolver) -> None:
-    cfg = make_instance_config(limit_seconds=50000)
-    instance = make_instance(consumed_balance=30000)
-    assert resolver.resolve(cfg, instance, date(2026, 4, 27)) == 1
-
-
-def test_exhausted_no_limits_returns_one(resolver: LimitResolver) -> None:
-    cfg = make_instance_config()
-    instance = make_instance(consumed_balance=30000)
-    assert resolver.resolve(cfg, instance, date(2026, 4, 27)) == 1
 
 
 def test_grant_active_on_start_date(resolver: LimitResolver) -> None:
@@ -239,16 +225,6 @@ def test_active_grant_no_base_limit_returns_grant_only(resolver: LimitResolver) 
     cfg = make_instance_config(limit_seconds=None, net_grants=[grant])
     result = resolver.resolve(cfg, make_instance(), today)
     assert result == 40000
-
-
-def test_exhausted_with_active_grant_returns_one(resolver: LimitResolver) -> None:
-    """Exhausted always wins."""
-    today = date(2026, 4, 27)
-    grant = NetGrant(start_date=datetime(2026, 4, 27), net_grant_seconds=40000, end_date=datetime(2026, 5, 25))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    instance = make_instance(consumed_balance=30000)
-    result = resolver.resolve(cfg, instance, today)
-    assert result == 1
 
 
 def test_grant_with_custom_end_date_active(resolver: LimitResolver) -> None:

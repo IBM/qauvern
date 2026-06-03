@@ -81,7 +81,6 @@ balance_period:
 instances:
   - name: "Quantum Chemistry Research"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-1::"
-    target_usage_seconds: 108000  # 30 hours (0.625 QAU) — optional
 
     # Optional: Hard limit applied on every optimize run
     # limit_seconds: 216000
@@ -97,7 +96,6 @@ instances:
 
   - name: "Quantum Machine Learning"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-2::"
-    # No target_usage_seconds — allocation optimized between minimum and limit
     limit_seconds: 72000
 ```
 
@@ -147,7 +145,7 @@ Options:
 - `--balance-start`: Balance period start date (ISO format)
 - `--balance-end`: Balance period end date (ISO format)
 
-After generating the configuration, optionally set `target_usage_seconds` to enable balance-period tracking and exhaustion behavior; when omitted, allocation is optimized between `minimum_allocation_seconds` and `limit_seconds`.
+After generating the configuration, optionally set `limit_seconds` and `net_grants` per instance to control hard caps and temporary bonuses.
 
 #### Show Current Allocations
 

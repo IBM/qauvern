@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `qauvern` now eagerly errors if the config file has any archived instances.
+- Removed `target_usage_seconds` from the config file, as it was duplicative of IBM Quantum Platform's limit mechanism. See [here](https://github.com/IBM/qauvern/issues/102) for more motivation.
 
 ### Fixed
 

@@ -28,18 +28,14 @@ class LimitResolver:
         """Return the effective limit in seconds for the given instance today.
 
         Resolution order:
-        1. Exhausted instance -> 1
-        2. Active net grants with rolloff -> base + sum(each grant's contribution)
-        3. Base limit only -> instance_config.limit_seconds
-        4. No limit -> None
+        1. Active net grants with rolloff -> base + sum(each grant's contribution)
+        2. Base limit only -> instance_config.limit_seconds
+        3. No limit -> None
 
         Grant contribution = max(0, net_grant_seconds - rolloff)
         where rolloff = sum(usage on days that were in the 28-day window at grant
         start but have since exited, and are strictly before grant start).
         """
-        if instance_state.exhausted(instance_config.target_usage_seconds):
-            return 1
-
         base_limit = instance_config.target_limit_seconds
 
         if not instance_config.net_grants:
