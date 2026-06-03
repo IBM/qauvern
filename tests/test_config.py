@@ -646,3 +646,21 @@ def test_validate_instances_against_api_unrecognized_takes_priority_over_drift()
         assert "Project B, crn:test:2" in str(excinfo.value)
     finally:
         os.unlink(path)
+
+
+def test_validate_instances_against_api_raises_on_archived_instance() -> None:
+    """A config CRN that is archived → ValueError naming the archived instance."""
+    client = MockIBMQuantumAPIClient()
+    client.setup_account("acc-1", target_usage_seconds=0)
+    client.setup_instance("crn:test:1", "Project A", allocation_seconds=0, account_id="acc-1")
+    client.setup_instance("crn:test:2", "Project B", allocation_seconds=0, account_id="acc-1", archived=True)
+
+    path = _write_config(_two_instance_config())
+    try:
+        parser = ConfigParser(path)
+        with pytest.raises(ValueError) as excinfo:
+            parser.validate_instances_against_api(client)  # ty: ignore[invalid-argument-type]
+        assert "archived" in str(excinfo.value)
+        assert "Project B, crn:test:2" in str(excinfo.value)
+    finally:
+        os.unlink(path)

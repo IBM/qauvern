@@ -810,14 +810,16 @@ def configure(
     client = _build_client(ctx, api_key)
 
     click.echo("Fetching instances...")
-    instance_refs = client.discover_instances(account_id, plan)
-    instances = client.get_account(account_id, plan, instance_refs).instances
+    discovered = client.discover_instances(account_id, plan)
+    if discovered.archived:
+        click.echo(f"Skipping {len(discovered.archived)} archived instance(s)", err=True)
 
+    instances = client.get_account(account_id, plan, discovered.live).instances
     if not instances:
         click.echo("⚠ No instances found in this account.", err=True)
         sys.exit(1)
 
-    click.echo(f"Found {len(instances)} instances")
+    click.echo(f"Found {len(instances)} instance(s)")
     click.echo("\nGenerating configuration file...")
 
     output_path = Path(output)

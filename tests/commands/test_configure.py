@@ -247,3 +247,44 @@ def test_configure_empty_instances_exits_with_error(runner: CliRunner, tmp_path:
     assert result.exit_code == 1
     assert "No instances found" in result.output
     assert not output.exists()
+
+
+def test_configure_excludes_archived_instances(runner: CliRunner, tmp_path: Path) -> None:
+    mock_client = MockIBMQuantumAPIClient()
+    mock_client.setup_account(account_id="acct-1", target_usage_seconds=0)
+    mock_client.setup_instance(
+        crn="crn:test:live",
+        name="Live Instance",
+        allocation_seconds=36000,
+        account_id="acct-1",
+    )
+    mock_client.setup_instance(
+        crn="crn:test:archived",
+        name="Archived Instance",
+        allocation_seconds=0,
+        account_id="acct-1",
+        archived=True,
+    )
+
+    output = tmp_path / "config.yaml"
+    result = _invoke_configure(
+        runner,
+        mock_client,
+        [
+            "--account-id",
+            "acct-1",
+            "--plan",
+            "internal",
+            "--api-key",
+            "test-key",
+            "--output",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Skipping 1 archived" in result.output
+
+    parsed = yaml.safe_load(output.read_text())
+    assert len(parsed["instances"]) == 1
+    assert parsed["instances"][0]["crn"] == "crn:test:live"
