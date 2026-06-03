@@ -216,7 +216,7 @@ def test_validate_allocations_valid() -> None:
     account = _make_account(10, _make_instance("crn:test:1", 5))
     cfg = _make_config("crn:test:1", target=8)
 
-    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult([]))
+    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult(()))
 
     assert is_valid
     assert errors == []
@@ -227,7 +227,7 @@ def test_validate_allocations_exceeds_instance_target() -> None:
     account = _make_account(20, _make_instance("crn:test:1", 12))
     cfg = _make_config("crn:test:1", target=10, name="Test Instance")
 
-    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult([]))
+    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult(()))
 
     assert not is_valid
     assert errors == ["Instance 'Test Instance' total allocation (12s) exceeds target (10s)"]
@@ -238,7 +238,7 @@ def test_validate_skips_config_without_target() -> None:
     account = _make_account(20, _make_instance("crn:test:1", 15))
     cfg = _make_config("crn:test:1", target=None, name="No Target")
 
-    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult([]))
+    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult(()))
 
     assert is_valid
     assert errors == []
@@ -250,19 +250,19 @@ def test_validate_allocations_uses_result_overrides() -> None:
     optimizer = AllocationOptimizer(account, [])
 
     # Current state is valid (4 <= 5).
-    is_valid, _ = optimizer.validate_allocations(OptimizationResult([]))
+    is_valid, _ = optimizer.validate_allocations(OptimizationResult(()))
     assert is_valid
 
     # Bumping to 6 projects the total over the cap.
     over_cap = OptimizationResult(
-        recommendations=[
+        recommendations=(
             OptimizationRecommendation(
                 instance_crn="crn:test:1",
                 current_allocation=4,
                 new_allocation=6,
                 reason="test",
-            )
-        ]
+            ),
+        )
     )
     is_valid, errors = optimizer.validate_allocations(over_cap)
     assert not is_valid
@@ -285,28 +285,28 @@ def test_validate_allocations_includes_unconfigured() -> None:
 
     # Bumping the loaded instance to 5 fits the cap exactly (5 + 5 unconfigured = 10).
     fits = OptimizationResult(
-        recommendations=[
+        recommendations=(
             OptimizationRecommendation(
                 instance_crn="crn:test:1",
                 current_allocation=4,
                 new_allocation=5,
                 reason="test",
-            )
-        ]
+            ),
+        )
     )
     is_valid, _ = optimizer.validate_allocations(fits)
     assert is_valid
 
     # Bumping to 6 overflows: 6 + 5 unconfigured > 10.
     over = OptimizationResult(
-        recommendations=[
+        recommendations=(
             OptimizationRecommendation(
                 instance_crn="crn:test:1",
                 current_allocation=4,
                 new_allocation=6,
                 reason="test",
-            )
-        ]
+            ),
+        )
     )
     is_valid, errors = optimizer.validate_allocations(over)
     assert not is_valid

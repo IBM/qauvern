@@ -283,7 +283,7 @@ class AllocationOptimizer:
         print("\n=== Optimization Complete ===")
         print(f"Total recommendations: {len(recommendations)}")
 
-        return OptimizationResult(recommendations)
+        return OptimizationResult(tuple(recommendations))
 
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
         """Check that applying `result` would not exceed the account cap or any per-instance config target.

@@ -321,7 +321,7 @@ def test_recommendation_negative_change() -> None:
 def test_result_reductions_property() -> None:
     """Test that reductions property filters correctly."""
     result = OptimizationResult(
-        recommendations=[
+        recommendations=(
             OptimizationRecommendation(
                 instance_crn="crn:1",
                 current_allocation=2000,
@@ -340,7 +340,7 @@ def test_result_reductions_property() -> None:
                 new_allocation=500,
                 reason="Reduce more",
             ),
-        ],
+        ),
     )
 
     reductions = result.reductions
@@ -351,7 +351,7 @@ def test_result_reductions_property() -> None:
 def test_result_additions_property() -> None:
     """Test that additions property filters correctly."""
     result = OptimizationResult(
-        recommendations=[
+        recommendations=(
             OptimizationRecommendation(
                 instance_crn="crn:1",
                 current_allocation=2000,
@@ -370,7 +370,7 @@ def test_result_additions_property() -> None:
                 new_allocation=1500,
                 reason="Increase more",
             ),
-        ],
+        ),
     )
 
     additions = result.additions
@@ -381,14 +381,14 @@ def test_result_additions_property() -> None:
 def test_result_no_change_recommendations() -> None:
     """Test result with no-change recommendations."""
     result = OptimizationResult(
-        recommendations=[
+        recommendations=(
             OptimizationRecommendation(
                 instance_crn="crn:1",
                 current_allocation=1000,
                 new_allocation=1000,
                 reason="No change",
             ),
-        ],
+        ),
     )
 
     assert len(result.reductions) == 0
