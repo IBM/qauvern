@@ -30,13 +30,20 @@ from qauvern.optimizer import AllocationOptimizer
 # ---------------------------------------------------------------------------
 
 
-def _make_instance(crn: str, allocation: int, *, name: str | None = None) -> InstanceState:
+def _make_instance(
+    crn: str,
+    allocation: int,
+    *,
+    name: str | None = None,
+    consumed: int = 0,
+    limit: int | None = None,
+) -> InstanceState:
     return InstanceState(
         crn=crn,
         name=name or crn,
         allocation_seconds=allocation,
-        limit_seconds=None,
-        consumed_seconds=0,
+        limit_seconds=limit,
+        consumed_seconds=consumed,
         detailed_usage=None,
     )
 
@@ -194,14 +201,27 @@ def test_optimize_generates_recommendations(
 
 
 def test_validate_allocations_valid() -> None:
-    """Allocation under account target passes."""
-    account = _make_account(10, _make_instance("crn:test:1", 5))
+    """An already-valid state with no recommendations passes all invariants."""
+    # allocation=100 satisfies invariant 4 (>= default minimum of 60)
+    account = _make_account(1000, _make_instance("crn:test:1", 100))
     cfg = _make_config("crn:test:1")
 
     is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult(()))
 
     assert is_valid
     assert errors == []
+
+
+def test_validate_allocations_catches_preexisting_violation() -> None:
+    """Current-state violations are flagged even when the result has no recommendations."""
+    # allocation < consumed: no recommendation produced, validator still fires invariant 3.
+    inst = _make_instance("crn:test:1", 50, consumed=100)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:test:1")])
+
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult(()))
+
+    assert not is_valid
+    assert any("28-day usage" in e for e in errors)
 
 
 def test_validate_allocations_uses_result_overrides() -> None:
@@ -254,8 +274,8 @@ def test_validate_allocations_includes_unmanaged() -> None:
             ),
         )
     )
-    is_valid, _ = optimizer.validate_allocations(fits)
-    assert is_valid
+    is_valid, errors = optimizer.validate_allocations(fits)
+    assert is_valid, errors
 
     # Bumping to 6 overflows: 6 + 5 unmanaged > 10.
     over = OptimizationResult(
@@ -271,6 +291,134 @@ def test_validate_allocations_includes_unmanaged() -> None:
     is_valid, errors = optimizer.validate_allocations(over)
     assert not is_valid
     assert errors == ["Total instance allocations (11s) exceeds account budget (10s)"]
+
+
+# ---------------------------------------------------------------------------
+# Invariant 2: reserve buffer
+# ---------------------------------------------------------------------------
+
+
+def test_validate_allocations_reserve_passes() -> None:
+    """Projected total within the reserve-adjusted budget passes."""
+    # unallocated = 800, above-floor = 200 - max(60, 100) = 100 → available = 900
+    # reserve_amount = int(900 * 0.20) = 180; effective_budget = 820
+    # projected total = 820 ≤ 820 → valid
+    inst = _make_instance("crn:a", 200, consumed=100)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], allocation_reserve_percent=20.0)
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=200, new_allocation=820, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert is_valid, errors
+
+
+def test_validate_allocations_reserve_violation() -> None:
+    """Projected total that consumes the reserve buffer is rejected."""
+    # same fixture; new_allocation=821 > effective_budget=820, but 821 ≤ 1000 so only reserve fires
+    inst = _make_instance("crn:a", 200, consumed=100)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], allocation_reserve_percent=20.0)
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=200, new_allocation=821, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert not is_valid
+    assert any("reserve" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Invariant 3: new_allocation >= 28-day consumed usage
+# ---------------------------------------------------------------------------
+
+
+def test_validate_allocations_usage_floor_passes() -> None:
+    """new_allocation equal to consumed_seconds passes invariant 3."""
+    inst = _make_instance("crn:a", 200, consumed=100)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=200, new_allocation=100, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert is_valid, errors
+
+
+def test_validate_allocations_usage_floor_violation() -> None:
+    """new_allocation below consumed_seconds is rejected."""
+    inst = _make_instance("crn:a", 200, consumed=150)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=200, new_allocation=100, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert not is_valid
+    assert any("28-day usage" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Invariant 4: new_allocation >= minimum_allocation_seconds
+# ---------------------------------------------------------------------------
+
+
+def test_validate_allocations_minimum_floor_passes() -> None:
+    """new_allocation equal to minimum_allocation_seconds passes invariant 4."""
+    inst = _make_instance("crn:a", 200)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], minimum_allocation_seconds=60)
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=200, new_allocation=60, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert is_valid, errors
+
+
+def test_validate_allocations_minimum_floor_violation() -> None:
+    """new_allocation below minimum_allocation_seconds is rejected."""
+    inst = _make_instance("crn:a", 200)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], minimum_allocation_seconds=60)
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=200, new_allocation=30, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert not is_valid
+    assert any("minimum" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Invariant 5: new_allocation <= effective limit
+# ---------------------------------------------------------------------------
+
+
+def test_validate_allocations_limit_ceiling_passes() -> None:
+    """new_allocation at inst.limit_seconds passes invariant 5."""
+    inst = _make_instance("crn:a", 200, limit=500)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=200, new_allocation=500, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert is_valid, errors
+
+
+def test_validate_allocations_limit_ceiling_violation() -> None:
+    """new_allocation above inst.limit_seconds is rejected."""
+    inst = _make_instance("crn:a", 200, limit=500)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=200, new_allocation=600, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert not is_valid
+    assert any("effective limit" in e for e in errors)
+
+
+def test_validate_allocations_new_limit_takes_precedence() -> None:
+    """rec.new_limit overrides inst.limit_seconds for the ceiling check."""
+    inst = _make_instance("crn:a", 200, limit=500)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
+    # new_limit=400 tightens the ceiling; new_allocation=450 exceeds it
+    rec = OptimizationRecommendation(
+        instance_crn="crn:a", current_allocation=200, new_allocation=450, reason="t", new_limit=400
+    )
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert not is_valid
+    assert any("effective limit" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Invariant 6: no archiving
+# ---------------------------------------------------------------------------
+
+
+def test_validate_allocations_no_archive_violation() -> None:
+    """new_allocation == 0 is rejected regardless of minimum_allocation_seconds."""
+    inst = _make_instance("crn:a", 200)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], minimum_allocation_seconds=0)
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=200, new_allocation=0, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert not is_valid
+    assert any("archiving" in e for e in errors)
 
 
 # ---------------------------------------------------------------------------

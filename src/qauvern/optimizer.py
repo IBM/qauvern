@@ -242,26 +242,91 @@ class AllocationOptimizer:
         return OptimizationResult(tuple(recommendations))
 
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
-        """Check that applying `result` would not exceed the account cap.
+        """Check that `result` satisfies all allocation invariants.
 
-        The check includes allocation held by instances missing from
-        `self.account.instances` via `Account.unmanaged_allocation_seconds`,
-        so the cap math is correct when only a subset of instances are loaded.
+        Checks (in order):
+        1. Total projected allocation does not exceed the account budget.
+        2. Total projected allocation respects the allocation_reserve_percent buffer.
+        3. Each managed instance's new_allocation >= its 28-day consumed usage.
+        4. Each managed instance's new_allocation >= minimum_allocation_seconds.
+        5. Each managed instance's new_allocation <= its effective limit (if set).
+        6. No managed instance's new_allocation is 0 (archiving is not allowed).
+
+        Unmanaged instances (those not in self.account.instances) contribute their
+        current allocation to the total-cap check via Account.unmanaged_allocation_seconds.
+        Per-instance invariants (3–6) only apply to instances present in
+        self.account.instances that also have a config.
 
         Returns:
             Tuple of (is_valid, list of error messages)
         """
         errors = []
 
-        projected = {inst.crn: inst.allocation_seconds for inst in self.account.instances}
-        for rec in result.recommendations:
-            projected[rec.instance_crn] = rec.new_allocation
+        rec_by_crn = {rec.instance_crn: rec for rec in result.recommendations}
 
-        total_allocated = sum(projected.values()) + self.account.unmanaged_allocation_seconds
+        # Invariant 1: total allocation cap
+        total_allocated = (
+            sum(
+                rec_by_crn[inst.crn].new_allocation if inst.crn in rec_by_crn else inst.allocation_seconds
+                for inst in self.account.instances
+            )
+            + self.account.unmanaged_allocation_seconds
+        )
         if total_allocated > self.account.allocation_budget_seconds:
             errors.append(
                 f"Total instance allocations ({total_allocated}s) exceeds "
                 f"account budget ({self.account.allocation_budget_seconds}s)"
             )
+
+        # Invariant 2: reserve buffer
+        # available = unallocated headroom + what managed instances hold above their floors.
+        # Mirrors the optimizer's Steps 2-3 redistribution pool.
+        available = max(
+            0,
+            self.account.unallocated_seconds
+            + sum(
+                inst.allocation_seconds - max(self.minimum_allocation_seconds, inst.consumed_seconds)
+                for inst in self.account.instances
+                if inst.crn in self._config_by_crn
+            ),
+        )
+        reserve_amount = int(available * self.allocation_reserve_percent / 100)
+        effective_budget = self.account.allocation_budget_seconds - reserve_amount
+        if reserve_amount > 0 and total_allocated > effective_budget:
+            errors.append(
+                f"Total instance allocations ({total_allocated}s) exceeds budget minus reserve ({effective_budget}s)"
+            )
+
+        # Invariants 3–6: per managed instance
+        for inst in self.account.instances:
+            if inst.crn not in self._config_by_crn:
+                continue
+            rec = rec_by_crn.get(inst.crn)
+            new_alloc = rec.new_allocation if rec is not None else inst.allocation_seconds
+
+            # Invariant 3: >= 28-day usage
+            if new_alloc < inst.consumed_seconds:
+                errors.append(
+                    f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below "
+                    f"28-day usage ({inst.consumed_seconds}s)"
+                )
+
+            # Invariant 4: >= minimum_allocation_seconds
+            if new_alloc < self.minimum_allocation_seconds:
+                errors.append(
+                    f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below "
+                    f"minimum ({self.minimum_allocation_seconds}s)"
+                )
+
+            # Invariant 5: <= effective limit (rec.new_limit takes precedence)
+            effective_limit = rec.new_limit if (rec is not None and rec.new_limit is not None) else inst.limit_seconds
+            if effective_limit is not None and new_alloc > effective_limit:
+                errors.append(
+                    f"Instance {inst.crn}: new_allocation ({new_alloc}s) exceeds effective limit ({effective_limit}s)"
+                )
+
+            # Invariant 6: no archiving
+            if new_alloc == 0:
+                errors.append(f"Instance {inst.crn}: new_allocation is 0 (archiving not allowed)")
 
         return len(errors) == 0, errors
