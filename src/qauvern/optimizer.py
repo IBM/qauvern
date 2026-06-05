@@ -262,14 +262,16 @@ class AllocationOptimizer:
         """
         errors = []
 
-        projected = {inst.crn: inst.allocation_seconds for inst in self.account.instances}
-        for rec in result.recommendations:
-            projected[rec.instance_crn] = rec.new_allocation
-
         rec_by_crn = {rec.instance_crn: rec for rec in result.recommendations}
 
         # Invariant 1: total allocation cap
-        total_allocated = sum(projected.values()) + self.account.unmanaged_allocation_seconds
+        total_allocated = (
+            sum(
+                rec_by_crn[inst.crn].new_allocation if inst.crn in rec_by_crn else inst.allocation_seconds
+                for inst in self.account.instances
+            )
+            + self.account.unmanaged_allocation_seconds
+        )
         if total_allocated > self.account.allocation_budget_seconds:
             errors.append(
                 f"Total instance allocations ({total_allocated}s) exceeds "
