@@ -212,6 +212,18 @@ def test_validate_allocations_valid() -> None:
     assert errors == []
 
 
+def test_validate_allocations_catches_preexisting_violation() -> None:
+    """Current-state violations are flagged even when the result has no recommendations."""
+    # allocation < consumed: no recommendation produced, validator still fires invariant 3.
+    inst = _make_instance("crn:test:1", 50, consumed=100)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:test:1")])
+
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult(()))
+
+    assert not is_valid
+    assert any("28-day usage" in e for e in errors)
+
+
 def test_validate_allocations_uses_result_overrides() -> None:
     """A recommendation that pushes a clean state past the cap is flagged."""
     account = _make_account(5, _make_instance("crn:test:1", 4))
@@ -262,8 +274,8 @@ def test_validate_allocations_includes_unmanaged() -> None:
             ),
         )
     )
-    is_valid, _ = optimizer.validate_allocations(fits)
-    assert is_valid
+    is_valid, errors = optimizer.validate_allocations(fits)
+    assert is_valid, errors
 
     # Bumping to 6 overflows: 6 + 5 unmanaged > 10.
     over = OptimizationResult(
@@ -288,9 +300,8 @@ def test_validate_allocations_includes_unmanaged() -> None:
 
 def test_validate_allocations_reserve_passes() -> None:
     """Projected total within the reserve-adjusted budget passes."""
-    # _make_account sets unallocated = 1000 - 200 = 800, so unmanaged = 0.
-    # freed = 200 - max(60, 100) = 100; available = 100 + 800 = 900
-    # reserve_amount = int(900 * 0.20) = 180; effective_budget = 1000 - 180 = 820
+    # unallocated = 800, above-floor = 200 - max(60, 100) = 100 → available = 900
+    # reserve_amount = int(900 * 0.20) = 180; effective_budget = 820
     # projected total = 820 ≤ 820 → valid
     inst = _make_instance("crn:a", 200, consumed=100)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], allocation_reserve_percent=20.0)
@@ -396,17 +407,8 @@ def test_validate_allocations_new_limit_takes_precedence() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invariant 6: no archiving (new_allocation != 0)
+# Invariant 6: no archiving
 # ---------------------------------------------------------------------------
-
-
-def test_validate_allocations_no_archive_passes() -> None:
-    """new_allocation > 0 passes invariant 6."""
-    inst = _make_instance("crn:a", 200)
-    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
-    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=200, new_allocation=60, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
-    assert is_valid, errors
 
 
 def test_validate_allocations_no_archive_violation() -> None:

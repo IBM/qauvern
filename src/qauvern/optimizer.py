@@ -279,13 +279,17 @@ class AllocationOptimizer:
             )
 
         # Invariant 2: reserve buffer
-        # freed mirrors the optimizer's Steps 2-3: reduction available from managed instances.
-        freed = sum(
-            inst.allocation_seconds - max(self.minimum_allocation_seconds, inst.consumed_seconds)
-            for inst in self.account.instances
-            if inst.crn in self._config_by_crn
+        # available = unallocated headroom + what managed instances hold above their floors.
+        # Mirrors the optimizer's Steps 2-3 redistribution pool.
+        available = max(
+            0,
+            self.account.unallocated_seconds
+            + sum(
+                inst.allocation_seconds - max(self.minimum_allocation_seconds, inst.consumed_seconds)
+                for inst in self.account.instances
+                if inst.crn in self._config_by_crn
+            ),
         )
-        available = max(0, freed + self.account.unallocated_seconds)
         reserve_amount = int(available * self.allocation_reserve_percent / 100)
         effective_budget = self.account.allocation_budget_seconds - reserve_amount
         if reserve_amount > 0 and total_allocated > effective_budget:
