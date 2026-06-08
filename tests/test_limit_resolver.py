@@ -8,9 +8,15 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Tests for LimitResolver with net grant rolloff."""
+"""Tests for resolve_limit.
 
-from datetime import date, datetime, timedelta
+Formula under test (when at least one grant is active today):
+    result = base + grant_total + max(0, rolloff - base)
+
+where rolloff sums daily_usage on days in [today - 28, boost_start - 1].
+"""
+
+from datetime import date, datetime
 
 import pytest
 
@@ -18,7 +24,7 @@ from qauvern.limit_resolver import resolve_limit
 from qauvern.models import InstanceState, InstanceConfig, InstanceDetailedUsage, NetGrant
 
 
-def make_instance_config(
+def make_config(
     limit_seconds: int | None = None,
     net_grants: list[NetGrant] | None = None,
 ) -> InstanceConfig:
@@ -32,19 +38,15 @@ def make_instance_config(
     )
 
 
-def make_instance(
-    consumed_balance: int = 0,
-    consumed_seconds: int = 0,
-    daily_usage: dict[date, int] | None = None,
-) -> InstanceState:
+def make_instance(daily_usage: dict[date, int] | None = None) -> InstanceState:
     return InstanceState(
         crn="crn:test:1",
         name="Test Instance",
         allocation_seconds=10000,
-        consumed_seconds=consumed_seconds,
+        consumed_seconds=0,
         limit_seconds=None,
         detailed_usage=InstanceDetailedUsage(
-            consumed_balance_period=consumed_balance,
+            consumed_balance_period=0,
             consumed_14day=0,
             consumed_7day=0,
             consumed_3day=0,
@@ -54,258 +56,207 @@ def make_instance(
     )
 
 
-def test_no_limit_fields_returns_none() -> None:
-    cfg = make_instance_config()
-    instance = make_instance()
-    assert resolve_limit(cfg, instance, date(2026, 4, 27)) is None
+# -------------------------------------------------------------------
+# Trivial paths
+# -------------------------------------------------------------------
 
 
-def test_base_limit_only_returns_base() -> None:
-    cfg = make_instance_config(limit_seconds=50000)
-    instance = make_instance()
-    assert resolve_limit(cfg, instance, date(2026, 4, 27)) == 50000
+def test_no_limit_and_no_grants_returns_none() -> None:
+    assert resolve_limit(make_config(), make_instance(), date(2026, 4, 27)) is None
+
+
+def test_base_limit_only_no_grants_returns_base() -> None:
+    assert resolve_limit(make_config(limit_seconds=50000), make_instance(), date(2026, 4, 27)) == 50000
+
+
+def test_all_grants_expired_returns_base() -> None:
+    grant = NetGrant(start_date=datetime(2026, 1, 1), net_grant_seconds=40000, end_date=datetime(2026, 2, 1))
+    cfg = make_config(limit_seconds=50000, net_grants=[grant])
+    assert resolve_limit(cfg, make_instance(), date(2026, 4, 27)) == 50000
+
+
+def test_future_grant_returns_base() -> None:
+    grant = NetGrant(start_date=datetime(2026, 5, 1), net_grant_seconds=40000, end_date=datetime(2026, 5, 29))
+    cfg = make_config(limit_seconds=50000, net_grants=[grant])
+    assert resolve_limit(cfg, make_instance(), date(2026, 4, 30)) == 50000
+
+
+# -------------------------------------------------------------------
+# Single-grant boundary behavior
+# -------------------------------------------------------------------
 
 
 def test_grant_active_on_start_date() -> None:
-    grant = NetGrant(start_date=datetime(2026, 5, 1), net_grant_seconds=40000, end_date=datetime(2026, 5, 29))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    result = resolve_limit(cfg, make_instance(), date(2026, 5, 1))
-    assert result == 90000
-
-
-def test_grant_active_on_day_27() -> None:
-    """Last day of grant window."""
-    start = datetime(2026, 5, 1)
-    last_day = start.date() + timedelta(days=27)
-    grant = NetGrant(start_date=start, net_grant_seconds=40000, end_date=datetime(2026, 5, 29))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    result = resolve_limit(cfg, make_instance(), last_day)
-    assert result == 90000
-
-
-def test_grant_expired_on_day_28() -> None:
-    """Day 28 is exclusive — grant is over."""
-    start = datetime(2026, 5, 1)
-    day_28 = start.date() + timedelta(days=28)
-    grant = NetGrant(start_date=start, net_grant_seconds=40000, end_date=datetime(2026, 5, 29))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    result = resolve_limit(cfg, make_instance(), day_28)
-    assert result == 50000
-
-
-def test_future_grant_returns_base_limit() -> None:
-    grant = NetGrant(start_date=datetime(2026, 5, 1), net_grant_seconds=40000, end_date=datetime(2026, 5, 29))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    result = resolve_limit(cfg, make_instance(), date(2026, 4, 30))
-    assert result == 50000
-
-
-def test_no_rolloff_when_grant_just_started() -> None:
-    """On grant start day, no pre-grant days have exited yet. Full grant active."""
-    today = date(2026, 4, 27)
-    grant = NetGrant(start_date=datetime(2026, 4, 27), net_grant_seconds=100000, end_date=datetime(2026, 5, 25))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    # yesterday is still inside the 28-day window (today - 28 = 2026-03-30)
-    instance = make_instance(daily_usage={date(2026, 4, 26): 5000})
-    result = resolve_limit(cfg, instance, today)
-    assert result == 150000  # full grant, no rolloff
-
-
-def test_one_day_rolled_off_reduces_limit() -> None:
-    """A pre-grant day exits the 28-day window, reducing the effective limit."""
-    # Grant started 2026-03-31 (27 days before today 2026-04-27) — still active (day 27 of 28)
-    # today - 28 = 2026-03-30
-    # Pre-grant exit: d < 2026-03-31 (pre-grant) AND d >= 2026-03-31 - 27 = 2026-03-04
-    #                 AND d < 2026-03-30 (exited window)
-    # 2026-03-29 qualifies: pre-grant (< 2026-03-31), was in window at grant start (>= 2026-03-04),
-    #                       and now exited (< 2026-03-30)
-    today = date(2026, 4, 27)
-    grant = NetGrant(start_date=datetime(2026, 3, 31), net_grant_seconds=100000, end_date=datetime(2026, 4, 28))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    instance = make_instance(daily_usage={date(2026, 3, 29): 5000})
-    result = resolve_limit(cfg, instance, today)
-    # rolloff = 5000, grant contribution = 100000 - 5000 = 95000
-    assert result == 145000
-
-
-def test_rolloff_capped_at_grant_amount() -> None:
-    """Rolloff cannot exceed grant amount; effective limit floor is base_limit."""
-    today = date(2026, 4, 27)
-    # Grant started 2026-03-31 (27 days ago) — still active
-    grant = NetGrant(start_date=datetime(2026, 3, 31), net_grant_seconds=1000, end_date=datetime(2026, 4, 28))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    # 2026-03-29: pre-grant, was in window at grant start (>= 2026-03-04), now exited (< 2026-03-30)
-    instance = make_instance(daily_usage={date(2026, 3, 29): 999999})
-    result = resolve_limit(cfg, instance, today)
-    assert result == 50000  # grant contribution = max(0, 1000 - 999999) = 0
-
-
-def test_days_still_in_window_do_not_roll_off() -> None:
-    """Days inside the current 28-day window have not rolled off — no rolloff."""
-    today = date(2026, 4, 27)
-    grant = NetGrant(start_date=datetime(2026, 4, 1), net_grant_seconds=100000, end_date=datetime(2026, 4, 29))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    # 2026-04-02 is 25 days ago — still inside 28-day window (today - 28 = 2026-03-30)
-    instance = make_instance(daily_usage={date(2026, 4, 2): 5000})
-    result = resolve_limit(cfg, instance, today)
-    assert result == 150000  # no rolloff
-
-
-def test_post_grant_days_never_roll_off() -> None:
-    """Usage after grant start does not count as rolloff (not pre-grant)."""
-    today = date(2026, 4, 27)
-    # Grant started 2026-03-31 (27 days ago) — still active
-    grant = NetGrant(start_date=datetime(2026, 3, 31), net_grant_seconds=100000, end_date=datetime(2026, 4, 28))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    # 2026-04-01 is after grant start — not a pre-grant day, cannot roll off
-    instance = make_instance(daily_usage={date(2026, 4, 1): 5000})
-    result = resolve_limit(cfg, instance, today)
-    assert result == 150000  # no rolloff
-
-
-def test_grant_expired_after_28_days() -> None:
-    """After 28 days, the grant is inactive regardless of rolloff."""
-    today = date(2026, 4, 27)
-    # Grant started exactly 28 days ago — window closed today
-    grant = NetGrant(start_date=datetime(2026, 3, 30), net_grant_seconds=100000, end_date=datetime(2026, 4, 27))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    instance = make_instance(daily_usage={date(2026, 3, 29): 5000})
-    result = resolve_limit(cfg, instance, today)
-    assert result == 50000  # grant inactive, base only
-
-
-def test_two_active_grants_stack() -> None:
-    today = date(2026, 4, 27)
-    grant1 = NetGrant(start_date=datetime(2026, 4, 27), net_grant_seconds=100000, end_date=datetime(2026, 5, 25))
-    grant2 = NetGrant(start_date=datetime(2026, 4, 27), net_grant_seconds=50000, end_date=datetime(2026, 5, 25))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant1, grant2])
-    result = resolve_limit(cfg, make_instance(), today)
-    assert result == 200000  # 50000 + 100000 + 50000
-
-
-def test_one_active_one_expired_grant() -> None:
-    today = date(2026, 4, 27)
-    expired = NetGrant(
-        start_date=datetime(2026, 3, 30), net_grant_seconds=100000, end_date=datetime(2026, 4, 27)
-    )  # expired
-    active = NetGrant(
-        start_date=datetime(2026, 4, 27), net_grant_seconds=50000, end_date=datetime(2026, 5, 25)
-    )  # active today
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[expired, active])
-    result = resolve_limit(cfg, make_instance(), today)
-    assert result == 100000  # 50000 base + 50000 active grant only
-
-
-def test_two_grants_independent_rolloff() -> None:
-    """Each grant's rolloff is computed independently from its own pre-grant days."""
-    today = date(2026, 4, 27)
-    # Grant 1: started 2026-03-31 (27 days ago, still active on day 27 of 28)
-    # today - 28 = 2026-03-30; pre-grant days < 2026-03-31 and < 2026-03-30 and >= 2026-03-04
-    # 2026-03-29 qualifies for grant1 rolloff
-    grant1 = NetGrant(start_date=datetime(2026, 3, 31), net_grant_seconds=100000, end_date=datetime(2026, 4, 28))
-    # Grant 2: started today; no rolloff
-    grant2 = NetGrant(start_date=datetime(2026, 4, 27), net_grant_seconds=50000, end_date=datetime(2026, 5, 25))
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant1, grant2])
-    instance = make_instance(daily_usage={date(2026, 3, 29): 5000})
-    result = resolve_limit(cfg, instance, today)
-    # grant1 contribution: 100000 - 5000 = 95000
-    # grant2 contribution: 50000 (no rolloff — 2026-03-29 is before grant2 start window)
-    assert result == 50000 + 95000 + 50000  # 195000
-
-
-def test_active_grant_no_base_limit_returns_grant_only() -> None:
-    """Grant without limit_seconds: base treated as 0."""
-    today = date(2026, 4, 27)
     grant = NetGrant(start_date=datetime(2026, 4, 27), net_grant_seconds=40000, end_date=datetime(2026, 5, 25))
-    cfg = make_instance_config(limit_seconds=None, net_grants=[grant])
-    result = resolve_limit(cfg, make_instance(), today)
-    assert result == 40000
+    cfg = make_config(limit_seconds=50000, net_grants=[grant])
+    assert resolve_limit(cfg, make_instance(), date(2026, 4, 27)) == 90000
 
 
-def test_grant_with_custom_end_date_active() -> None:
-    """Grant with explicit end_date 45 days out is still active on day 30."""
-    start = datetime(2026, 5, 1)
-    grant = NetGrant(
-        start_date=start,
-        net_grant_seconds=40000,
-        end_date=datetime(2026, 6, 15),
-    )
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    result = resolve_limit(cfg, make_instance(), date(2026, 5, 31))
-    assert result == 90000
+def test_grant_active_day_before_end() -> None:
+    grant = NetGrant(start_date=datetime(2026, 4, 1), net_grant_seconds=40000, end_date=datetime(2026, 4, 28))
+    cfg = make_config(limit_seconds=50000, net_grants=[grant])
+    # rolloff window: window_floor=Mar 30, rolloff_end=Mar 31; no usage → rolloff=0
+    assert resolve_limit(cfg, make_instance(), date(2026, 4, 27)) == 90000
 
 
-def test_grant_with_short_end_date_expired() -> None:
-    """Grant with explicit end_date 14 days out is inactive on day 14."""
-    start = datetime(2026, 5, 1)
-    grant = NetGrant(
-        start_date=start,
-        net_grant_seconds=40000,
-        end_date=datetime(2026, 5, 15),
-    )
-    cfg = make_instance_config(limit_seconds=50000, net_grants=[grant])
-    result = resolve_limit(cfg, make_instance(), date(2026, 5, 15))
-    assert result == 50000  # end_date is exclusive, grant expired
+def test_grant_inactive_on_end_date() -> None:
+    grant = NetGrant(start_date=datetime(2026, 4, 1), net_grant_seconds=40000, end_date=datetime(2026, 4, 28))
+    cfg = make_config(limit_seconds=50000, net_grants=[grant])
+    assert resolve_limit(cfg, make_instance(), date(2026, 4, 28)) == 50000
+
+
+# -------------------------------------------------------------------
+# Pre-grant usage at-or-below base contributes nothing
+# -------------------------------------------------------------------
+
+
+def test_pregrant_usage_below_base_does_not_extend_limit() -> None:
+    today = date(2026, 4, 27)
+    grant = NetGrant(start_date=datetime(2026, 4, 20), net_grant_seconds=40000, end_date=datetime(2026, 5, 18))
+    cfg = make_config(limit_seconds=50000, net_grants=[grant])
+    # rolloff window: [Mar 30, Apr 19]; Apr 1 usage 5000 is well under base 50000
+    instance = make_instance(daily_usage={date(2026, 4, 1): 5000})
+    # 50000 + 40000 + max(0, 5000 - 50000) = 90000
+    assert resolve_limit(cfg, instance, today) == 90000
+
+
+def test_pregrant_total_below_base_does_not_extend_limit() -> None:
+    today = date(2026, 4, 27)
+    grant = NetGrant(start_date=datetime(2026, 4, 20), net_grant_seconds=40000, end_date=datetime(2026, 5, 18))
+    cfg = make_config(limit_seconds=50000, net_grants=[grant])
+    # multiple days, but their sum (12000) is still under base
+    instance = make_instance(daily_usage={date(2026, 4, 1): 4000, date(2026, 4, 5): 4000, date(2026, 4, 10): 4000})
+    assert resolve_limit(cfg, instance, today) == 90000
+
+
+# -------------------------------------------------------------------
+# Pre-grant usage above base extends the limit
+# -------------------------------------------------------------------
+
+
+def test_pregrant_usage_above_base_adds_excess_headroom() -> None:
+    today = date(2026, 4, 27)
+    grant = NetGrant(start_date=datetime(2026, 4, 20), net_grant_seconds=6000, end_date=datetime(2026, 5, 18))
+    cfg = make_config(limit_seconds=12000, net_grants=[grant])
+    # rolloff window: [Mar 30, Apr 19]; one day at 20000 (above base 12000)
+    instance = make_instance(daily_usage={date(2026, 4, 1): 20000})
+    # 12000 + 6000 + max(0, 20000 - 12000) = 26000
+    assert resolve_limit(cfg, instance, today) == 26000
+
+
+def test_pregrant_excess_compares_total_to_base() -> None:
+    """Rolloff is summed across pre-grant days before the max(0, rolloff - base) cut."""
+    today = date(2026, 4, 27)
+    grant = NetGrant(start_date=datetime(2026, 4, 20), net_grant_seconds=6000, end_date=datetime(2026, 5, 18))
+    cfg = make_config(limit_seconds=12000, net_grants=[grant])
+    # two days at 8000 each → rolloff=16000, excess over base=4000
+    instance = make_instance(daily_usage={date(2026, 4, 1): 8000, date(2026, 4, 5): 8000})
+    # 12000 + 6000 + 4000 = 22000
+    assert resolve_limit(cfg, instance, today) == 22000
+
+
+def test_pregrant_days_outside_window_do_not_contribute() -> None:
+    today = date(2026, 5, 10)
+    # grant_start Apr 1 → rolloff_end Mar 31; window_floor = Apr 12 → rolloff_end < window_floor
+    grant = NetGrant(start_date=datetime(2026, 4, 1), net_grant_seconds=6000, end_date=datetime(2026, 5, 30))
+    cfg = make_config(limit_seconds=12000, net_grants=[grant])
+    instance = make_instance(daily_usage={date(2026, 3, 20): 99999})
+    # entire pre-grant window is outside the current 28-day window → rolloff=0
+    assert resolve_limit(cfg, instance, today) == 18000
+
+
+def test_day_equal_to_boost_start_does_not_count_in_rolloff() -> None:
+    today = date(2026, 4, 27)
+    grant = NetGrant(start_date=datetime(2026, 4, 20), net_grant_seconds=6000, end_date=datetime(2026, 5, 18))
+    cfg = make_config(limit_seconds=12000, net_grants=[grant])
+    # Apr 20 is the grant start; rolloff_end=Apr 19, so this day is excluded
+    instance = make_instance(daily_usage={date(2026, 4, 20): 99999})
+    assert resolve_limit(cfg, instance, today) == 18000
+
+
+# -------------------------------------------------------------------
+# Multiple grants
+# -------------------------------------------------------------------
+
+
+def test_two_grants_same_start_contributions_sum() -> None:
+    today = date(2026, 4, 27)
+    g1 = NetGrant(start_date=datetime(2026, 4, 20), net_grant_seconds=40000, end_date=datetime(2026, 5, 18))
+    g2 = NetGrant(start_date=datetime(2026, 4, 20), net_grant_seconds=20000, end_date=datetime(2026, 5, 18))
+    cfg = make_config(limit_seconds=50000, net_grants=[g1, g2])
+    assert resolve_limit(cfg, make_instance(), today) == 110000
+
+
+def test_two_grants_different_starts_anchor_at_earliest() -> None:
+    """boost_start is the min of active starts. Days between the two starts must NOT count as rolloff."""
+    today = date(2026, 4, 27)
+    g_early = NetGrant(start_date=datetime(2026, 4, 10), net_grant_seconds=10000, end_date=datetime(2026, 5, 8))
+    g_late = NetGrant(start_date=datetime(2026, 4, 20), net_grant_seconds=10000, end_date=datetime(2026, 5, 18))
+    cfg = make_config(limit_seconds=1000, net_grants=[g_early, g_late])
+    # boost_start = Apr 10 → rolloff_end = Apr 9. Apr 15 is AFTER boost_start, excluded.
+    # If we wrongly anchored at max (Apr 20), Apr 15 would inflate rolloff by 9000.
+    instance = make_instance(daily_usage={date(2026, 4, 15): 10000})
+    # 1000 + 20000 + max(0, 0 - 1000) = 21000
+    assert resolve_limit(cfg, instance, today) == 21000
+
+
+def test_active_plus_expired_grant_anchors_at_active() -> None:
+    today = date(2026, 4, 27)
+    expired = NetGrant(start_date=datetime(2026, 1, 1), net_grant_seconds=99999, end_date=datetime(2026, 1, 31))
+    active = NetGrant(start_date=datetime(2026, 4, 20), net_grant_seconds=10000, end_date=datetime(2026, 5, 18))
+    cfg = make_config(limit_seconds=1000, net_grants=[expired, active])
+    # boost_start = Apr 20 (only the active grant counts) → rolloff_end = Apr 19
+    instance = make_instance(daily_usage={date(2026, 4, 10): 10000})
+    # rolloff = 10000, excess over base = 9000 → 1000 + 10000 + 9000 = 20000
+    assert resolve_limit(cfg, instance, today) == 20000
+
+
+# -------------------------------------------------------------------
+# End-to-end timeline showing decay as pre-grant days roll out
+# -------------------------------------------------------------------
 
 
 @pytest.fixture
-def rolloff_scenario() -> tuple[InstanceConfig, InstanceState]:
-    """End-to-end rolloff scenario fixture.
+def decay_scenario() -> tuple[InstanceConfig, InstanceState]:
+    """Pre-grant usage exceeds base; effective limit decays as those days roll out.
 
-    Setup (all values in seconds; 30m=1800s, 100m=6000s, 200m=12000s):
-      - Base limit: 12000s
-      - Jan 1-4: 1800s usage/day (pre-grant)
-      - Jan 5: grant of 6000s starts; grant window = [Jan 5, Feb 2) (28 days)
-      - Jan 5 onward: no usage
+    Setup:
+      - base = 5000s, grant = 5000s, grant window [Jan 5, Feb 2)
+      - Jan 1-4 usage = 4000s each (sum = 16000 > base)
+      - boost_start = Jan 5; rolloff_end = Jan 4
     """
-    grant_start = datetime(2026, 1, 5)
-    cfg = make_instance_config(
-        limit_seconds=12000,
-        net_grants=[NetGrant(start_date=grant_start, net_grant_seconds=6000, end_date=datetime(2026, 2, 2))],
+    cfg = make_config(
+        limit_seconds=5000,
+        net_grants=[NetGrant(start_date=datetime(2026, 1, 5), net_grant_seconds=5000, end_date=datetime(2026, 2, 2))],
     )
     instance = make_instance(
         daily_usage={
-            date(2026, 1, 1): 1800,
-            date(2026, 1, 2): 1800,
-            date(2026, 1, 3): 1800,
-            date(2026, 1, 4): 1800,
+            date(2026, 1, 1): 4000,
+            date(2026, 1, 2): 4000,
+            date(2026, 1, 3): 4000,
+            date(2026, 1, 4): 4000,
         }
     )
     return cfg, instance
 
 
-def test_jan5_grant_start_full_grant(rolloff_scenario: tuple[InstanceConfig, InstanceState]) -> None:
-    """Jan 5 (grant start): no rolloff yet, full grant active."""
-    cfg, instance = rolloff_scenario
-    assert resolve_limit(cfg, instance, date(2026, 1, 5)) == 18000
-
-
-def test_jan29_no_rolloff_yet(rolloff_scenario: tuple[InstanceConfig, InstanceState]) -> None:
-    """Jan 29: today-28=Jan 1, but rolloff requires d < Jan 1 strict, so no rolloff."""
-    # today - 28 = Jan 1; condition is d < Jan 1 (strict), so Jan 1 itself has not exited
-    cfg, instance = rolloff_scenario
-    assert resolve_limit(cfg, instance, date(2026, 1, 29)) == 18000
-
-
-def test_jan30_first_day_rolls_off(rolloff_scenario: tuple[InstanceConfig, InstanceState]) -> None:
-    """Jan 30: today-28=Jan 2, Jan 1 exits (d < Jan 2), rolloff=1800."""
-    cfg, instance = rolloff_scenario
-    assert resolve_limit(cfg, instance, date(2026, 1, 30)) == 16200  # 12000+4200
-
-
-def test_jan31_two_days_rolled_off(rolloff_scenario: tuple[InstanceConfig, InstanceState]) -> None:
-    """Jan 31: today-28=Jan 3, Jan 1+2 exit, rolloff=3600."""
-    cfg, instance = rolloff_scenario
-    assert resolve_limit(cfg, instance, date(2026, 1, 31)) == 14400  # 12000+2400
-
-
-def test_feb1_three_days_rolled_off(rolloff_scenario: tuple[InstanceConfig, InstanceState]) -> None:
-    """Feb 1: today-28=Jan 4, Jan 1+2+3 exit, rolloff=5400, last active day of grant."""
-    cfg, instance = rolloff_scenario
-    assert resolve_limit(cfg, instance, date(2026, 2, 1)) == 12600  # 12000+600
-
-
-def test_feb2_grant_expired(rolloff_scenario: tuple[InstanceConfig, InstanceState]) -> None:
-    """Feb 2: grant_end=Jan 5+28=Feb 2, today >= grant_end so grant inactive, base only."""
-    cfg, instance = rolloff_scenario
-    assert resolve_limit(cfg, instance, date(2026, 2, 2)) == 12000
+@pytest.mark.parametrize(
+    "today,expected",
+    [
+        # Jan 5: window_floor=Dec 8, rolloff covers Jan 1-4 (16000), excess=11000
+        (date(2026, 1, 5), 5000 + 5000 + 11000),
+        # Jan 29: window_floor=Jan 1, rolloff covers Jan 1-4 (16000), excess=11000
+        (date(2026, 1, 29), 21000),
+        # Jan 30: window_floor=Jan 2 → Jan 1 exited; rolloff=Jan 2-4 (12000), excess=7000
+        (date(2026, 1, 30), 5000 + 5000 + 7000),
+        # Jan 31: window_floor=Jan 3; rolloff=Jan 3-4 (8000), excess=3000
+        (date(2026, 1, 31), 5000 + 5000 + 3000),
+        # Feb 1: window_floor=Jan 4; rolloff=Jan 4 only (4000), excess=max(0, 4000-5000)=0
+        (date(2026, 2, 1), 5000 + 5000),
+        # Feb 2: grant expired → base only
+        (date(2026, 2, 2), 5000),
+    ],
+)
+def test_decay_timeline(decay_scenario: tuple[InstanceConfig, InstanceState], today: date, expected: int) -> None:
+    cfg, instance = decay_scenario
+    assert resolve_limit(cfg, instance, today) == expected

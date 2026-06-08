@@ -47,6 +47,8 @@ class InstanceConfig:
             raise ValueError("start_date must be before end_date")
         if not self.crn:
             raise ValueError("crn cannot be empty")
+        if self.net_grants and self.target_limit_seconds is None:
+            raise ValueError("target_limit_seconds is required when net_grants is set")
 
 
 @dataclass(frozen=True)

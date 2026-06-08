@@ -16,53 +16,49 @@ from .models import InstanceState, InstanceConfig
 
 
 def resolve_limit(instance_config: InstanceConfig, instance_state: InstanceState, today: date) -> int | None:
-    """Return the effective limit in seconds for the given instance today.
+    """Return the effective config-side limit in seconds for the given instance today.
 
-    Resolution order:
-    1. Active net grants with rolloff -> base + sum(each grant's contribution)
-    2. Base limit only -> instance_config.limit_seconds
-    3. No limit -> None
+    Returns None when the config sets neither target_limit_seconds nor any active
+    grants — callers should treat that as "no config-side override" and fall back
+    to whatever IQP currently has.
 
-    Grant contribution = max(0, net_grant_seconds - rolloff)
-    where rolloff = sum(usage on days that were in the 28-day window at grant
-    start but have since exited, and are strictly before grant start).
+    Formula when there is at least one active grant:
+        base + grant_total + max(0, rolloff - base)
+
+    where:
+        grant_total = sum of net_grant_seconds across grants active today
+        boost_start = earliest start_date among active grants
+        rolloff     = sum of daily_usage on days strictly before boost_start that
+                      are still inside the current 28-day rolling window
+                      [today - 28, today]
+
+    The max(0, rolloff - base) term lets pre-grant usage that exceeded the base
+    limit decay out of the effective limit as those days exit the rolling window.
+    Pre-grant days that stayed at or below the base limit contribute nothing.
     """
     base_limit = instance_config.target_limit_seconds
 
     if not instance_config.net_grants:
         return base_limit
 
-    total_grant_contribution = 0
-    any_active = False
-
-    for grant in instance_config.net_grants:
-        grant_start = grant.start_date.date()
-        grant_end = grant.end_date.date()
-
-        if not (grant_start <= today < grant_end):
-            continue
-
-        any_active = True
-
-        # Pre-grant exit set: days that were in the 28-day window at grant_start
-        # and have since exited the current 28-day window.
-        # Was in window at grant_start: d >= grant_start - 27
-        # Has since exited: d < today - 28
-        # Is pre-grant: d < grant_start
-        window_floor_at_grant = grant_start - timedelta(days=27)
-        current_window_floor = today - timedelta(days=28)
-
-        rolloff = sum(
-            seconds
-            for day, seconds in instance_state.usage.daily_usage.items()
-            if day < grant_start and day >= window_floor_at_grant and day < current_window_floor
-        )
-
-        contribution = max(0, grant.net_grant_seconds - rolloff)
-        total_grant_contribution += contribution
-
-    if not any_active:
+    active_grants = [g for g in instance_config.net_grants if g.start_date.date() <= today < g.end_date.date()]
+    if not active_grants:
         return base_limit
 
-    effective_base = base_limit if base_limit is not None else 0
-    return effective_base + total_grant_contribution
+    if base_limit is None:
+        raise AssertionError("InstanceConfig invariant violated: net_grants without target_limit_seconds")
+
+    grant_total = sum(g.net_grant_seconds for g in active_grants)
+    boost_start = min(g.start_date.date() for g in active_grants)
+
+    window_floor = today - timedelta(days=28)
+    rolloff_end = boost_start - timedelta(days=1)
+
+    if rolloff_end < window_floor:
+        rolloff = 0
+    else:
+        rolloff = sum(
+            seconds for day, seconds in instance_state.usage.daily_usage.items() if window_floor <= day <= rolloff_end
+        )
+
+    return base_limit + grant_total + max(0, rolloff - base_limit)

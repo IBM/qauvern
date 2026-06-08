@@ -103,6 +103,19 @@ def test_instance_config_empty_crn() -> None:
         )
 
 
+def test_instance_config_net_grants_require_target_limit() -> None:
+    grant = NetGrant(start_date=datetime(2026, 5, 1), net_grant_seconds=86400, end_date=datetime(2026, 5, 29))
+    with pytest.raises(ValueError, match="target_limit_seconds is required when net_grants is set"):
+        InstanceConfig(
+            name="Test",
+            crn="crn:test:1",
+            start_date=datetime(2026, 1, 1),
+            end_date=datetime(2026, 12, 31),
+            target_limit_seconds=None,
+            net_grants=(grant,),
+        )
+
+
 # -------------------------------------------------------------------
 # Instance — validation
 # -------------------------------------------------------------------
