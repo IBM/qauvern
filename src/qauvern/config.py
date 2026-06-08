@@ -96,6 +96,9 @@ class ConfigParser:
                     raise ValueError(f"Instance config missing required field: {field}")
 
             inst = entry.get("name", "?")
+            if not entry["crn"]:
+                raise ValueError(f"instances[{inst}].crn cannot be empty")
+
             start_date = (
                 parse_utc_datetime(entry["start_date"], provenance=f"instances[{inst}].start_date")
                 if "start_date" in entry
@@ -106,17 +109,22 @@ class ConfigParser:
                 if "end_date" in entry
                 else period["end_date"]
             )
+            if start_date >= end_date:
+                raise ValueError(f"instances[{inst}]: start_date must be before end_date")
 
             net_grants = []
-            for grant_data in entry.get("net_grants", []):
-                grant_start = parse_utc_datetime(
-                    grant_data["start_date"], provenance=f"instances[{inst}].net_grants.start_date"
-                )
+            for i, grant_data in enumerate(entry.get("net_grants", [])):
+                grant_provenance = f"instances[{inst}].net_grants[{i}]"
+                grant_start = parse_utc_datetime(grant_data["start_date"], provenance=f"{grant_provenance}.start_date")
                 grant_end = (
-                    parse_utc_datetime(grant_data["end_date"], provenance=f"instances[{inst}].net_grants.end_date")
+                    parse_utc_datetime(grant_data["end_date"], provenance=f"{grant_provenance}.end_date")
                     if "end_date" in grant_data
                     else grant_start + timedelta(days=28)
                 )
+                if grant_end <= grant_start:
+                    raise ValueError(f"{grant_provenance}: end_date must be after start_date")
+                if grant_data["net_grant_seconds"] <= 0:
+                    raise ValueError(f"{grant_provenance}: net_grant_seconds must be positive")
                 net_grants.append(
                     NetGrant(
                         start_date=grant_start,
@@ -125,12 +133,16 @@ class ConfigParser:
                     )
                 )
 
+            target_limit_seconds = entry.get("limit_seconds")
+            if net_grants and target_limit_seconds is None:
+                raise ValueError(f"instances[{inst}]: limit_seconds is required when net_grants is set")
+
             config = InstanceConfig(
                 name=entry["name"],
                 crn=entry["crn"],
                 start_date=start_date,
                 end_date=end_date,
-                target_limit_seconds=entry.get("limit_seconds"),
+                target_limit_seconds=target_limit_seconds,
                 net_grants=tuple(net_grants),
             )
             configs.append(config)
