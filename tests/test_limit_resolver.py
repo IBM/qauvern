@@ -16,12 +16,16 @@ Formula under test (when at least one grant is active today):
 where rolloff sums daily_usage on days in [today - 28, boost_start - 1].
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
 from qauvern.limit_resolver import resolve_limit
 from qauvern.models import InstanceState, InstanceConfig, InstanceDetailedUsage, NetGrant
+
+
+def _dt(d: date) -> datetime:
+    return datetime(d.year, d.month, d.day)
 
 
 def make_config(
@@ -76,9 +80,12 @@ def test_all_grants_expired_returns_base() -> None:
 
 
 def test_future_grant_returns_base() -> None:
-    grant = NetGrant(start_date=datetime(2026, 5, 1), net_grant_seconds=400, end_date=datetime(2026, 5, 29))
+    today = date(2026, 4, 30)
+    grant = NetGrant(
+        start_date=_dt(today + timedelta(days=1)), net_grant_seconds=400, end_date=_dt(today + timedelta(days=29))
+    )
     cfg = make_config(limit_seconds=500, net_grants=[grant])
-    assert resolve_limit(cfg, make_instance(), date(2026, 4, 30)) == 500
+    assert resolve_limit(cfg, make_instance(), today) == 500
 
 
 # -------------------------------------------------------------------
@@ -87,22 +94,27 @@ def test_future_grant_returns_base() -> None:
 
 
 def test_grant_active_on_start_date() -> None:
-    grant = NetGrant(start_date=datetime(2026, 4, 27), net_grant_seconds=400, end_date=datetime(2026, 5, 25))
+    today = date(2026, 4, 27)
+    grant = NetGrant(start_date=_dt(today), net_grant_seconds=400, end_date=_dt(today + timedelta(days=28)))
     cfg = make_config(limit_seconds=500, net_grants=[grant])
-    assert resolve_limit(cfg, make_instance(), date(2026, 4, 27)) == 900
+    assert resolve_limit(cfg, make_instance(), today) == 900
 
 
 def test_grant_active_day_before_end() -> None:
-    grant = NetGrant(start_date=datetime(2026, 4, 1), net_grant_seconds=400, end_date=datetime(2026, 4, 28))
+    today = date(2026, 4, 27)
+    grant = NetGrant(
+        start_date=_dt(today - timedelta(days=26)), net_grant_seconds=400, end_date=_dt(today + timedelta(days=1))
+    )
     cfg = make_config(limit_seconds=500, net_grants=[grant])
-    # rolloff window: window_floor=Mar 30, rolloff_end=Mar 31; no usage → rolloff=0
-    assert resolve_limit(cfg, make_instance(), date(2026, 4, 27)) == 900
+    # rolloff window: window_floor=today-28, rolloff_end=grant_start-1; no usage → rolloff=0
+    assert resolve_limit(cfg, make_instance(), today) == 900
 
 
 def test_grant_inactive_on_end_date() -> None:
-    grant = NetGrant(start_date=datetime(2026, 4, 1), net_grant_seconds=400, end_date=datetime(2026, 4, 28))
+    today = date(2026, 4, 28)
+    grant = NetGrant(start_date=_dt(today - timedelta(days=27)), net_grant_seconds=400, end_date=_dt(today))
     cfg = make_config(limit_seconds=500, net_grants=[grant])
-    assert resolve_limit(cfg, make_instance(), date(2026, 4, 28)) == 500
+    assert resolve_limit(cfg, make_instance(), today) == 500
 
 
 # -------------------------------------------------------------------
