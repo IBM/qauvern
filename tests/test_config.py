@@ -411,7 +411,7 @@ instances:
 
 
 def test_net_grant_zero_seconds_raises() -> None:
-    """Test that net_grant_seconds <= 0 raises ValueError."""
+    """Test that net_grant_seconds <= 0 raises ValueError naming the offending instance/grant."""
     path = _write_config("""
 account_id: "acc-1"
 plan: "internal"
@@ -424,10 +424,104 @@ instances:
     limit_seconds: 50000
     net_grants:
       - start_date: "2026-05-01T00:00:00+00:00"
+        net_grant_seconds: 180000
+      - start_date: "2026-06-01T00:00:00+00:00"
         net_grant_seconds: 0
 """)
     try:
-        with pytest.raises(ValueError, match="net_grant_seconds"):
+        with pytest.raises(
+            ValueError, match=r"instances\[Project A\]\.net_grants\[1\]: net_grant_seconds must be positive"
+        ):
+            ConfigParser(path)
+    finally:
+        os.unlink(path)
+
+
+def test_net_grant_end_date_not_after_start_raises() -> None:
+    """Test that net_grant end_date <= start_date raises ValueError naming the offending grant."""
+    path = _write_config("""
+account_id: "acc-1"
+plan: "internal"
+balance_period:
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
+instances:
+  - name: "Project A"
+    crn: "crn:test:1"
+    limit_seconds: 50000
+    net_grants:
+      - start_date: "2026-05-01T00:00:00+00:00"
+        end_date: "2026-04-30T00:00:00+00:00"
+        net_grant_seconds: 180000
+""")
+    try:
+        with pytest.raises(
+            ValueError, match=r"instances\[Project A\]\.net_grants\[0\]: end_date must be after start_date"
+        ):
+            ConfigParser(path)
+    finally:
+        os.unlink(path)
+
+
+def test_instance_start_date_not_before_end_raises() -> None:
+    """Test that instance start_date >= end_date raises ValueError naming the instance."""
+    path = _write_config("""
+account_id: "acc-1"
+plan: "internal"
+balance_period:
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
+instances:
+  - name: "Project A"
+    crn: "crn:test:1"
+    start_date: "2026-12-31T00:00:00+00:00"
+    end_date: "2026-01-01T00:00:00+00:00"
+""")
+    try:
+        with pytest.raises(ValueError, match=r"instances\[Project A\]: start_date must be before end_date"):
+            ConfigParser(path)
+    finally:
+        os.unlink(path)
+
+
+def test_instance_empty_crn_raises() -> None:
+    """Test that an empty crn raises ValueError naming the instance."""
+    path = _write_config("""
+account_id: "acc-1"
+plan: "internal"
+balance_period:
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
+instances:
+  - name: "Project A"
+    crn: ""
+""")
+    try:
+        with pytest.raises(ValueError, match=r"instances\[Project A\]\.crn cannot be empty"):
+            ConfigParser(path)
+    finally:
+        os.unlink(path)
+
+
+def test_net_grants_require_limit_seconds() -> None:
+    """Test that net_grants without limit_seconds raises ValueError naming the instance."""
+    path = _write_config("""
+account_id: "acc-1"
+plan: "internal"
+balance_period:
+  start_date: "2026-01-01T00:00:00+00:00"
+  end_date: "2026-12-31T23:59:59+00:00"
+instances:
+  - name: "Project A"
+    crn: "crn:test:1"
+    net_grants:
+      - start_date: "2026-05-01T00:00:00+00:00"
+        net_grant_seconds: 180000
+""")
+    try:
+        with pytest.raises(
+            ValueError, match=r"instances\[Project A\]: limit_seconds is required when net_grants is set"
+        ):
             ConfigParser(path)
     finally:
         os.unlink(path)

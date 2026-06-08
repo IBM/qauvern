@@ -24,12 +24,6 @@ class NetGrant:
     net_grant_seconds: int
     end_date: datetime
 
-    def __post_init__(self) -> None:
-        if self.net_grant_seconds <= 0:
-            raise ValueError("net_grant_seconds must be positive")
-        if self.end_date <= self.start_date:
-            raise ValueError("end_date must be after start_date")
-
 
 @dataclass(frozen=True)
 class InstanceConfig:
@@ -41,14 +35,6 @@ class InstanceConfig:
     end_date: datetime
     target_limit_seconds: int | None = None
     net_grants: tuple[NetGrant, ...] = ()
-
-    def __post_init__(self) -> None:
-        if self.start_date >= self.end_date:
-            raise ValueError("start_date must be before end_date")
-        if not self.crn:
-            raise ValueError("crn cannot be empty")
-        if self.net_grants and self.target_limit_seconds is None:
-            raise ValueError("target_limit_seconds is required when net_grants is set")
 
 
 @dataclass(frozen=True)

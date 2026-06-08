@@ -10,12 +10,11 @@
 
 """Tests for data models."""
 
-from datetime import datetime
 from typing import Any
 
 import pytest
 
-from qauvern.models import Account, InstanceState, InstanceConfig, InstanceDetailedUsage, NetGrant
+from qauvern.models import Account, InstanceState, InstanceDetailedUsage
 
 
 # -------------------------------------------------------------------
@@ -43,77 +42,6 @@ def _usage(**kwargs: Any) -> InstanceDetailedUsage:
         consumed_24h=kwargs.get("consumed_24h", 0),
         daily_usage=kwargs.get("daily_usage", {}),
     )
-
-
-# -------------------------------------------------------------------
-# NetGrant — validation
-# -------------------------------------------------------------------
-
-
-def test_net_grant_zero_seconds_raises() -> None:
-    with pytest.raises(ValueError, match="net_grant_seconds must be positive"):
-        NetGrant(start_date=datetime(2026, 5, 1), net_grant_seconds=0, end_date=datetime(2026, 5, 29))
-
-
-def test_net_grant_negative_raises() -> None:
-    with pytest.raises(ValueError, match="net_grant_seconds must be positive"):
-        NetGrant(start_date=datetime(2026, 5, 1), net_grant_seconds=-100, end_date=datetime(2026, 5, 29))
-
-
-def test_net_grant_end_date_before_start_raises() -> None:
-    with pytest.raises(ValueError, match="end_date must be after start_date"):
-        NetGrant(
-            start_date=datetime(2026, 5, 1),
-            net_grant_seconds=86400,
-            end_date=datetime(2026, 4, 30),
-        )
-
-
-def test_net_grant_end_date_equals_start_raises() -> None:
-    with pytest.raises(ValueError, match="end_date must be after start_date"):
-        NetGrant(
-            start_date=datetime(2026, 5, 1),
-            net_grant_seconds=86400,
-            end_date=datetime(2026, 5, 1),
-        )
-
-
-# -------------------------------------------------------------------
-# InstanceConfig — validation
-# -------------------------------------------------------------------
-
-
-def test_instance_config_invalid_dates() -> None:
-    with pytest.raises(ValueError, match="start_date must be before end_date"):
-        InstanceConfig(
-            name="Test",
-            crn="crn:test:1",
-            start_date=datetime(2026, 12, 31),
-            end_date=datetime(2026, 1, 1),
-        )
-
-
-def test_instance_config_empty_crn() -> None:
-    with pytest.raises(ValueError, match="crn cannot be empty"):
-        InstanceConfig(
-            name="Test",
-            crn="",
-            start_date=datetime(2026, 1, 1),
-            end_date=datetime(2026, 12, 31),
-        )
-
-
-def test_instance_config_net_grants_require_target_limit() -> None:
-    grant = NetGrant(start_date=datetime(2026, 5, 1), net_grant_seconds=86400, end_date=datetime(2026, 5, 29))
-    with pytest.raises(ValueError, match="target_limit_seconds is required when net_grants is set"):
-        InstanceConfig(
-            name="Test",
-            crn="crn:test:1",
-            start_date=datetime(2026, 1, 1),
-            end_date=datetime(2026, 12, 31),
-            target_limit_seconds=None,
-            net_grants=(grant,),
-        )
 
 
 # -------------------------------------------------------------------
