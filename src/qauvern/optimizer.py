@@ -10,7 +10,7 @@
 
 """Optimization algorithm for IBM Quantum instance allocation."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from .limit_resolver import resolve_limit
 from .models import Account, InstanceState, InstanceConfig, OptimizationRecommendation, OptimizationResult
@@ -34,13 +34,13 @@ class AllocationOptimizer:
             instance_configs: List of instance configs with allocation constraints
             minimum_allocation_seconds: Minimum allocation to maintain for each instance (default: 60 seconds)
             allocation_reserve_percent: Fraction of available seconds to hold back from redistribution
-            today: Date to use for limit override resolution (defaults to date.today())
+            today: Date to use for limit override resolution (defaults to today in UTC)
         """
         self.account = account
         self.instance_configs = instance_configs
         self.minimum_allocation_seconds = minimum_allocation_seconds
         self.allocation_reserve_percent = allocation_reserve_percent
-        self.today = today or date.today()
+        self.today = today or datetime.now(timezone.utc).date()
         self._config_by_crn = {config.crn: config for config in instance_configs}
 
     def _config_for(self, instance: InstanceState) -> InstanceConfig | None:
