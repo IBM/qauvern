@@ -13,7 +13,7 @@
 import functools
 import sys
 from collections.abc import Sequence
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import click
@@ -51,7 +51,7 @@ def enrich_instances_with_usage_data(
             detailed_usage = client.get_detailed_usage(instance.crn, account.account_id)
 
             # Fetch per-day usage for net grant rolloff calculation (60-day lookback)
-            today_date = date.today()
+            today_date = datetime.now(timezone.utc).date()
             daily_start = today_date - timedelta(days=60)
             try:
                 daily = client.get_daily_usage(instance.crn, account.account_id, daily_start, today_date)
@@ -237,7 +237,7 @@ def format_instance_table(
                 _has_grant = False
                 _in_debt = getattr(instance, "in_debt", False)
                 if config:
-                    _today = date.today()
+                    _today = datetime.now(timezone.utc).date()
                     for _grant in getattr(config, "net_grants", []):
                         _gs = _grant.start_date.date()
                         if _gs <= _today < _grant.end_date.date():
@@ -248,7 +248,7 @@ def format_instance_table(
                 _has_grant = False
                 _in_debt = getattr(instance, "in_debt", False)
                 if config:
-                    _today = date.today()
+                    _today = datetime.now(timezone.utc).date()
                     for _grant in getattr(config, "net_grants", []):
                         _gs = _grant.start_date.date()
                         if _gs <= _today < _grant.end_date.date():

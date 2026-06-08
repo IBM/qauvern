@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Setting `net_grants` on an instance config now requires also setting `limit_seconds`. Configs that violate this will fail to load.
  
+ ### Fixed
+
+- Fixed timezone handling for net grants.
+
 ## [0.5.0] - 2026-06-03
 
 ### Changed
