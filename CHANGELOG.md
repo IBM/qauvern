@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 
 - `qauvern` now enforces all six invariants from [here](https://github.com/IBM/qauvern/issues/102) when validating the proposal from `analyze` and `optimize`.
+
+## Changed
+
+- Reworked how the effective limit is computed when `net_grants` are configured (see [#102](https://github.com/IBM/qauvern/issues/102)). The new formula is `base + grant_total + max(0, rolloff - base)`, where:
+  - `base` is the instance's configured `limit_seconds`.
+  - `grant_total` is the sum of `net_grant_seconds` across grants active today.
+  - `rolloff` is the sum of `daily_usage` on days strictly before the earliest active grant's start that are still inside the current 28-day rolling window.
+  
+  Previously, rolloff was subtracted from each grant's contribution per-grant. Under the new formula, pre-grant days that were already at or below the base limit contribute nothing — only excess usage above base extends the effective limit, and that excess decays naturally as those days exit the rolling window. When multiple grants are active, rolloff is anchored at the earliest active grant's start, not computed per-grant.
+
+- Setting `net_grants` on an instance config now requires also setting `limit_seconds`. Configs that violate this will fail to load.
  
 ## [0.5.0] - 2026-06-03
 
