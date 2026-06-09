@@ -5,7 +5,7 @@
 account_id: "my-ibm-cloud-account-id"
 plan: "premium"  # one of: internal, premium, paygo
 
-# Minimum allocation to maintain for each instance (optional, default: 60 seconds)
+# Minimum allocation to maintain for each instance.
 minimum_allocation_seconds: 60
 
 balance_period:

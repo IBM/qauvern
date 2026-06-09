@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - If every active instance is capped by limits, leftover capacity stays unallocated rather than being forced onto any instance — no more phantom overshoots.
 - Improved the error message for when `analyze` and `optimize` propose a plan that would exceed your account's allocation budget.
 - The `analyze` command no longer shows `-` in the "New Limit" column for instances whose limit is unchanged. It now shows the current limit, so the column reflects the actual post-run state rather than ambiguously suggesting the limit will be removed.
+- `minimum_allocation_seconds` is now a required field in the config file rather than an implicit 60-second default. `qauvern configure` still generates `60`, so freshly generated configs work unchanged; existing configs without the field will fail to load until you set it explicitly. This change is to make the default less surprising.
 
 ## [0.6.0] - 2026-06-08
 

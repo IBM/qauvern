@@ -68,7 +68,8 @@ The program operates on YAML configuration files where you define your account, 
 account_id: "your-ibm-cloud-account-id"
 plan: "premium"  # one of: internal, premium, paygo
 
-# Minimum allocation to maintain for each instance (optional, default: 60 seconds)
+# Minimum allocation to maintain for each instance.
+# `qauvern configure` defaults to 60 seconds.
 minimum_allocation_seconds: 60
 
 # Hold back a percentage of account allocation from rebalancing (optional, default: 0)

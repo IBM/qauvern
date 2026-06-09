@@ -9,9 +9,8 @@ account_id: "your-account-id-here"
 # One of: internal, premium, paygo.
 plan: "premium"
 
-# Minimum allocation in seconds to maintain for each instance (optional)
-# Default: 60 seconds (1 minute)
-# This ensures inactive instances maintain a baseline allocation
+# Minimum allocation in seconds to maintain for each instance.
+# This ensures inactive instances maintain a baseline allocation.
 minimum_allocation_seconds: 60
 
 # Optional: Hold back a percentage of account allocation from rebalancing.
