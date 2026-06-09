@@ -10,10 +10,28 @@
 
 """Optimization algorithm for IBM Quantum instance allocation."""
 
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from typing import Literal
 
 from .limit_resolver import resolve_limit
 from .models import Account, AllocationChange, InstanceConfig, InstanceState, LimitChange, OptimizationResult
+
+FloorSource = Literal["consumed_seconds", "minimum_allocation_seconds"]
+
+
+@dataclass(frozen=True)
+class Floor:
+    """The minimum allocation we'll pin an instance to, and why.
+
+    `consumed_seconds` is the IBM Quantum hard floor — the API technically
+    does not enforce it, but it can result in surprising behavior `minimum_allocation_seconds` is a qauvern-level config knob
+    that the user can lower. Ties go to `consumed_seconds` so the
+    user sees the unfixable source first.
+    """
+
+    value: int
+    source: FloorSource
 
 
 class AllocationOptimizer:
@@ -43,8 +61,10 @@ class AllocationOptimizer:
         self.today = today or datetime.now(timezone.utc).date()
         self._configs = {config.crn: config for config in instance_configs}
 
-    def _floor(self, instance: InstanceState) -> int:
-        return max(self.minimum_allocation_seconds, instance.consumed_seconds)
+    def _floor(self, instance: InstanceState) -> Floor:
+        if instance.consumed_seconds >= self.minimum_allocation_seconds:
+            return Floor(instance.consumed_seconds, "consumed_seconds")
+        return Floor(self.minimum_allocation_seconds, "minimum_allocation_seconds")
 
     def optimize(self) -> OptimizationResult:
         """Compute allocation and limit recommendations.
@@ -76,12 +96,13 @@ class AllocationOptimizer:
         # First, set all instances to their floor. This sometimes increases the allocation
         # to ensure that we meet invariants like >=28-day consumption. Otherwise, it often
         # frees up allocation so that we can redistribute it later based on the activity score.
-        new_alloc: dict[str, int] = {inst.crn: self._floor(inst) for inst in managed}
+        floors: dict[str, Floor] = {inst.crn: self._floor(inst) for inst in managed}
+        new_alloc: dict[str, int] = {crn: f.value for crn, f in floors.items()}
 
         # Pool: unallocated headroom + (alloc - floor) summed across managed instances.
         # Negative contributions (instances below their floor) reduce the pool because
         # bumping them up to floor consumes budget. Reserve scales the whole pool.
-        delta_above_floor = sum(inst.allocation_seconds - self._floor(inst) for inst in managed)
+        delta_above_floor = sum(inst.allocation_seconds - floors[inst.crn].value for inst in managed)
         raw_pool = self.account.unallocated_seconds + delta_above_floor
         pool = max(0, int(raw_pool * (1 - self.allocation_reserve_percent / 100)))
 
@@ -157,7 +178,9 @@ class AllocationOptimizer:
 
     def _reason_for(self, inst: InstanceState, projected: int, effective_limit: int | None) -> str:
         if inst.activity_score == 0:
-            return f"No recent activity (score=0); pinning at floor (28d usage: {inst.consumed_seconds}s)"
+            floor = self._floor(inst)
+            label = "28d usage" if floor.source == "consumed_seconds" else "minimum_allocation_seconds"
+            return f"Inactive; set to {label}: {floor.value}s)"
         capped = effective_limit is not None and projected >= effective_limit
         suffix = " (capped at effective limit)" if capped else ""
         return f"Active (activity score: {inst.activity_score:.1f}, fairness: {inst.fairness:.2f}){suffix}"
@@ -197,11 +220,46 @@ class AllocationOptimizer:
             )
             + self.account.unmanaged_allocation_seconds
         )
-        if total_allocated > self.account.allocation_budget_seconds:
-            errors.append(
-                f"Total instance allocations ({total_allocated}s) exceeds "
-                f"account budget ({self.account.allocation_budget_seconds}s)"
-            )
+        budget = self.account.allocation_budget_seconds
+        if total_allocated > budget:
+            # The floors win over the cap — they're the minimums we refuse to violate.
+            # When the floors plus unmanaged allocation exceed budget, the breach is
+            # unavoidable. Split the managed floor by source so the message names
+            # what's actionable: a minimum_allocation_seconds shortfall is
+            # config-fixable, while a consumed_seconds shortfall is an IBM Quantum
+            # reality where only support can raise the budget.
+            floors = [self._floor(inst) for inst in self.account.instances if inst.crn in self._configs]
+            floor_total = sum(f.value for f in floors)
+            unmanaged = self.account.unmanaged_allocation_seconds
+            if floor_total + unmanaged > budget:
+                consumed_bucket = sum(f.value for f in floors if f.source == "consumed_seconds")
+                min_alloc_bucket = floor_total - consumed_bucket
+
+                if unmanaged > 0:
+                    managed_budget = budget - unmanaged
+                    header = (
+                        f"Managed instance allocations ({total_allocated - unmanaged}s) exceed the "
+                        f"budget available to them ({managed_budget}s = {budget}s account budget "
+                        f"− {unmanaged}s held by unmanaged instances)"
+                    )
+                else:
+                    header = f"Total instance allocations ({total_allocated}s) exceeds account budget ({budget}s)"
+
+                parts: list[str] = []
+                if consumed_bucket > 0:
+                    parts.append(f"28-day usage requires {consumed_bucket}s")
+                if min_alloc_bucket > 0:
+                    parts.append(f"minimum_allocation_seconds requires {min_alloc_bucket}s")
+
+                fixes: list[str] = []
+                if min_alloc_bucket > 0:
+                    fixes.append("lower minimum_allocation_seconds in your config")
+                if consumed_bucket > 0:
+                    fixes.append("contact IBM Quantum support to discuss raising your account budget")
+
+                errors.append(f"{header}. {'; '.join(parts)}. To fix: {' and/or '.join(fixes)}.")
+            else:
+                errors.append(f"Total instance allocations ({total_allocated}s) exceeds account budget ({budget}s)")
 
         # Invariant 2: reserve buffer
         # available = unallocated headroom + what managed instances hold above their floors.
