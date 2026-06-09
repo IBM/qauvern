@@ -17,9 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The effective limit (including any active net grant) now caps allocations on the same run that updates the limit. Previously the optimizer used the live IQP limit, so a fresh net grant or a config-driven limit bump didn't take effect on allocation until the next run.
   - When an active instance hits its effective limit, the surplus from its proportional share is now redistributed to other active instances in proportion to activity score. Previously that surplus was silently dropped, leaving allocation on the table.
   - If every active instance is capped by limits, leftover capacity stays unallocated rather than being forced onto any instance — no more phantom overshoots.
-
-## Fixed
-
+- Improved the error message for when `analyze` and `optimize` propose a plan that would exceed your account's allocation budget.
 - The `analyze` command no longer shows `-` in the "New Limit" column for instances whose limit is unchanged. It now shows the current limit, so the column reflects the actual post-run state rather than ambiguously suggesting the limit will be removed.
 
 ## [0.6.0] - 2026-06-08

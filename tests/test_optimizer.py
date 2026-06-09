@@ -212,6 +212,86 @@ def test_validate_allocations_includes_unmanaged() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Invariant 1: allocation budget
+#
+# Note that we expect the optimizer _can_ produce plans that violate this
+# invariant.
+# ---------------------------------------------------------------------------
+
+
+def test_optimize_in_debt_account_overruns_budget_with_consumed_floor_diagnostic() -> None:
+    """Floors driven by consumed_seconds: diagnostic blames 28-day usage and tells
+    the operator to raise the budget (config can't lower the floor)."""
+    # budget=100, unallocated=10. consumed (80, 70) ≥ min_alloc=60 so floors come
+    # from consumed_seconds and sum to 150 > 100. raw_pool is negative → pool=0.
+    a = _inactive_instance("crn:a", allocation=50, consumed=80)
+    b = _inactive_instance("crn:b", allocation=40, consumed=70)
+    optimizer = AllocationOptimizer(_make_account(100, a, b), [_make_config("crn:a"), _make_config("crn:b")])
+
+    result = optimizer.optimize()
+    projected = _projected(result, optimizer.account)
+    assert projected == {"crn:a": 80, "crn:b": 70}
+
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert not is_valid
+    msg = next(e for e in errors if "exceeds account budget" in e)
+    assert "28-day usage requires 150s" in msg
+    assert "minimum_allocation_seconds" not in msg
+    assert "contact IBM Quantum support" in msg
+    assert "lower minimum_allocation_seconds" not in msg
+
+
+def test_optimize_min_alloc_squeeze_overruns_budget_with_config_fix_diagnostic() -> None:
+    """Floors driven by minimum_allocation_seconds: diagnostic suggests lowering it."""
+    # budget=100, unallocated=0, three instances each holding ~33 with consumed=0.
+    # min_alloc=50 forces each floor to 50; sum=150 > 100. consumed_bucket=0.
+    a = _inactive_instance("crn:a", allocation=34)
+    b = _inactive_instance("crn:b", allocation=33)
+    c = _inactive_instance("crn:c", allocation=33)
+    optimizer = AllocationOptimizer(
+        _make_account(100, a, b, c),
+        [_make_config("crn:a"), _make_config("crn:b"), _make_config("crn:c")],
+        minimum_allocation_seconds=50,
+    )
+
+    result = optimizer.optimize()
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert not is_valid
+    msg = next(e for e in errors if "exceeds account budget" in e)
+    assert "minimum_allocation_seconds requires 150s" in msg
+    assert "28-day usage" not in msg
+    assert "lower minimum_allocation_seconds" in msg
+    assert "IBM Quantum support" not in msg
+
+
+def test_optimize_unmanaged_drag_overruns_budget_with_diagnostic() -> None:
+    """Unmanaged allocation plus a min-alloc floor pushes the projection over budget."""
+    # budget=100, unallocated=5, loaded A holds 50 → unmanaged=45.
+    # consumed=10 < min_alloc=60 → floor=60 from minimum_allocation_seconds.
+    # floor_required = 60 + 45 = 105 > 100.
+    inst = _inactive_instance("crn:a", allocation=50, consumed=10)
+    optimizer = AllocationOptimizer(
+        Account(
+            account_id="test",
+            plan_id="test-plan",
+            allocation_budget_seconds=100,
+            unallocated_seconds=5,
+            limit_seconds=None,
+            instances=(inst,),
+        ),
+        [_make_config("crn:a")],
+    )
+
+    result = optimizer.optimize()
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert not is_valid
+    msg = next(e for e in errors if "budget available to them" in e)
+    assert "55s = 100s account budget − 45s held by unmanaged instances" in msg
+    assert "minimum_allocation_seconds requires 60s" in msg
+    assert "lower minimum_allocation_seconds" in msg
+
+
+# ---------------------------------------------------------------------------
 # Invariant 2: reserve buffer
 # ---------------------------------------------------------------------------
 
@@ -376,6 +456,11 @@ def test_inactive_with_excess_allocation_drops_to_minimum_floor() -> None:
     projected = _projected(result, optimizer.account)
 
     assert projected["crn:a"] == 60  # default minimum_allocation_seconds
+    # Reason should attribute the floor to the config knob, not 28d usage. (An
+    # inactive instance always has consumed_seconds=0 — any positive consumption
+    # contributes to activity_score — so the inactive branch sources its floor
+    # from minimum_allocation_seconds.)
+    assert "minimum_allocation_seconds: 60s" in result.allocation_changes[0].reason
 
 
 def test_inactive_below_minimum_floor_is_bumped_up() -> None:
