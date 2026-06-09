@@ -25,9 +25,10 @@ class Floor:
     """The minimum allocation we'll pin an instance to, and why.
 
     `consumed_seconds` is the IBM Quantum hard floor — the API technically
-    does not enforce it, but it can result in surprising behavior `minimum_allocation_seconds` is a qauvern-level config knob
-    that the user can lower. Ties go to `consumed_seconds` so the
-    user sees the unfixable source first.
+    does not enforce it, but it can result in surprising behavior.
+    `minimum_allocation_seconds` is a qauvern-level config knob that the
+    user can lower. Ties go to `consumed_seconds` so the user sees the
+    unfixable source first.
     """
 
     value: int
@@ -180,7 +181,7 @@ class AllocationOptimizer:
         if inst.activity_score == 0:
             floor = self._floor(inst)
             label = "28d usage" if floor.source == "consumed_seconds" else "minimum_allocation_seconds"
-            return f"Inactive; set to {label}: {floor.value}s)"
+            return f"Inactive; set to {label}: {floor.value}s"
         capped = effective_limit is not None and projected >= effective_limit
         suffix = " (capped at effective limit)" if capped else ""
         return f"Active (activity score: {inst.activity_score:.1f}, fairness: {inst.fairness:.2f}){suffix}"

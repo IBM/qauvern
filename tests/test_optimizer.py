@@ -264,6 +264,25 @@ def test_optimize_min_alloc_squeeze_overruns_budget_with_config_fix_diagnostic()
     assert "IBM Quantum support" not in msg
 
 
+def test_optimize_floor_tie_attributes_to_consumed_seconds() -> None:
+    """When consumed == minimum_allocation_seconds, the floor source ties to consumed_seconds.
+
+    Diagnostic should blame 28-day usage (the unfixable source) rather than the config knob.
+    """
+    # budget=100, two instances each with consumed=60 == min_alloc=60. floors sum to 120 > 100.
+    a = _inactive_instance("crn:a", allocation=50, consumed=60)
+    b = _inactive_instance("crn:b", allocation=50, consumed=60)
+    optimizer = AllocationOptimizer(_make_account(100, a, b), [_make_config("crn:a"), _make_config("crn:b")])
+
+    result = optimizer.optimize()
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert not is_valid
+    msg = next(e for e in errors if "exceeds account budget" in e)
+    assert "28-day usage requires 120s" in msg
+    assert "minimum_allocation_seconds" not in msg
+    assert "lower minimum_allocation_seconds" not in msg
+
+
 def test_optimize_unmanaged_drag_overruns_budget_with_diagnostic() -> None:
     """Unmanaged allocation plus a min-alloc floor pushes the projection over budget."""
     # budget=100, unallocated=5, loaded A holds 50 → unmanaged=45.
