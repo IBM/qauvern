@@ -13,7 +13,7 @@
 from datetime import date, datetime, timezone
 
 from .limit_resolver import resolve_limit
-from .models import Account, InstanceState, InstanceConfig, OptimizationRecommendation, OptimizationResult
+from .models import Account, InstanceConfig, OptimizationRecommendation, OptimizationResult
 
 
 class AllocationOptimizer:
@@ -41,18 +41,7 @@ class AllocationOptimizer:
         self.minimum_allocation_seconds = minimum_allocation_seconds
         self.allocation_reserve_percent = allocation_reserve_percent
         self.today = today or datetime.now(timezone.utc).date()
-        self._config_by_crn = {config.crn: config for config in instance_configs}
-
-    def _config_for(self, instance: InstanceState) -> InstanceConfig | None:
-        """Get the instance config for a runtime instance."""
-        return self._config_by_crn.get(instance.crn)
-
-    def _consumption_for(self, config: InstanceConfig) -> int:
-        """Calculate total consumption for an instance config."""
-        for instance in self.account.instances:
-            if instance.crn == config.crn:
-                return instance.consumed_seconds
-        return 0
+        self._configs = {config.crn: config for config in instance_configs}
 
     def optimize(self) -> OptimizationResult:
         """Compute allocation and limit recommendations based on core algorithm.
@@ -81,7 +70,7 @@ class AllocationOptimizer:
         active = []  # score > 0
 
         for instance in self.account.instances:
-            config = self._config_for(instance)
+            config = self._configs.get(instance.crn)
             if not config:
                 continue
 
@@ -176,7 +165,7 @@ class AllocationOptimizer:
 
                 active_recommendations = 0
                 for instance in active_sorted:
-                    config = self._config_for(instance)
+                    config = self._configs.get(instance.crn)
                     if not config:
                         continue
 
@@ -213,7 +202,7 @@ class AllocationOptimizer:
         print("\n=== Step 6: Resolving Limits ===")
         limit_updates = 0
         for instance in self.account.instances:
-            config = self._config_for(instance)
+            config = self._configs.get(instance.crn)
             if not config:
                 continue
 
@@ -290,7 +279,7 @@ class AllocationOptimizer:
             + sum(
                 inst.allocation_seconds - max(self.minimum_allocation_seconds, inst.consumed_seconds)
                 for inst in self.account.instances
-                if inst.crn in self._config_by_crn
+                if inst.crn in self._configs
             ),
         )
         reserve_amount = int(available * self.allocation_reserve_percent / 100)
@@ -302,7 +291,7 @@ class AllocationOptimizer:
 
         # Invariants 3–6: per managed instance
         for inst in self.account.instances:
-            if inst.crn not in self._config_by_crn:
+            if inst.crn not in self._configs:
                 continue
             rec = rec_by_crn.get(inst.crn)
             new_alloc = rec.new_allocation if rec is not None else inst.allocation_seconds

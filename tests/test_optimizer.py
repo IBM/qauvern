@@ -158,29 +158,6 @@ def optimizer_instance_configs() -> list[InstanceConfig]:
     return [cfg1, cfg2, cfg3]
 
 
-def test_optimizer_initialization(optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]) -> None:
-    """Test optimizer initialization."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
-
-    assert optimizer.account == optimizer_account
-    assert len(optimizer.instance_configs) == 3
-    assert len(optimizer._config_by_crn) == 3  # One CRN per cfg
-
-
-def test_consumption_for_config(optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]) -> None:
-    """Test calculating cfg consumption."""
-    optimizer = AllocationOptimizer(optimizer_account, optimizer_instance_configs)
-
-    cfg1_consumption = optimizer._consumption_for(optimizer_instance_configs[0])
-    assert cfg1_consumption == 550000  # instance1 (crn:test:1)
-
-    cfg2_consumption = optimizer._consumption_for(optimizer_instance_configs[1])
-    assert cfg2_consumption == 1000  # instance2 (crn:test:2)
-
-    cfg3_consumption = optimizer._consumption_for(optimizer_instance_configs[2])
-    assert cfg3_consumption == 150000  # instance3 (crn:test:3)
-
-
 def test_optimize_generates_recommendations(
     optimizer_account: Account, optimizer_instance_configs: list[InstanceConfig]
 ) -> None:
