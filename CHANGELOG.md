@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The `configure` command has an optional `--region` argument to restrict which instances are added. Because all the other commands only run on the instances in your config file, you can use this new argument to restrict `qauvern` to only run on `us-east` or `eu-de`.
 
+## Fixed
+
+- The `analyze` command no longer shows `-` in the "New Limit" column for instances whose limit is unchanged. It now shows the current limit, so the column reflects the actual post-run state rather than ambiguously suggesting the limit will be removed.
+
 ## [0.6.0] - 2026-06-08
 
 ## Added

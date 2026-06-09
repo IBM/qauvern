@@ -265,7 +265,7 @@ def format_instance_table(
                         if _gs <= _today < _grant.end_date.date():
                             _has_grant = True
                             break
-                _new_limit = limit_rec.new if limit_rec is not None else None
+                _new_limit = limit_rec.new if limit_rec is not None else instance.limit_seconds
                 row.append(format_limit_display(_new_limit, has_grant=_has_grant, in_debt=_in_debt))
             elif col == "fairness":
                 row.append(format_fairness(instance.fairness))
