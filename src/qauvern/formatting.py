@@ -8,9 +8,19 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Shared display formatters."""
+"""Display formatters and table builders for the CLI."""
+
+from collections.abc import Sequence
+from datetime import datetime, timezone
 
 import click
+
+from .models import (
+    AllocationChange,
+    InstanceConfig,
+    InstanceState,
+    LimitChange,
+)
 
 
 def format_seconds(seconds: int) -> str:
@@ -41,3 +51,221 @@ def format_fairness(fairness: float) -> str:
         return click.style(f"{fairness:.2f} ⚠", fg="yellow")
     else:
         return click.style(f"{fairness:.2f} ✗", fg="red")
+
+
+def format_limit_display(
+    limit_seconds: int | None,
+    has_grant: bool = False,
+    in_debt: bool = False,
+) -> str:
+    """Format a limit value with optional grant and debt annotations."""
+    if limit_seconds is None:
+        return "-"
+    base = format_limit(limit_seconds)
+    annotation = ""
+    if has_grant:
+        annotation += " (+grant)"
+    if in_debt:
+        annotation += click.style(" !", fg="red", bold=True)
+    return base + annotation
+
+
+def format_reserve_summary(distributable_pool: int, reserve_percent: float) -> str:
+    """Format account reserve summary line.
+
+    `distributable_pool` is the post-reserve seconds available to redistribute
+    (AllocationOptimizer.redistribution_pool()[0]) — i.e. the raw pool already
+    scaled by `1 - reserve_percent/100`.
+    """
+    return f"Reserve: {reserve_percent:.1f}%   Available for rebalancing: {format_seconds(distributable_pool)}"
+
+
+def parse_seconds(value: str) -> int:
+    """Parse a human-friendly time string into seconds.
+
+    Accepts plain integers (as seconds), suffixed values (10h, 30m, 2.5d, 96000s),
+    or QAU units (1qau = 96000 seconds).
+    """
+    value = value.strip().lower()
+
+    try:
+        return int(value)
+    except ValueError:
+        pass
+
+    suffixes = {
+        "qau": 96000,
+        "d": 86400,
+        "h": 3600,
+        "m": 60,
+        "s": 1,
+    }
+
+    for suffix, multiplier in suffixes.items():
+        if value.endswith(suffix):
+            numeric_part = value[: -len(suffix)]
+            try:
+                return int(float(numeric_part) * multiplier)
+            except ValueError:
+                pass
+
+    raise click.BadParameter(
+        f"Cannot parse '{value}' as a time duration. Use plain seconds, or a suffix: 30m, 10h, 2.5d, 1qau"
+    )
+
+
+def _truncate(text: str, max_len: int) -> str:
+    return text if len(text) <= max_len else text[:max_len]
+
+
+def _has_active_grant(config: InstanceConfig | None) -> bool:
+    if config is None:
+        return False
+    today = datetime.now(timezone.utc).date()
+    return any(g.start_date.date() <= today < g.end_date.date() for g in config.net_grants)
+
+
+def format_instance_summary_table(
+    instances: Sequence[InstanceState],
+) -> tuple[list[list[str]], list[str]]:
+    """Build the summary table used by `show` and `instances`.
+
+    Columns: Instance, Allocation, Consumed, Utilization, Limit, Fairness.
+    """
+    headers = ["Instance", "Allocation", "Consumed", "Utilization", "Limit", "Fairness"]
+    rows = []
+    for inst in instances:
+        if inst.allocation_seconds > 0:
+            util = (inst.consumed_seconds / inst.allocation_seconds) * 100
+            util_str = f"{util:.1f}%"
+        else:
+            util_str = "0.0%"
+        in_debt = getattr(inst, "in_debt", False)
+        rows.append(
+            [
+                _truncate(inst.name, 35),
+                format_seconds(inst.allocation_seconds),
+                format_seconds(inst.consumed_seconds),
+                util_str,
+                format_limit_display(inst.limit_seconds, in_debt=in_debt),
+                format_fairness(inst.fairness),
+            ]
+        )
+    return rows, headers
+
+
+def format_instance_analysis_table(
+    instances: Sequence[InstanceState],
+    instance_configs: list[InstanceConfig] | None = None,
+    alloc_map: dict[str, AllocationChange] | None = None,
+    limit_map: dict[str, LimitChange] | None = None,
+) -> tuple[list[list[str]], list[str]]:
+    """Build the per-instance analysis table used by `analyze`.
+
+    Columns: Instance, Period, 28d, 14d, 7d, 3d, 24h, Allocation,
+    Cur Limit, New Limit, Recommended, Change, Reason.
+    """
+    headers = [
+        "Instance",
+        "Period",
+        "28d",
+        "14d",
+        "7d",
+        "3d",
+        "24h",
+        "Allocation",
+        "Cur Limit",
+        "New Limit",
+        "Recommended",
+        "Change",
+        "Reason",
+    ]
+    config_map = {cfg.crn: cfg for cfg in (instance_configs or [])}
+    alloc_map = alloc_map or {}
+    limit_map = limit_map or {}
+
+    rows = []
+    for inst in instances:
+        config = config_map.get(inst.crn)
+        alloc = alloc_map.get(inst.crn)
+        limit_rec = limit_map.get(inst.crn)
+        has_grant = _has_active_grant(config)
+        in_debt = getattr(inst, "in_debt", False)
+
+        cur_limit = format_limit_display(inst.limit_seconds, has_grant=has_grant, in_debt=in_debt)
+        new_limit_seconds = limit_rec.new if limit_rec is not None else inst.limit_seconds
+        new_limit = format_limit_display(new_limit_seconds, has_grant=has_grant, in_debt=in_debt)
+
+        if alloc is not None:
+            recommended = format_seconds(alloc.new)
+            delta = alloc.delta
+            change = f"+{format_seconds(delta)}" if delta > 0 else f"-{format_seconds(delta)}"
+        else:
+            recommended = "-"
+            change = "-"
+
+        if alloc is not None:
+            reason = _truncate(alloc.reason, 30)
+        elif limit_rec is not None:
+            reason = _truncate(limit_rec.reason, 30)
+        else:
+            reason = "No change"
+
+        rows.append(
+            [
+                _truncate(inst.name, 35),
+                format_seconds(inst.usage.consumed_balance_period),
+                format_seconds(inst.consumed_seconds),
+                format_seconds(inst.usage.consumed_14day),
+                format_seconds(inst.usage.consumed_7day),
+                format_seconds(inst.usage.consumed_3day),
+                format_seconds(inst.usage.consumed_24h),
+                format_seconds(inst.allocation_seconds),
+                cur_limit,
+                new_limit,
+                recommended,
+                change,
+                reason,
+            ]
+        )
+    return rows, headers
+
+
+def format_optimize_changes_table(
+    allocation_changes: Sequence[AllocationChange],
+    limit_changes: Sequence[LimitChange],
+    instance_map: dict[str, str],
+) -> tuple[list[list[str]], list[str]]:
+    """Build the changes-to-apply table used by `optimize`.
+
+    `instance_map` maps CRN to instance name. Rows are sorted by name.
+    """
+    headers = ["Instance Name", "Current", "New", "Change", "New Limit"]
+    alloc_by_crn = {c.instance_crn: c for c in allocation_changes}
+    limit_by_crn = {c.instance_crn: c for c in limit_changes}
+    all_crns = sorted(
+        set(alloc_by_crn) | set(limit_by_crn),
+        key=lambda crn: instance_map.get(crn, crn),
+    )
+
+    rows = []
+    for crn in all_crns:
+        alloc = alloc_by_crn.get(crn)
+        limit_chg = limit_by_crn.get(crn)
+        name = instance_map.get(crn, crn[:40] + "...")
+        name = name if len(name) <= 40 else name[:37] + "..."
+
+        if alloc is not None:
+            delta = alloc.delta
+            change_str = f"+{format_seconds(delta)}" if delta > 0 else f"-{format_seconds(delta)}"
+            current_str = format_seconds(alloc.current)
+            new_str = format_seconds(alloc.new)
+        else:
+            change_str = "-"
+            current_str = "-"
+            new_str = "-"
+
+        new_limit_str = format_seconds(limit_chg.new) if limit_chg is not None else "None"
+        rows.append([name, current_str, new_str, change_str, new_limit_str])
+
+    return rows, headers
