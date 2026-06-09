@@ -20,6 +20,7 @@ import requests
 
 from .models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState, InstanceRef
 from .plan import Plan, plan_id_for
+from .region import extract_region_from_crn
 
 QUANTUM_COMPUTING_RESOURCE_ID = "b6049020-80f4-11eb-a0f7-e35ec9b4054f"
 
@@ -74,24 +75,6 @@ class IBMQuantumAPIClient:
         else:
             self._set_authorization_header()
 
-    @staticmethod
-    def _extract_region_from_crn(crn: str) -> str:
-        """Extract the region from a CRN.
-
-        CRN format: crn:v1:bluemix:public:quantum-computing:REGION:a/ACCOUNT_ID:INSTANCE_ID::
-
-        Args:
-            crn: The Cloud Resource Name
-
-        Returns:
-            The region string (e.g., 'us-east', 'eu-de')
-        """
-        # CRN format: crn:version:cname:ctype:service-name:location:scope:service-instance:resource-type:resource
-        parts = crn.split(":")
-        if len(parts) >= 6:
-            return parts[5]  # Region is the 6th component (index 5)
-        return "us-east"  # Default to us-east if parsing fails
-
     def _get_regional_base_url(self, crn: str) -> str:
         """Get the appropriate regional base URL for a given CRN.
 
@@ -101,7 +84,7 @@ class IBMQuantumAPIClient:
         Returns:
             The regional base URL (e.g., 'https://eu-de.quantum.cloud.ibm.com/api')
         """
-        region = self._extract_region_from_crn(crn)
+        region = extract_region_from_crn(crn)
 
         # Determine the domain based on staging flag
         domain = "test.cloud.ibm.com" if self.staging else "cloud.ibm.com"

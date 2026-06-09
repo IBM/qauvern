@@ -24,9 +24,17 @@ from .config import parse_utc_datetime
 from .commands.configure import build_configure_yaml
 from .config import ConfigParser
 from .formatting import format_fairness, format_limit, format_seconds
-from .models import Account, InstanceState, InstanceConfig, InstanceDetailedUsage, OptimizationRecommendation
+from .models import (
+    Account,
+    DiscoveredInstances,
+    InstanceState,
+    InstanceConfig,
+    InstanceDetailedUsage,
+    OptimizationRecommendation,
+)
 from .optimizer import AllocationOptimizer
 from .plan import Plan, plan_from_name
+from .region import Region, extract_region_from_crn
 
 
 def enrich_instances_with_usage_data(
@@ -304,6 +312,19 @@ api_key_option = click.option(
 
 def _parse_plan(_ctx: click.Context, _param: click.Parameter, value: str | None) -> Plan | None:
     return plan_from_name(value) if value else None
+
+
+def _parse_region(_ctx: click.Context, _param: click.Parameter, value: str | None) -> Region | None:
+    return Region(value) if value else None
+
+
+region_option = click.option(
+    "--region",
+    default=None,
+    type=click.Choice([r.value for r in Region], case_sensitive=False),
+    callback=_parse_region,
+    help="Limit to instances in a specific region (e.g. us-east, eu-de)",
+)
 
 
 def _parse_balance_date(_ctx: click.Context, param: click.Parameter, value: str) -> str:
@@ -757,6 +778,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
 )
 @plan_option
 @api_key_option
+@region_option
 @click.option(
     "--output",
     "-o",
@@ -783,6 +805,7 @@ def configure(
     account_id: str,
     plan: Plan,
     api_key: str | None,
+    region: Region | None,
     output: str,
     balance_start: str,
     balance_end: str,
@@ -800,11 +823,16 @@ def configure(
     if discovered.archived:
         click.echo(f"Skipping {len(discovered.archived)} archived instance(s)", err=True)
 
+    if region is not None:
+        active = tuple(i for i in discovered.active if extract_region_from_crn(i.crn) == region.value)
+        discovered = DiscoveredInstances(active=active, archived=discovered.archived)
+
     if not discovered.active:
         click.echo("⚠ No active instances found in this account.", err=True)
         sys.exit(1)
 
-    click.echo(f"Found {len(discovered.active)} instance(s)")
+    region_suffix = f" in region {region.value}" if region is not None else ""
+    click.echo(f"Found {len(discovered.active)} instance(s){region_suffix}")
     click.echo("\nGenerating configuration file...")
 
     output_path = Path(output)
