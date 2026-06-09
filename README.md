@@ -18,7 +18,7 @@ qauvern helps administrators manage quantum computing allocations efficiently by
 - **Fairness**: Ratio of consumed time to allocated time (lower fairness = higher priority)
 - **Allocation**: Target consumption for an instance during the rolling window
 - **Limit**: Hard cap on instance consumption
-- **Net Grant**: Temporary time bonus above the base limit, active for a 28-day window. The effective limit decays as pre-grant usage rolls out of the window.
+- **Net Grant**: Temporary time bonus above the base limit. Multiple grants stack, and any pre-grant usage that exceeded the base limit decays out of the effective limit as those days exit the 28-day rolling window.
 
 ## Installation
 
@@ -142,6 +142,7 @@ Options:
 - `--account-id, -a`: IBM Cloud account ID (required)
 - `--plan, -p`: Plan name — `internal`, `premium`, or `paygo` (required)
 - `--api-key, -k`: IBM Cloud API key (or use `IBMCLOUD_API_KEY` env var)
+- `--region`: Limit to instances in a specific region (e.g., `us-east`, `eu-de`). Because all other commands only operate on instances in your config file, you can use this to restrict `qauvern` to a single region.
 - `--output, -o`: Output file path (default: `config.yaml`)
 - `--balance-start`: Balance period start date (ISO format)
 - `--balance-end`: Balance period end date (ISO format)
@@ -236,28 +237,34 @@ The `--staging` flag is a global option and applies to all commands.
 
 ### Optimization Algorithm
 
-1. **Classify** instances as active or inactive based on recent consumption
-2. **Reclaim** allocation from inactive instances (down to the configured minimum)
-3. **Redistribute** freed allocation to active instances weighted by fairness
-4. **Enforce limits** using `limit_seconds` and any active `net_grants`
+For each managed instance, qauvern:
 
-The optimizer targets low fairness values (< 0.5) to ensure instances receive scheduling priority from IBM Quantum's fair-share system. See the `net_grants` field in [Configuration](#configuration) for details on how grant rolloff works.
+1. **Resolves the effective limit** from `limit_seconds` and any active `net_grants`. This is the upper bound on the instance's allocation.
+2. **Computes an activity score** by exponentially weighting recent usage (24h carries 16× the weight of 28d). Instances with no usage across all buckets get score 0 and are classified inactive.
+
+Then, account-wide:
+
+3. **Pins every managed instance to its floor** — `max(minimum_allocation_seconds, 28-day consumed)`. Inactive instances stay at the floor.
+4. **Builds a redistribution pool** from unallocated headroom plus everything managed instances hold above their floor. If `allocation_reserve_percent` is set, scales the pool down by that fraction.
+5. **Water-fills the pool across active instances** proportional to activity score. When an instance hits its effective limit, it drops out and its surplus flows to the rest. If every active instance is capped, leftover capacity stays unallocated rather than being forced onto any instance.
+
+See [Design.md](Design.md) for full algorithm details and the invariants the optimizer enforces.
 
 ### Configured vs. Unconfigured Instances
 
-`analyze` and `optimize` only operate on instances listed in your config file. Any other instance that exists on the same account and plan is **unconfigured** and is left exactly as-is — its allocation and limit are never touched.
+`analyze`, `optimize`, `show`, and `instances` only operate on instances listed in your config file. Any other instance that exists on the same account and plan is **unconfigured** and is left exactly as-is — its allocation and limit are never touched.
 
 Unconfigured instances still consume from the account-wide cap, so the optimizer subtracts their allocation before deciding how much to redistribute. Concretely:
 
 ```
-redistributable = account.target_usage_seconds
+redistributable = account.allocation_budget
                   − sum(unconfigured allocations)   ← reserved, untouched
-                  − sum(28-day usage of configured) ← the floor we never go under
+                  − sum(floors of configured)       ← max(minimum_allocation_seconds, 28-day usage)
 ```
 
 This means you can safely manage a subset of an account's instances with qauvern: anything you leave out of the config file is opaque to the optimizer except as a fixed reservation. To bring an instance under management, add it to the config (or regenerate with `qauvern configure`).
 
-**Caveat:** the configured instances will absorb all the available account allocation, which leaves no available allocation for the unconfigured instances. For example, if you configure 2 of 10 instances, those 2 will claim every spare second on the account and the remaining 8 are left with no buffer to expand into. We will add a buffer mechanism in the future.
+**Caveat:** the configured instances will absorb all the available account allocation, which leaves no available allocation for the unconfigured instances. For example, if you configure 2 of 10 instances, those 2 will claim every spare second on the account and the remaining 8 are left with no buffer to expand into. Use `allocation_reserve_percent` to hold back a fraction of the pool if you need headroom for unconfigured instances.
 
 ## Examples
 

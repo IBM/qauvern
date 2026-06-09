@@ -37,7 +37,8 @@ instances:
     # limit_seconds: 216000  # 60 hours
 
     # Optional: Grant additional time above limit_seconds.
-    # The effective limit decays as pre-grant usage rolls out of the rolling window.
+    # Pre-grant usage that exceeded limit_seconds decays out of the effective
+    # limit as those days exit the 28-day rolling window.
     # Multiple grants stack. Limit snaps back to limit_seconds after end_date.
     # end_date is optional; defaults to start_date + 28 days if omitted.
     # net_grants:
