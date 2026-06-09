@@ -12,7 +12,6 @@
 
 import functools
 import sys
-from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,12 +22,18 @@ from .api_client import IBMQuantumAPIClient
 from .config import parse_utc_datetime
 from .commands.configure import build_configure_yaml
 from .config import ConfigParser
-from .formatting import format_fairness, format_limit, format_seconds
+from .formatting import (
+    format_instance_analysis_table,
+    format_instance_summary_table,
+    format_optimize_changes_table,
+    format_reserve_summary,
+    format_seconds,
+    parse_seconds,
+)
 from .models import (
     Account,
     AllocationChange,
     DiscoveredInstances,
-    InstanceState,
     InstanceConfig,
     InstanceDetailedUsage,
     LimitChange,
@@ -87,220 +92,6 @@ def enrich_instances_with_usage_data(
                 consumed_24h=0,
                 daily_usage={},
             )
-
-
-def format_limit_display(
-    limit_seconds: int | None,
-    has_grant: bool = False,
-    in_debt: bool = False,
-) -> str:
-    """Format a limit value with optional grant and debt annotations."""
-    if limit_seconds is None:
-        return "-"
-    base = format_limit(limit_seconds)
-    annotation = ""
-    if has_grant:
-        annotation += " (+grant)"
-    if in_debt:
-        annotation += click.style(" !", fg="red", bold=True)
-    return base + annotation
-
-
-def format_reserve_summary(distributable_pool: int, reserve_percent: float) -> str:
-    """Format account reserve summary line.
-
-    `distributable_pool` is the post-reserve seconds available to redistribute
-    (AllocationOptimizer.redistribution_pool()[0]) — i.e. the raw pool already
-    scaled by `1 - reserve_percent/100`.
-    """
-    return f"Reserve: {reserve_percent:.1f}%   Available for rebalancing: {format_seconds(distributable_pool)}"
-
-
-def parse_seconds(value: str) -> int:
-    """Parse a human-friendly time string into seconds.
-
-    Accepts plain integers (as seconds), suffixed values (10h, 30m, 2.5d, 96000s),
-    or QAU units (1qau = 96000 seconds).
-    """
-    value = value.strip().lower()
-
-    try:
-        return int(value)
-    except ValueError:
-        pass
-
-    suffixes = {
-        "qau": 96000,
-        "d": 86400,
-        "h": 3600,
-        "m": 60,
-        "s": 1,
-    }
-
-    for suffix, multiplier in suffixes.items():
-        if value.endswith(suffix):
-            numeric_part = value[: -len(suffix)]
-            try:
-                return int(float(numeric_part) * multiplier)
-            except ValueError:
-                pass
-
-    raise click.BadParameter(
-        f"Cannot parse '{value}' as a time duration. Use plain seconds, or a suffix: 30m, 10h, 2.5d, 1qau"
-    )
-
-
-def format_instance_table(
-    instances: Sequence[InstanceState],
-    instance_configs: list[InstanceConfig] | None = None,
-    columns: list[str] | None = None,
-    alloc_map: dict[str, "AllocationChange"] | None = None,
-    limit_map: dict[str, "LimitChange"] | None = None,
-) -> tuple[list[list[str]], list[str]]:
-    """Format instance data into a table with configurable columns.
-
-    Args:
-        instances: List of Instance objects to display
-        instance_configs: Optional list of InstanceConfig objects (needed for target columns)
-        columns: List of column names to display. Available columns:
-            - name: Instance name
-            - target: Target usage seconds
-            - target_pct: Percentage of target consumed
-            - period: Balance period consumption
-            - 28d: 28-day consumption
-            - 14d: 14-day consumption
-            - 7d: 7-day consumption
-            - 3d: 3-day consumption
-            - 24h: 24-hour consumption
-            - allocation: Current allocation
-            - consumed: Consumed seconds (28-day)
-            - utilization: Utilization percentage
-            - limit: Limit seconds
-            - fairness: Fairness value
-            - recommended: Recommended allocation (from rec_map)
-            - change: Change amount (from rec_map)
-            - reason: Reason for change (from rec_map)
-        rec_map: Optional dict mapping CRN to recommendation data
-
-    Returns:
-        Tuple of (table_data, headers) ready for tabulate()
-    """
-    if columns is None:
-        columns = ["name", "allocation", "consumed", "utilization", "limit", "fairness"]
-
-    # Build config map if instance_configs provided
-    config_map = {}
-    if instance_configs:
-        for cfg in instance_configs:
-            config_map[cfg.crn] = cfg
-
-    # Column header mapping
-    header_map = {
-        "name": "Instance",
-        "period": "Period",
-        "28d": "28d",
-        "14d": "14d",
-        "7d": "7d",
-        "3d": "3d",
-        "24h": "24h",
-        "allocation": "Allocation",
-        "consumed": "Consumed",
-        "utilization": "Utilization",
-        "limit": "Cur Limit",
-        "new_limit": "New Limit",
-        "fairness": "Fairness",
-        "recommended": "Recommended",
-        "change": "Change",
-        "reason": "Reason",
-    }
-
-    headers = [header_map.get(col, col) for col in columns]
-    table_data = []
-
-    for instance in instances:
-        row = []
-        config = config_map.get(instance.crn) if config_map else None
-        alloc = alloc_map.get(instance.crn) if alloc_map else None
-        limit_rec = limit_map.get(instance.crn) if limit_map else None
-
-        for col in columns:
-            if col == "name":
-                row.append(instance.name[:35] if len(instance.name) > 35 else instance.name)
-            elif col == "period":
-                row.append(format_seconds(instance.usage.consumed_balance_period))
-            elif col == "28d":
-                row.append(format_seconds(instance.consumed_seconds))
-            elif col == "14d":
-                row.append(format_seconds(instance.usage.consumed_14day))
-            elif col == "7d":
-                row.append(format_seconds(instance.usage.consumed_7day))
-            elif col == "3d":
-                row.append(format_seconds(instance.usage.consumed_3day))
-            elif col == "24h":
-                row.append(format_seconds(instance.usage.consumed_24h))
-            elif col == "allocation":
-                row.append(format_seconds(instance.allocation_seconds))
-            elif col == "consumed":
-                row.append(format_seconds(instance.consumed_seconds))
-            elif col == "utilization":
-                if instance.allocation_seconds > 0:
-                    util = (instance.consumed_seconds / instance.allocation_seconds) * 100
-                    row.append(f"{util:.1f}%")
-                else:
-                    row.append("0.0%")
-            elif col == "limit":
-                _has_grant = False
-                _in_debt = getattr(instance, "in_debt", False)
-                if config:
-                    _today = datetime.now(timezone.utc).date()
-                    for _grant in getattr(config, "net_grants", []):
-                        _gs = _grant.start_date.date()
-                        if _gs <= _today < _grant.end_date.date():
-                            _has_grant = True
-                            break
-                row.append(format_limit_display(instance.limit_seconds, has_grant=_has_grant, in_debt=_in_debt))
-            elif col == "new_limit":
-                _has_grant = False
-                _in_debt = getattr(instance, "in_debt", False)
-                if config:
-                    _today = datetime.now(timezone.utc).date()
-                    for _grant in getattr(config, "net_grants", []):
-                        _gs = _grant.start_date.date()
-                        if _gs <= _today < _grant.end_date.date():
-                            _has_grant = True
-                            break
-                _new_limit = limit_rec.new if limit_rec is not None else instance.limit_seconds
-                row.append(format_limit_display(_new_limit, has_grant=_has_grant, in_debt=_in_debt))
-            elif col == "fairness":
-                row.append(format_fairness(instance.fairness))
-            elif col == "recommended":
-                if alloc:
-                    row.append(format_seconds(alloc.new))
-                else:
-                    row.append("-")
-            elif col == "change":
-                if alloc:
-                    delta = alloc.delta
-                    if delta > 0:
-                        change_str = f"+{format_seconds(delta)}"
-                    else:
-                        change_str = f"-{format_seconds(delta)}"
-                    row.append(change_str)
-                else:
-                    row.append("-")
-            elif col == "reason":
-                if alloc:
-                    row.append(alloc.reason[:30] if len(alloc.reason) > 30 else alloc.reason)
-                elif limit_rec:
-                    row.append(limit_rec.reason[:30] if len(limit_rec.reason) > 30 else limit_rec.reason)
-                else:
-                    row.append("No change")
-            else:
-                row.append("-")
-
-        table_data.append(row)
-
-    return table_data, headers
 
 
 config_option = click.option(
@@ -459,8 +250,7 @@ def show(ctx, config: str, api_key: str | None):
     click.echo(f"INSTANCE USAGE SUMMARY ({len(account.instances)} configured)")
     click.echo("=" * 80)
 
-    columns = ["name", "allocation", "consumed", "utilization", "limit", "fairness"]
-    table_data, headers = format_instance_table(account.instances, columns=columns)
+    table_data, headers = format_instance_summary_table(account.instances)
 
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
 
@@ -502,8 +292,7 @@ def instances(ctx, config: str, api_key: str | None):
     # Sort by fairness
     sorted_instances = sorted(instances_data, key=lambda x: x.fairness, reverse=True)
 
-    columns = ["name", "allocation", "consumed", "utilization", "limit", "fairness"]
-    table_data, headers = format_instance_table(sorted_instances, columns=columns)
+    table_data, headers = format_instance_summary_table(sorted_instances)
 
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
 
@@ -603,24 +392,11 @@ def analyze(ctx, config: str, api_key: str | None):
     alloc_map = {c.instance_crn: c for c in result.allocation_changes}
     limit_map = {c.instance_crn: c for c in result.limit_changes}
 
-    # Use utility function with all analysis columns
-    columns = [
-        "name",
-        "period",
-        "28d",
-        "14d",
-        "7d",
-        "3d",
-        "24h",
-        "allocation",
-        "limit",
-        "new_limit",
-        "recommended",
-        "change",
-        "reason",
-    ]
-    table_data, headers = format_instance_table(
-        account.instances, instance_configs=instance_configs, columns=columns, alloc_map=alloc_map, limit_map=limit_map
+    table_data, headers = format_instance_analysis_table(
+        account.instances,
+        instance_configs=instance_configs,
+        alloc_map=alloc_map,
+        limit_map=limit_map,
     )
 
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
@@ -701,46 +477,10 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
             "(reserved against the account cap)"
         )
 
-    # Build a map of CRN to instance name
     instance_map = {inst.crn: inst.name for inst in account.instances}
 
-    alloc_by_crn = {c.instance_crn: c for c in result.allocation_changes}
-    limit_by_crn = {c.instance_crn: c for c in result.limit_changes}
-    all_crns = sorted(
-        set(alloc_by_crn) | set(limit_by_crn),
-        key=lambda crn: instance_map.get(crn, crn),
-    )
-
-    rec_data = []
-    for crn in all_crns:
-        alloc = alloc_by_crn.get(crn)
-        limit_chg = limit_by_crn.get(crn)
-
-        instance_name = instance_map.get(crn, crn[:40] + "...")
-        if len(instance_name) > 40:
-            instance_name = instance_name[:37] + "..."
-
-        if alloc:
-            delta = alloc.delta
-            change_str = f"+{format_seconds(delta)}" if delta > 0 else format_seconds(delta)
-            current_str = format_seconds(alloc.current)
-            new_str = format_seconds(alloc.new)
-        else:
-            change_str = "-"
-            current_str = "-"
-            new_str = "-"
-
-        new_limit_str = format_seconds(limit_chg.new) if limit_chg is not None else "None"
-
-        rec_data.append([instance_name, current_str, new_str, change_str, new_limit_str])
-
-    click.echo(
-        tabulate(
-            rec_data,
-            headers=["Instance Name", "Current", "New", "Change", "New Limit"],
-            tablefmt="grid",
-        )
-    )
+    rec_data, rec_headers = format_optimize_changes_table(result.allocation_changes, result.limit_changes, instance_map)
+    click.echo(tabulate(rec_data, headers=rec_headers, tablefmt="grid"))
 
     if dry_run:
         click.echo("\n[DRY RUN] No changes were made.")
@@ -757,7 +497,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
         if len(instance_name) > 40:
             instance_name = instance_name[:37] + "..."
         delta = chg.delta
-        change_str = f"+{format_seconds(delta)}" if delta > 0 else format_seconds(delta)
+        change_str = f"+{format_seconds(delta)}" if delta > 0 else f"-{format_seconds(delta)}"
         try:
             click.echo(
                 f"  Updating {instance_name}: {format_seconds(chg.current)} → {format_seconds(chg.new)} ({change_str})"
