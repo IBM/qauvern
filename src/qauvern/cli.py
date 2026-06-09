@@ -823,8 +823,8 @@ def configure(
 
     if region is not None:
         discovered = DiscoveredInstances(
-            active=tuple(i for i in discovered.active if extract_region_from_crn(i.crn) == region.value),
-            archived=tuple(i for i in discovered.archived if extract_region_from_crn(i.crn) == region.value),
+            active=tuple(i for i in discovered.active if extract_region_from_crn(i.crn) == region),
+            archived=tuple(i for i in discovered.archived if extract_region_from_crn(i.crn) == region),
         )
 
     if discovered.archived:

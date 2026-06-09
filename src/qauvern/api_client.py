@@ -20,7 +20,7 @@ import requests
 
 from .models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState, InstanceRef
 from .plan import Plan, plan_id_for
-from .region import extract_region_from_crn
+from .region import Region, extract_region_from_crn
 
 QUANTUM_COMPUTING_RESOURCE_ID = "b6049020-80f4-11eb-a0f7-e35ec9b4054f"
 
@@ -85,16 +85,11 @@ class IBMQuantumAPIClient:
             The regional base URL (e.g., 'https://eu-de.quantum.cloud.ibm.com/api')
         """
         region = extract_region_from_crn(crn)
-
-        # Determine the domain based on staging flag
         domain = "test.cloud.ibm.com" if self.staging else "cloud.ibm.com"
 
-        # us-east is the default region and uses the main endpoint
-        if region == "us-east":
+        if region == Region.US_EAST:
             return f"https://quantum.{domain}/api"
-        else:
-            # Other regions use region-specific endpoints
-            return f"https://{region}.quantum.{domain}/api"
+        return f"https://{region.value}.quantum.{domain}/api"
 
     def _obtain_iam_token(self) -> None:
         """Obtain an IAM token from IBM Cloud IAM service."""

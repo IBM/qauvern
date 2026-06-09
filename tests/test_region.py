@@ -10,6 +10,8 @@
 
 """Unit tests for region utilities."""
 
+import pytest
+
 from qauvern.region import extract_region_from_crn
 
 
@@ -29,3 +31,9 @@ def test_truncated_crn_defaults_to_us_east() -> None:
 
 def test_empty_crn_defaults_to_us_east() -> None:
     assert extract_region_from_crn("") == "us-east"
+
+
+def test_unrecognized_region_raises_assertion_error() -> None:
+    unknown_crn = "crn:v1:bluemix:public:quantum-computing:in-south:a/acc:inst::"
+    with pytest.raises(AssertionError, match="github.com/IBM/qauvern/issues"):
+        extract_region_from_crn(unknown_crn)

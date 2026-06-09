@@ -18,14 +18,20 @@ class Region(str, Enum):
     EU_DE = "eu-de"
 
 
-def extract_region_from_crn(crn: str) -> str:
+def extract_region_from_crn(crn: str) -> Region:
     """Extract the region from a CRN.
 
     CRN format: crn:v1:bluemix:public:quantum-computing:REGION:a/ACCOUNT_ID:INSTANCE_ID::
 
-    Returns the region string, or 'us-east' if the CRN cannot be parsed.
+    Returns Region.US_EAST if the CRN cannot be parsed. Raises AssertionError for
+    well-formed CRNs whose region is not yet in the Region enum.
     """
     parts = crn.split(":")
-    if len(parts) >= 6:
-        return parts[5]
-    return "us-east"
+    if len(parts) < 6:
+        return Region.US_EAST
+    region_str = parts[5]
+    if region_str not in {r.value for r in Region}:
+        raise AssertionError(
+            f"Unrecognized region {region_str!r} in CRN. Please open an issue at https://github.com/IBM/qauvern/issues"
+        )
+    return Region(region_str)
