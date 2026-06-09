@@ -13,7 +13,7 @@
 from datetime import date, datetime, timezone
 
 from .limit_resolver import resolve_limit
-from .models import Account, AllocationChange, InstanceConfig, LimitChange, OptimizationResult
+from .models import Account, AllocationChange, InstanceConfig, InstanceState, LimitChange, OptimizationResult
 
 
 class AllocationOptimizer:
@@ -43,188 +43,124 @@ class AllocationOptimizer:
         self.today = today or datetime.now(timezone.utc).date()
         self._configs = {config.crn: config for config in instance_configs}
 
+    def _floor(self, instance: InstanceState) -> int:
+        return max(self.minimum_allocation_seconds, instance.consumed_seconds)
+
     def optimize(self) -> OptimizationResult:
-        """Compute allocation and limit recommendations based on core algorithm.
+        """Compute allocation and limit recommendations.
 
-        Core Algorithm (from Design.md):
-        1. Get detailed usage for all instances
-        2. Allocation can never be reduced below current 28d usage (system constraint)
-        3. Create composite activity score using exponential weighting:
-           - Each bucket's usage/days is multiplied by bias^exponent
-           - Exponents: 24h=5.0, 3d=4.0, 7d=3.0, 14d=2.0, 28d=1.0
-           - With bias=2.0, creates strong recency bias (24h has 16x weight vs 28d)
-        4. Instances with score=0 → minimal allocation
-        5. Temporarily reduce active instances to their 28-day usage to free up allocation
-        6. Redistribute all available allocation to active instances proportionally by activity score
-        7. Resolve effective limits via LimitResolver (net grants, rolloff)
-
-        Returns:
-            OptimizationResult with recommendations; no changes are applied
+        Algorithm:
+        1. Resolve effective limit for each managed instance via LimitResolver.
+        2. Categorize active (activity_score > 0) vs inactive (score == 0).
+        3. Pin every managed instance at floor = max(minimum_allocation_seconds,
+           consumed_seconds). Inactive instances stay there.
+        4. Build the redistribution pool from unallocated headroom plus what
+           managed instances hold above their floor; scale by reserve_percent.
+        5. Water-fill the pool across active instances proportional to activity
+           score. Instances that hit their effective limit drop out of the round
+           and the leftover flows to the rest. Leftover after all active
+           instances are capped stays unallocated.
+        6. Emit AllocationChange / LimitChange where the projected value differs
+           from the live state.
         """
+        managed = [inst for inst in self.account.instances if inst.crn in self._configs]
+
+        resolved_limits: dict[str, int | None] = {
+            inst.crn: resolve_limit(self._configs[inst.crn], inst, self.today) for inst in managed
+        }
+        effective_limits: dict[str, int | None] = {
+            inst.crn: resolved_limits[inst.crn] if resolved_limits[inst.crn] is not None else inst.limit_seconds
+            for inst in managed
+        }
+
+        # First, set all instances to their floor. This sometimes increases the allocation
+        # to ensure that we meet invariants like >=28-day consumption. Otherwise, it often
+        # frees up allocation so that we can redistribute it later based on the activity score.
+        new_alloc: dict[str, int] = {inst.crn: self._floor(inst) for inst in managed}
+
+        # Pool: unallocated headroom + (alloc - floor) summed across managed instances.
+        # Negative contributions (instances below their floor) reduce the pool because
+        # bumping them up to floor consumes budget. Reserve scales the whole pool.
+        delta_above_floor = sum(inst.allocation_seconds - self._floor(inst) for inst in managed)
+        raw_pool = self.account.unallocated_seconds + delta_above_floor
+        pool = max(0, int(raw_pool * (1 - self.allocation_reserve_percent / 100)))
+
+        active = [inst for inst in managed if inst.activity_score > 0]
+        if active and pool > 0:
+            self._water_fill(active, pool, effective_limits, new_alloc)
+
         allocation_changes: list[AllocationChange] = []
-        limit_changes: list[LimitChange] = []
-
-        # Step 1: Categorize instances by activity score
-        print("\n=== Step 1: Categorizing Instances ===")
-        instance_scores = {}
-        inactive = []  # score = 0
-        active = []  # score > 0
-
-        for instance in self.account.instances:
-            config = self._configs.get(instance.crn)
-            if not config:
-                continue
-
-            # Use the activity_score property from Instance model
-            score = instance.activity_score
-            instance_scores[instance.crn] = score
-
-            if score == 0:
-                inactive.append(instance)
-            else:
-                active.append(instance)
-
-        print(f"  Inactive instances (score=0): {len(inactive)}")
-        print(f"  Active instances (score>0): {len(active)}")
-
-        # Step 2: Reduce allocation for inactive instances (score = 0)
-        # Allocation cannot go below current 28d usage
-        print("\n=== Step 2: Processing Inactive Instances ===")
-        freed_allocation = 0
-        inactive_reduced = 0
-        inactive_increased = 0
-        for instance in inactive:
-            # Minimum is the greater of: minimum_allocation_seconds or current 28d usage
-            min_allocation = max(self.minimum_allocation_seconds, instance.consumed_seconds)
-            if instance.allocation_seconds > min_allocation:
-                freed = instance.allocation_seconds - min_allocation
-                freed_allocation += freed
+        for inst in managed:
+            projected = new_alloc[inst.crn]
+            if projected != inst.allocation_seconds:
                 allocation_changes.append(
                     AllocationChange(
-                        instance_crn=instance.crn,
-                        current=instance.allocation_seconds,
-                        new=min_allocation,
-                        reason=f"No recent activity (score=0), reducing to minimum (cannot go below 28d usage: {instance.consumed_seconds}s)",
+                        instance_crn=inst.crn,
+                        current=inst.allocation_seconds,
+                        new=projected,
+                        reason=self._reason_for(inst, projected, effective_limits[inst.crn]),
                     )
                 )
-                inactive_reduced += 1
-            elif instance.allocation_seconds < min_allocation:
-                # Need to increase allocation to meet minimum (28d usage floor)
-                additional = min_allocation - instance.allocation_seconds
-                allocation_changes.append(
-                    AllocationChange(
-                        instance_crn=instance.crn,
-                        current=instance.allocation_seconds,
-                        new=min_allocation,
-                        reason=f"Allocation below 28d usage floor, increasing to minimum: {instance.consumed_seconds}s",
-                    )
-                )
-                freed_allocation -= additional  # This reduces available allocation
-                inactive_increased += 1
-        print(f"  Inactive instances reduced: {inactive_reduced}")
-        print(f"  Inactive instances increased (below 28d floor): {inactive_increased}")
-        print(f"  Allocation freed from inactive: {freed_allocation}s")
 
-        # Step 3: Temporarily reduce active instances to their 28-day usage
-        # This frees up all allocation not already consumed this period
-        print("\n=== Step 3: Reducing Active Instances to 28-Day Usage ===")
-        active_freed = 0
-        for instance in active:
-            # Reduce to 28-day usage (cannot go below this anyway)
-            min_allocation = max(self.minimum_allocation_seconds, instance.consumed_seconds)
-            if instance.allocation_seconds > min_allocation:
-                freed = instance.allocation_seconds - min_allocation
-                freed_allocation += freed
-                active_freed += freed
-        print(f"  Allocation freed from active instances: {active_freed}s")
+        limit_changes = tuple(
+            LimitChange(
+                instance_crn=inst.crn,
+                current=inst.limit_seconds,
+                new=new_limit,
+                reason="Resolved from config (limit_seconds and any active net grants)",
+            )
+            for inst in managed
+            if (new_limit := resolved_limits[inst.crn]) is not None and new_limit != inst.limit_seconds
+        )
 
-        # Step 4: Calculate total allocation to distribute
-        # Use ALL available allocation (freed + account available)
-        print("\n=== Step 4: Calculating Total Available Allocation ===")
-        reserve_factor = 1.0 - (self.allocation_reserve_percent / 100.0)
-        total_to_allocate = int((freed_allocation + self.account.unallocated_seconds) * reserve_factor)
-        print(f"  Freed from inactive: {freed_allocation - active_freed}s")
-        print(f"  Freed from active (temporary reduction): {active_freed}s")
-        print(f"  Account available: {self.account.unallocated_seconds}s")
-        print(f"  Total to allocate: {total_to_allocate}s")
+        return OptimizationResult(tuple(allocation_changes), limit_changes)
 
-        # Step 5: Distribute allocation to active instances
-        print("\n=== Step 5: Distributing to Active Instances ===")
-        if active and total_to_allocate > 0:
-            # All active instances have been reduced to 28-day usage in Step 3
-            # Now distribute all available allocation proportionally by activity score
-            print("  Distributing all available allocation by activity score")
-            print(f"    Total to distribute: {total_to_allocate}s")
+    def _water_fill(
+        self,
+        active: list[InstanceState],
+        pool: int,
+        effective_limits: dict[str, int | None],
+        new_alloc: dict[str, int],
+    ) -> None:
+        """Distribute `pool` seconds across `active` proportional to activity score, capping at effective limit.
 
-            # Calculate total score across all active instances
-            total_score = sum(instance_scores[inst.crn] for inst in active)
-            print(f"    Total activity score: {total_score:.1f}")
+        Instances that hit their effective limit drop out of the candidate set and
+        their leftover share flows to the remaining candidates in the next round.
+        """
+        scores = {inst.crn: inst.activity_score for inst in active}
+        candidates = list(active)
+        remaining = pool
 
-            if total_score > 0:
-                # Sort by score (highest first) for better distribution
-                active_sorted = sorted(active, key=lambda x: instance_scores[x.crn], reverse=True)
+        while remaining > 0 and candidates:
+            total_score = sum(scores[inst.crn] for inst in candidates)
+            if total_score <= 0:
+                break
 
-                active_recommendations = 0
-                for instance in active_sorted:
-                    config = self._configs.get(instance.crn)
-                    if not config:
-                        continue
+            awarded = 0
+            still_active: list[InstanceState] = []
+            for inst in candidates:
+                share = int((scores[inst.crn] / total_score) * remaining)
+                limit = effective_limits[inst.crn]
+                room = (limit - new_alloc[inst.crn]) if limit is not None else share
+                give = max(0, min(share, room))
+                new_alloc[inst.crn] += give
+                awarded += give
+                if limit is None or new_alloc[inst.crn] < limit:
+                    still_active.append(inst)
 
-                    # Calculate proportional share based on activity score
-                    score = instance_scores[instance.crn]
-                    proportional_share = int((score / total_score) * total_to_allocate)
+            remaining -= awarded
+            candidates = still_active
+            if awarded == 0:
+                # Either every remaining candidate is at its cap, or rounding left
+                # nothing distributable this round. Either way, no further progress.
+                break
 
-                    # Start from 28-day usage floor
-                    min_allocation = max(self.minimum_allocation_seconds, instance.consumed_seconds)
-                    new_allocation = min_allocation + proportional_share
-
-                    # Cap allocation at limit_seconds if set
-                    if instance.limit_seconds is not None:
-                        if new_allocation > instance.limit_seconds:
-                            new_allocation = instance.limit_seconds
-
-                    # Only create a change if allocation actually differs
-                    if new_allocation != instance.allocation_seconds:
-                        allocation_changes.append(
-                            AllocationChange(
-                                instance_crn=instance.crn,
-                                current=instance.allocation_seconds,
-                                new=new_allocation,
-                                reason=f"Active instance (activity score: {score:.1f}, fairness: {instance.fairness:.2f})",
-                            )
-                        )
-                        active_recommendations += 1
-
-                print(f"    Recommendations for active instances: {active_recommendations}")
-        else:
-            print("  No active instances or no allocation to distribute")
-
-        # Step 6: Resolve effective limits for each instance
-        print("\n=== Step 6: Resolving Limits ===")
-        limit_updates = 0
-        for instance in self.account.instances:
-            config = self._configs.get(instance.crn)
-            if not config:
-                continue
-
-            new_limit = resolve_limit(config, instance, self.today)
-
-            if new_limit is not None and new_limit != instance.limit_seconds:
-                limit_changes.append(
-                    LimitChange(
-                        instance_crn=instance.crn,
-                        current=instance.limit_seconds,
-                        new=new_limit,
-                        reason="Updating limit via LimitResolver",
-                    )
-                )
-                limit_updates += 1
-        print(f"  Limit updates: {limit_updates}")
-
-        print("\n=== Optimization Complete ===")
-        print(f"Total changes: {len(allocation_changes)} allocation, {len(limit_changes)} limit")
-
-        return OptimizationResult(tuple(allocation_changes), tuple(limit_changes))
+    def _reason_for(self, inst: InstanceState, projected: int, effective_limit: int | None) -> str:
+        if inst.activity_score == 0:
+            return f"No recent activity (score=0); pinning at floor (28d usage: {inst.consumed_seconds}s)"
+        capped = effective_limit is not None and projected >= effective_limit
+        suffix = " (capped at effective limit)" if capped else ""
+        return f"Active (activity score: {inst.activity_score:.1f}, fairness: {inst.fairness:.2f}){suffix}"
 
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
         """Check that `result` satisfies all allocation invariants.
@@ -269,7 +205,6 @@ class AllocationOptimizer:
 
         # Invariant 2: reserve buffer
         # available = unallocated headroom + what managed instances hold above their floors.
-        # Mirrors the optimizer's Steps 2-3 redistribution pool.
         available = max(
             0,
             self.account.unallocated_seconds
