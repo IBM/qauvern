@@ -170,34 +170,41 @@ class Account:
         return max(0, self.allocation_budget_seconds - self.unallocated_seconds - configured)
 
 
-@dataclass
-class OptimizationRecommendation:
-    """Represents a single optimization recommendation for an instance."""
+@dataclass(frozen=True)
+class AllocationChange:
+    """A proposed change to a single instance's allocation."""
 
     instance_crn: str
-    current_allocation: int
-    new_allocation: int
+    current: int
+    new: int
     reason: str
-    new_limit: int | None = None
 
     @property
-    def change(self) -> int:
-        """Calculate the change in allocation."""
-        return self.new_allocation - self.current_allocation
+    def delta(self) -> int:
+        return self.new - self.current
+
+
+@dataclass(frozen=True)
+class LimitChange:
+    """A proposed change to a single instance's limit."""
+
+    instance_crn: str
+    current: int | None
+    new: int
+    reason: str
 
 
 @dataclass(frozen=True)
 class OptimizationResult:
-    """Results from optimization algorithm."""
+    """Results from the optimization algorithm."""
 
-    recommendations: tuple[OptimizationRecommendation, ...]
-
-    @property
-    def reductions(self) -> list[OptimizationRecommendation]:
-        """Get recommendations that reduce allocation (change < 0)."""
-        return [rec for rec in self.recommendations if rec.change < 0]
+    allocation_changes: tuple[AllocationChange, ...]
+    limit_changes: tuple[LimitChange, ...]
 
     @property
-    def additions(self) -> list[OptimizationRecommendation]:
-        """Get recommendations that increase allocation (change > 0)."""
-        return [rec for rec in self.recommendations if rec.change > 0]
+    def decreases(self) -> list[AllocationChange]:
+        return [c for c in self.allocation_changes if c.delta < 0]
+
+    @property
+    def increases(self) -> list[AllocationChange]:
+        return [c for c in self.allocation_changes if c.delta > 0]

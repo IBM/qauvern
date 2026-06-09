@@ -26,11 +26,12 @@ from .config import ConfigParser
 from .formatting import format_fairness, format_limit, format_seconds
 from .models import (
     Account,
+    AllocationChange,
     DiscoveredInstances,
     InstanceState,
     InstanceConfig,
     InstanceDetailedUsage,
-    OptimizationRecommendation,
+    LimitChange,
 )
 from .optimizer import AllocationOptimizer
 from .plan import Plan, plan_from_name
@@ -149,7 +150,8 @@ def format_instance_table(
     instances: Sequence[InstanceState],
     instance_configs: list[InstanceConfig] | None = None,
     columns: list[str] | None = None,
-    rec_map: dict[str, "OptimizationRecommendation"] | None = None,
+    alloc_map: dict[str, "AllocationChange"] | None = None,
+    limit_map: dict[str, "LimitChange"] | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     """Format instance data into a table with configurable columns.
 
@@ -214,7 +216,8 @@ def format_instance_table(
     for instance in instances:
         row = []
         config = config_map.get(instance.crn) if config_map else None
-        rec = rec_map.get(instance.crn) if rec_map else None
+        alloc = alloc_map.get(instance.crn) if alloc_map else None
+        limit_rec = limit_map.get(instance.crn) if limit_map else None
 
         for col in columns:
             if col == "name":
@@ -262,28 +265,30 @@ def format_instance_table(
                         if _gs <= _today < _grant.end_date.date():
                             _has_grant = True
                             break
-                _new_limit = rec.new_limit if rec and rec.new_limit is not None else None
+                _new_limit = limit_rec.new if limit_rec is not None else None
                 row.append(format_limit_display(_new_limit, has_grant=_has_grant, in_debt=_in_debt))
             elif col == "fairness":
                 row.append(format_fairness(instance.fairness))
             elif col == "recommended":
-                if rec:
-                    row.append(format_seconds(rec.new_allocation))
+                if alloc:
+                    row.append(format_seconds(alloc.new))
                 else:
                     row.append("-")
             elif col == "change":
-                if rec:
-                    change = rec.change
-                    if change > 0:
-                        change_str = f"+{format_seconds(change)}"
+                if alloc:
+                    delta = alloc.delta
+                    if delta > 0:
+                        change_str = f"+{format_seconds(delta)}"
                     else:
-                        change_str = f"-{format_seconds(change)}"
+                        change_str = f"-{format_seconds(delta)}"
                     row.append(change_str)
                 else:
                     row.append("-")
             elif col == "reason":
-                if rec:
-                    row.append(rec.reason[:30] if len(rec.reason) > 30 else rec.reason)
+                if alloc:
+                    row.append(alloc.reason[:30] if len(alloc.reason) > 30 else alloc.reason)
+                elif limit_rec:
+                    row.append(limit_rec.reason[:30] if len(limit_rec.reason) > 30 else limit_rec.reason)
                 else:
                     row.append("No change")
             else:
@@ -584,10 +589,8 @@ def analyze(ctx, config: str, api_key: str | None):
     click.echo("INSTANCE ANALYSIS")
     click.echo("=" * 80)
 
-    # Build a map of recommendations by CRN
-    rec_map = {}
-    for rec in result.recommendations:
-        rec_map[rec.instance_crn] = rec
+    alloc_map = {c.instance_crn: c for c in result.allocation_changes}
+    limit_map = {c.instance_crn: c for c in result.limit_changes}
 
     # Use utility function with all analysis columns
     columns = [
@@ -606,13 +609,16 @@ def analyze(ctx, config: str, api_key: str | None):
         "reason",
     ]
     table_data, headers = format_instance_table(
-        account.instances, instance_configs=instance_configs, columns=columns, rec_map=rec_map
+        account.instances, instance_configs=instance_configs, columns=columns, alloc_map=alloc_map, limit_map=limit_map
     )
 
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
 
-    if result.recommendations:
-        click.echo(f"\nTotal recommendations: {len(result.recommendations)}")
+    total_changes = len(result.allocation_changes) + len(result.limit_changes)
+    if total_changes:
+        click.echo(
+            f"\nTotal changes: {total_changes} ({len(result.allocation_changes)} allocation, {len(result.limit_changes)} limit)"
+        )
         click.echo("\nTo apply these recommendations, run: qauvern optimize")
     else:
         click.echo("\n✓ No optimization recommendations. Allocations are optimal.")
@@ -669,7 +675,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
             click.echo(f"❌ {err}", err=True)
         raise click.ClickException("Validation failed; refusing to apply changes.")
 
-    if not result.recommendations:
+    if not result.allocation_changes and not result.limit_changes:
         click.echo("✓ No optimization needed. Allocations are already optimal.")
         return
 
@@ -687,29 +693,35 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     # Build a map of CRN to instance name
     instance_map = {inst.crn: inst.name for inst in account.instances}
 
-    rec_data = []
-    for rec in result.recommendations:
-        change = rec.change
-        if change > 0:
-            change_str = f"+{format_seconds(change)}"
-        else:
-            change_str = f"{format_seconds(change)}"
-        new_limit_str = format_seconds(rec.new_limit) if rec.new_limit is not None else "None"
+    alloc_by_crn = {c.instance_crn: c for c in result.allocation_changes}
+    limit_by_crn = {c.instance_crn: c for c in result.limit_changes}
+    all_crns = sorted(
+        set(alloc_by_crn) | set(limit_by_crn),
+        key=lambda crn: instance_map.get(crn, crn),
+    )
 
-        # Get instance name, truncate if too long
-        instance_name = instance_map.get(rec.instance_crn, rec.instance_crn[:40] + "...")
+    rec_data = []
+    for crn in all_crns:
+        alloc = alloc_by_crn.get(crn)
+        limit_chg = limit_by_crn.get(crn)
+
+        instance_name = instance_map.get(crn, crn[:40] + "...")
         if len(instance_name) > 40:
             instance_name = instance_name[:37] + "..."
 
-        rec_data.append(
-            [
-                instance_name,
-                format_seconds(rec.current_allocation),
-                format_seconds(rec.new_allocation),
-                change_str,
-                new_limit_str,
-            ]
-        )
+        if alloc:
+            delta = alloc.delta
+            change_str = f"+{format_seconds(delta)}" if delta > 0 else format_seconds(delta)
+            current_str = format_seconds(alloc.current)
+            new_str = format_seconds(alloc.new)
+        else:
+            change_str = "-"
+            current_str = "-"
+            new_str = "-"
+
+        new_limit_str = format_seconds(limit_chg.new) if limit_chg is not None else "None"
+
+        rec_data.append([instance_name, current_str, new_str, change_str, new_limit_str])
 
     click.echo(
         tabulate(
@@ -723,46 +735,49 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
         click.echo("\n[DRY RUN] No changes were made.")
         return
 
-    # Apply changes - process reductions first, then additions
+    # Apply in safe order: decreases first (free headroom), then limits, then increases
     click.echo("\nApplying changes...")
     success_count = 0
     error_count = 0
 
-    # Process reductions first to free up allocation
-    all_changes = list(result.reductions) + list(result.additions)
-
-    for rec in all_changes:
-        # Get instance name
-        instance_name = instance_map.get(rec.instance_crn, rec.instance_crn[:40] + "...")
+    def _apply_allocation(chg: AllocationChange) -> None:
+        nonlocal success_count, error_count
+        instance_name = instance_map.get(chg.instance_crn, chg.instance_crn[:40] + "...")
         if len(instance_name) > 40:
             instance_name = instance_name[:37] + "..."
-
-        # Format the change
-        change = rec.change
-        if change > 0:
-            change_str = f"+{format_seconds(change)}"
-        else:
-            change_str = f"{format_seconds(change)}"
-
+        delta = chg.delta
+        change_str = f"+{format_seconds(delta)}" if delta > 0 else format_seconds(delta)
         try:
-            # Show what we're doing
             click.echo(
-                f"  Updating {instance_name}: {format_seconds(rec.current_allocation)} → {format_seconds(rec.new_allocation)} ({change_str})"
+                f"  Updating {instance_name}: {format_seconds(chg.current)} → {format_seconds(chg.new)} ({change_str})"
             )
-
-            # Update allocation
-            client.update_instance_allocation(rec.instance_crn, rec.new_allocation)
-
-            # Update limit if specified
-            if rec.new_limit is not None:
-                click.echo(f"    Setting limit: {format_seconds(rec.new_limit)}")
-                client.update_instance_limit(rec.instance_crn, rec.new_limit)
-
+            client.update_instance_allocation(chg.instance_crn, chg.new)
             success_count += 1
             click.echo("    ✓ Success")
         except Exception as e:
             click.echo(f"    ❌ Failed: {e}", err=True)
             error_count += 1
+
+    def _apply_limit(chg: LimitChange) -> None:
+        nonlocal success_count, error_count
+        instance_name = instance_map.get(chg.instance_crn, chg.instance_crn[:40] + "...")
+        if len(instance_name) > 40:
+            instance_name = instance_name[:37] + "..."
+        try:
+            click.echo(f"  Setting limit for {instance_name}: {format_seconds(chg.new)}")
+            client.update_instance_limit(chg.instance_crn, chg.new)
+            success_count += 1
+            click.echo("    ✓ Success")
+        except Exception as e:
+            click.echo(f"    ❌ Failed: {e}", err=True)
+            error_count += 1
+
+    for chg in result.decreases:
+        _apply_allocation(chg)
+    for chg in result.limit_changes:
+        _apply_limit(chg)
+    for chg in result.increases:
+        _apply_allocation(chg)
 
     click.echo(f"\n✓ Successfully updated {success_count} instances")
     if error_count > 0:
