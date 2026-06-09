@@ -13,11 +13,12 @@
 import pytest
 from datetime import datetime
 from qauvern.models import (
+    AllocationChange,
     InstanceState,
     InstanceConfig,
     InstanceDetailedUsage,
+    LimitChange,
     OptimizationResult,
-    OptimizationRecommendation,
 )
 from qauvern.cli import format_instance_table, format_seconds, format_fairness
 
@@ -127,22 +128,32 @@ def cfg2(instance2: InstanceState) -> InstanceConfig:
 
 
 @pytest.fixture
-def rec1(instance1: InstanceState) -> OptimizationRecommendation:
-    return OptimizationRecommendation(
+def alloc1(instance1: InstanceState) -> AllocationChange:
+    return AllocationChange(
         instance_crn=instance1.crn,
-        current_allocation=1000,
-        new_allocation=1500,
+        current=1000,
+        new=1500,
         reason="Increased usage detected",
     )
 
 
 @pytest.fixture
-def rec2(instance2: InstanceState) -> OptimizationRecommendation:
-    return OptimizationRecommendation(
+def alloc2(instance2: InstanceState) -> AllocationChange:
+    return AllocationChange(
         instance_crn=instance2.crn,
-        current_allocation=2000,
-        new_allocation=1000,
+        current=2000,
+        new=1000,
         reason="Reduced due to low activity",
+    )
+
+
+@pytest.fixture
+def limit1(instance1: InstanceState) -> LimitChange:
+    return LimitChange(
+        instance_crn=instance1.crn,
+        current=2000,
+        new=3000,
+        reason="Net grant active",
     )
 
 
@@ -163,25 +174,24 @@ def test_format_basic_columns(instance1: InstanceState, instance2: InstanceState
 def test_format_with_recommendations(
     instance1: InstanceState,
     instance2: InstanceState,
-    rec1: OptimizationRecommendation,
-    rec2: OptimizationRecommendation,
+    alloc1: AllocationChange,
+    alloc2: AllocationChange,
 ) -> None:
-    """Test formatting with recommendations."""
+    """Test formatting with allocation changes."""
     instances = [instance1, instance2]
-    rec_map = {
-        instance1.crn: rec1,
-        instance2.crn: rec2,
+    alloc_map = {
+        instance1.crn: alloc1,
+        instance2.crn: alloc2,
     }
     columns = ["name", "allocation", "recommended", "change", "reason"]
 
-    table_data, headers = format_instance_table(instances, columns=columns, rec_map=rec_map)
+    table_data, headers = format_instance_table(instances, columns=columns, alloc_map=alloc_map)
 
     assert len(table_data) == 2
     assert "Recommended" in headers
     assert "Change" in headers
     assert "Reason" in headers
 
-    # Check that recommendations are properly formatted
     # Instance 1 should show increase
     row1 = table_data[0]
     assert "+" in str(row1)  # Should have positive change indicator
@@ -244,138 +254,105 @@ def test_format_empty_instances() -> None:
 
 
 def test_format_instance_without_recommendation(
-    instance1: InstanceState, instance2: InstanceState, rec1: OptimizationRecommendation
+    instance1: InstanceState, instance2: InstanceState, alloc1: AllocationChange
 ) -> None:
-    """Test formatting instance that has no recommendation."""
+    """Test formatting instance that has no allocation change."""
     instances = [instance1, instance2]
-    rec_map = {instance1.crn: rec1}  # Only rec for instance1
+    alloc_map = {instance1.crn: alloc1}  # Only change for instance1
     columns = ["name", "recommended", "change", "reason"]
 
-    table_data, headers = format_instance_table(instances, columns=columns, rec_map=rec_map)
+    table_data, headers = format_instance_table(instances, columns=columns, alloc_map=alloc_map)
 
     assert len(table_data) == 2
-    # Instance 2 should have "-" or "No change" for missing recommendation
+    # Instance 2 should have "-" or "No change" for missing change
     row2 = table_data[1]
     assert "-" in str(row2) or "No change" in str(row2)
 
 
-def test_recommendation_properties() -> None:
-    """Test that recommendation properties are accessible."""
-    rec = OptimizationRecommendation(
+def test_allocation_change_properties() -> None:
+    """Test AllocationChange fields and delta property."""
+    chg = AllocationChange(
         instance_crn="crn:test",
-        current_allocation=1000,
-        new_allocation=1500,
+        current=1000,
+        new=1500,
         reason="Test reason",
     )
 
-    assert rec.instance_crn == "crn:test"
-    assert rec.current_allocation == 1000
-    assert rec.new_allocation == 1500
-    assert rec.reason == "Test reason"
-    assert rec.change == 500
-    assert rec.new_limit is None
+    assert chg.instance_crn == "crn:test"
+    assert chg.current == 1000
+    assert chg.new == 1500
+    assert chg.reason == "Test reason"
+    assert chg.delta == 500
 
 
-def test_recommendation_with_limit() -> None:
-    """Test recommendation with limit set."""
-    rec = OptimizationRecommendation(
+def test_allocation_change_negative_delta() -> None:
+    """Test AllocationChange with negative delta."""
+    chg = AllocationChange(
         instance_crn="crn:test",
-        current_allocation=1000,
-        new_allocation=1500,
-        reason="Test reason",
-        new_limit=2000,
-    )
-
-    assert rec.new_limit == 2000
-
-
-def test_recommendation_negative_change() -> None:
-    """Test recommendation with negative change."""
-    rec = OptimizationRecommendation(
-        instance_crn="crn:test",
-        current_allocation=2000,
-        new_allocation=1000,
+        current=2000,
+        new=1000,
         reason="Reduction",
     )
 
-    assert rec.change == -1000
+    assert chg.delta == -1000
 
 
-def test_result_reductions_property() -> None:
-    """Test that reductions property filters correctly."""
-    result = OptimizationResult(
-        recommendations=(
-            OptimizationRecommendation(
-                instance_crn="crn:1",
-                current_allocation=2000,
-                new_allocation=1000,
-                reason="Reduce",
-            ),
-            OptimizationRecommendation(
-                instance_crn="crn:2",
-                current_allocation=1000,
-                new_allocation=2000,
-                reason="Increase",
-            ),
-            OptimizationRecommendation(
-                instance_crn="crn:3",
-                current_allocation=1500,
-                new_allocation=500,
-                reason="Reduce more",
-            ),
-        ),
+def test_limit_change_fields() -> None:
+    """Test LimitChange fields."""
+    chg = LimitChange(
+        instance_crn="crn:test",
+        current=2000,
+        new=3000,
+        reason="Net grant active",
     )
 
-    reductions = result.reductions
-    assert len(reductions) == 2
-    assert all(rec.change < 0 for rec in reductions)
+    assert chg.instance_crn == "crn:test"
+    assert chg.current == 2000
+    assert chg.new == 3000
+    assert chg.reason == "Net grant active"
 
 
-def test_result_additions_property() -> None:
-    """Test that additions property filters correctly."""
+def test_result_decreases_property() -> None:
+    """Test that decreases property filters allocation_changes with delta < 0."""
     result = OptimizationResult(
-        recommendations=(
-            OptimizationRecommendation(
-                instance_crn="crn:1",
-                current_allocation=2000,
-                new_allocation=1000,
-                reason="Reduce",
-            ),
-            OptimizationRecommendation(
-                instance_crn="crn:2",
-                current_allocation=1000,
-                new_allocation=2000,
-                reason="Increase",
-            ),
-            OptimizationRecommendation(
-                instance_crn="crn:3",
-                current_allocation=500,
-                new_allocation=1500,
-                reason="Increase more",
-            ),
+        allocation_changes=(
+            AllocationChange(instance_crn="crn:1", current=2000, new=1000, reason="Reduce"),
+            AllocationChange(instance_crn="crn:2", current=1000, new=2000, reason="Increase"),
+            AllocationChange(instance_crn="crn:3", current=1500, new=500, reason="Reduce more"),
         ),
+        limit_changes=(),
     )
 
-    additions = result.additions
-    assert len(additions) == 2
-    assert all(rec.change > 0 for rec in additions)
+    decreases = result.decreases
+    assert len(decreases) == 2
+    assert all(c.delta < 0 for c in decreases)
 
 
-def test_result_no_change_recommendations() -> None:
-    """Test result with no-change recommendations."""
+def test_result_increases_property() -> None:
+    """Test that increases property filters allocation_changes with delta > 0."""
     result = OptimizationResult(
-        recommendations=(
-            OptimizationRecommendation(
-                instance_crn="crn:1",
-                current_allocation=1000,
-                new_allocation=1000,
-                reason="No change",
-            ),
+        allocation_changes=(
+            AllocationChange(instance_crn="crn:1", current=2000, new=1000, reason="Reduce"),
+            AllocationChange(instance_crn="crn:2", current=1000, new=2000, reason="Increase"),
+            AllocationChange(instance_crn="crn:3", current=500, new=1500, reason="Increase more"),
         ),
+        limit_changes=(),
     )
 
-    assert len(result.reductions) == 0
-    assert len(result.additions) == 0
+    increases = result.increases
+    assert len(increases) == 2
+    assert all(c.delta > 0 for c in increases)
+
+
+def test_result_no_change() -> None:
+    """A zero-delta AllocationChange appears in neither decreases nor increases."""
+    result = OptimizationResult(
+        allocation_changes=(AllocationChange(instance_crn="crn:1", current=1000, new=1000, reason="No change"),),
+        limit_changes=(),
+    )
+
+    assert len(result.decreases) == 0
+    assert len(result.increases) == 0
 
 
 def test_none_returns_dash() -> None:

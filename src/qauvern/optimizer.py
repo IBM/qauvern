@@ -13,7 +13,7 @@
 from datetime import date, datetime, timezone
 
 from .limit_resolver import resolve_limit
-from .models import Account, InstanceConfig, OptimizationRecommendation, OptimizationResult
+from .models import Account, AllocationChange, InstanceConfig, LimitChange, OptimizationResult
 
 
 class AllocationOptimizer:
@@ -61,7 +61,8 @@ class AllocationOptimizer:
         Returns:
             OptimizationResult with recommendations; no changes are applied
         """
-        recommendations: list[OptimizationRecommendation] = []
+        allocation_changes: list[AllocationChange] = []
+        limit_changes: list[LimitChange] = []
 
         # Step 1: Categorize instances by activity score
         print("\n=== Step 1: Categorizing Instances ===")
@@ -98,11 +99,11 @@ class AllocationOptimizer:
             if instance.allocation_seconds > min_allocation:
                 freed = instance.allocation_seconds - min_allocation
                 freed_allocation += freed
-                recommendations.append(
-                    OptimizationRecommendation(
+                allocation_changes.append(
+                    AllocationChange(
                         instance_crn=instance.crn,
-                        current_allocation=instance.allocation_seconds,
-                        new_allocation=min_allocation,
+                        current=instance.allocation_seconds,
+                        new=min_allocation,
                         reason=f"No recent activity (score=0), reducing to minimum (cannot go below 28d usage: {instance.consumed_seconds}s)",
                     )
                 )
@@ -110,11 +111,11 @@ class AllocationOptimizer:
             elif instance.allocation_seconds < min_allocation:
                 # Need to increase allocation to meet minimum (28d usage floor)
                 additional = min_allocation - instance.allocation_seconds
-                recommendations.append(
-                    OptimizationRecommendation(
+                allocation_changes.append(
+                    AllocationChange(
                         instance_crn=instance.crn,
-                        current_allocation=instance.allocation_seconds,
-                        new_allocation=min_allocation,
+                        current=instance.allocation_seconds,
+                        new=min_allocation,
                         reason=f"Allocation below 28d usage floor, increasing to minimum: {instance.consumed_seconds}s",
                     )
                 )
@@ -182,13 +183,13 @@ class AllocationOptimizer:
                         if new_allocation > instance.limit_seconds:
                             new_allocation = instance.limit_seconds
 
-                    # Only create recommendation if allocation changes
+                    # Only create a change if allocation actually differs
                     if new_allocation != instance.allocation_seconds:
-                        recommendations.append(
-                            OptimizationRecommendation(
+                        allocation_changes.append(
+                            AllocationChange(
                                 instance_crn=instance.crn,
-                                current_allocation=instance.allocation_seconds,
-                                new_allocation=new_allocation,
+                                current=instance.allocation_seconds,
+                                new=new_allocation,
                                 reason=f"Active instance (activity score: {score:.1f}, fairness: {instance.fairness:.2f})",
                             )
                         )
@@ -209,26 +210,21 @@ class AllocationOptimizer:
             new_limit = resolve_limit(config, instance, self.today)
 
             if new_limit is not None and new_limit != instance.limit_seconds:
-                existing_rec = next((rec for rec in recommendations if rec.instance_crn == instance.crn), None)
-                if existing_rec:
-                    existing_rec.new_limit = new_limit
-                else:
-                    recommendations.append(
-                        OptimizationRecommendation(
-                            instance_crn=instance.crn,
-                            current_allocation=instance.allocation_seconds,
-                            new_allocation=instance.allocation_seconds,
-                            reason="Updating limit via LimitResolver",
-                            new_limit=new_limit,
-                        )
+                limit_changes.append(
+                    LimitChange(
+                        instance_crn=instance.crn,
+                        current=instance.limit_seconds,
+                        new=new_limit,
+                        reason="Updating limit via LimitResolver",
                     )
+                )
                 limit_updates += 1
         print(f"  Limit updates: {limit_updates}")
 
         print("\n=== Optimization Complete ===")
-        print(f"Total recommendations: {len(recommendations)}")
+        print(f"Total changes: {len(allocation_changes)} allocation, {len(limit_changes)} limit")
 
-        return OptimizationResult(tuple(recommendations))
+        return OptimizationResult(tuple(allocation_changes), tuple(limit_changes))
 
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
         """Check that `result` satisfies all allocation invariants.
@@ -254,12 +250,13 @@ class AllocationOptimizer:
         """
         errors = []
 
-        rec_by_crn = {rec.instance_crn: rec for rec in result.recommendations}
+        alloc_by_crn = {c.instance_crn: c for c in result.allocation_changes}
+        limit_by_crn = {c.instance_crn: c for c in result.limit_changes}
 
         # Invariant 1: total allocation cap
         total_allocated = (
             sum(
-                rec_by_crn[inst.crn].new_allocation if inst.crn in rec_by_crn else inst.allocation_seconds
+                alloc_by_crn[inst.crn].new if inst.crn in alloc_by_crn else inst.allocation_seconds
                 for inst in self.account.instances
             )
             + self.account.unmanaged_allocation_seconds
@@ -293,8 +290,8 @@ class AllocationOptimizer:
         for inst in self.account.instances:
             if inst.crn not in self._configs:
                 continue
-            rec = rec_by_crn.get(inst.crn)
-            new_alloc = rec.new_allocation if rec is not None else inst.allocation_seconds
+            alloc_chg = alloc_by_crn.get(inst.crn)
+            new_alloc = alloc_chg.new if alloc_chg is not None else inst.allocation_seconds
 
             # Invariant 3: >= 28-day usage
             if new_alloc < inst.consumed_seconds:
@@ -310,11 +307,12 @@ class AllocationOptimizer:
                     f"minimum ({self.minimum_allocation_seconds}s)"
                 )
 
-            # Invariant 5: <= effective limit (rec.new_limit takes precedence).
+            # Invariant 5: <= effective limit (limit_changes take precedence).
             # Invariants 3 and 4 win: only fire when the breach exceeds the
             # floor they would force, so a limit tightened below that floor
             # doesn't surface as a separate, unactionable error.
-            effective_limit = rec.new_limit if (rec is not None and rec.new_limit is not None) else inst.limit_seconds
+            limit_chg = limit_by_crn.get(inst.crn)
+            effective_limit = limit_chg.new if limit_chg is not None else inst.limit_seconds
             floor = max(self.minimum_allocation_seconds, inst.consumed_seconds)
             if effective_limit is not None and new_alloc > effective_limit and new_alloc > floor:
                 errors.append(
