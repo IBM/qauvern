@@ -39,7 +39,7 @@ class ConfigParser:
 
     def _validate_config(self) -> None:
         """Validate the configuration structure."""
-        required_fields = ["account_id", "plan", "balance_period", "instances"]
+        required_fields = ["account_id", "plan", "minimum_allocation_seconds", "balance_period", "instances"]
 
         for field in required_fields:
             if field not in self.config_data:
@@ -70,7 +70,7 @@ class ConfigParser:
 
     @property
     def minimum_allocation_seconds(self) -> int:
-        return self.config_data.get("minimum_allocation_seconds", 60)
+        return self.config_data["minimum_allocation_seconds"]
 
     @property
     def allocation_reserve_percent(self) -> float:

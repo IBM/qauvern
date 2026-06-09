@@ -29,6 +29,7 @@ def build_configure_yaml(
     config = {
         "account_id": account_id,
         "plan": plan.value,
+        "minimum_allocation_seconds": 60,
         "balance_period": {
             "start_date": balance_start,
             "end_date": balance_end,

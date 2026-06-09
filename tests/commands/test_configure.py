@@ -95,6 +95,7 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     cfg = ConfigParser(str(path))
     assert cfg.account_id == "acct"
     assert cfg.plan == Plan.INTERNAL
+    assert cfg.minimum_allocation_seconds == 60
     assert cfg.balance_period["start_date"] == datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
     assert cfg.balance_period["end_date"] == datetime(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
     assert len(cfg.instance_configs) == 1
