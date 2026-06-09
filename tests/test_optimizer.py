@@ -406,6 +406,30 @@ def test_validate_allocations_new_limit_takes_precedence() -> None:
     assert any("effective limit" in e for e in errors)
 
 
+def test_validate_allocations_consumed_floor_beats_limit_ceiling() -> None:
+    """When 28d consumed exceeds the limit, holding new_allocation at consumed is valid.
+
+    The limit breach is unavoidable (invariant 3 forces new_allocation >= consumed),
+    so invariant 5 must yield to avoid a non-actionable error.
+    """
+    inst = _make_instance("crn:a", 600, consumed=600, limit=500)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=600, new_allocation=600, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert is_valid, errors
+
+
+def test_validate_allocations_gratuitous_breach_above_floor_still_fires() -> None:
+    """new_allocation above max(consumed, minimum) AND above limit is gratuitous and still errors."""
+    inst = _make_instance("crn:a", 600, consumed=600, limit=500)
+    optimizer = AllocationOptimizer(_make_account(2000, inst), [_make_config("crn:a")])
+    # consumed=600 forces a floor of 600; 700 exceeds both that floor and the limit.
+    rec = OptimizationRecommendation(instance_crn="crn:a", current_allocation=600, new_allocation=700, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((rec,)))
+    assert not is_valid
+    assert any("effective limit" in e for e in errors)
+
+
 # ---------------------------------------------------------------------------
 # Invariant 6: no archiving
 # ---------------------------------------------------------------------------

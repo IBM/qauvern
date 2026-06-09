@@ -249,7 +249,10 @@ class AllocationOptimizer:
         2. Total projected allocation respects the allocation_reserve_percent buffer.
         3. Each managed instance's new_allocation >= its 28-day consumed usage.
         4. Each managed instance's new_allocation >= minimum_allocation_seconds.
-        5. Each managed instance's new_allocation <= its effective limit (if set).
+        5. Each managed instance's new_allocation <= its effective limit (if set),
+           unless invariants 3 or 4 force it higher: the floor max(consumed_seconds,
+           minimum_allocation_seconds) takes precedence, since a tightened limit
+           below that floor is an unavoidable, non-actionable breach.
         6. No managed instance's new_allocation is 0 (archiving is not allowed).
 
         Unmanaged instances (those not in self.account.instances) contribute their
@@ -318,9 +321,13 @@ class AllocationOptimizer:
                     f"minimum ({self.minimum_allocation_seconds}s)"
                 )
 
-            # Invariant 5: <= effective limit (rec.new_limit takes precedence)
+            # Invariant 5: <= effective limit (rec.new_limit takes precedence).
+            # Invariants 3 and 4 win: only fire when the breach exceeds the
+            # floor they would force, so a limit tightened below that floor
+            # doesn't surface as a separate, unactionable error.
             effective_limit = rec.new_limit if (rec is not None and rec.new_limit is not None) else inst.limit_seconds
-            if effective_limit is not None and new_alloc > effective_limit:
+            floor = max(self.minimum_allocation_seconds, inst.consumed_seconds)
+            if effective_limit is not None and new_alloc > effective_limit and new_alloc > floor:
                 errors.append(
                     f"Instance {inst.crn}: new_allocation ({new_alloc}s) exceeds effective limit ({effective_limit}s)"
                 )
