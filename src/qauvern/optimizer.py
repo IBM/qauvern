@@ -67,6 +67,26 @@ class AllocationOptimizer:
             return Floor(instance.consumed_seconds, "consumed_seconds")
         return Floor(self.minimum_allocation_seconds, "minimum_allocation_seconds")
 
+    def redistribution_pool(self) -> tuple[int, int]:
+        """Return (distributable_pool, reserve_amount) in seconds.
+
+        raw_pool = unallocated headroom + sum(allocation - floor) over managed instances.
+        `distributable_pool` is what water-fill awards across active instances;
+        `reserve_amount` is what invariant 2 withholds from the account budget.
+        Both `int()` calls truncate toward zero, so the pair sums to raw_pool or
+        raw_pool - 1 — never above raw_pool, which is what keeps the two halves
+        consistent without an explicit reconciliation.
+        """
+        managed = [inst for inst in self.account.instances if inst.crn in self._configs]
+        raw_pool = max(
+            0,
+            self.account.unallocated_seconds
+            + sum(inst.allocation_seconds - self._floor(inst).value for inst in managed),
+        )
+        distributable = int(raw_pool * (1 - self.allocation_reserve_percent / 100))
+        reserve_amount = int(raw_pool * self.allocation_reserve_percent / 100)
+        return distributable, reserve_amount
+
     def optimize(self) -> OptimizationResult:
         """Compute allocation and limit recommendations.
 
@@ -100,12 +120,7 @@ class AllocationOptimizer:
         floors: dict[str, Floor] = {inst.crn: self._floor(inst) for inst in managed}
         new_alloc: dict[str, int] = {crn: f.value for crn, f in floors.items()}
 
-        # Pool: unallocated headroom + (alloc - floor) summed across managed instances.
-        # Negative contributions (instances below their floor) reduce the pool because
-        # bumping them up to floor consumes budget. Reserve scales the whole pool.
-        delta_above_floor = sum(inst.allocation_seconds - floors[inst.crn].value for inst in managed)
-        raw_pool = self.account.unallocated_seconds + delta_above_floor
-        pool = max(0, int(raw_pool * (1 - self.allocation_reserve_percent / 100)))
+        pool, _ = self.redistribution_pool()
 
         active = [inst for inst in managed if inst.activity_score > 0]
         if active and pool > 0:
@@ -263,17 +278,7 @@ class AllocationOptimizer:
                 errors.append(f"Total instance allocations ({total_allocated}s) exceeds account budget ({budget}s)")
 
         # Invariant 2: reserve buffer
-        # available = unallocated headroom + what managed instances hold above their floors.
-        available = max(
-            0,
-            self.account.unallocated_seconds
-            + sum(
-                inst.allocation_seconds - max(self.minimum_allocation_seconds, inst.consumed_seconds)
-                for inst in self.account.instances
-                if inst.crn in self._configs
-            ),
-        )
-        reserve_amount = int(available * self.allocation_reserve_percent / 100)
+        _, reserve_amount = self.redistribution_pool()
         effective_budget = self.account.allocation_budget_seconds - reserve_amount
         if reserve_amount > 0 and total_allocated > effective_budget:
             errors.append(

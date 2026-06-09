@@ -106,10 +106,14 @@ def format_limit_display(
     return base + annotation
 
 
-def format_reserve_summary(total: int, reserve_percent: float) -> str:
-    """Format account reserve summary line."""
-    available_for_rebalancing = int(total * (1 - reserve_percent / 100))
-    return f"Reserve: {reserve_percent:.1f}%   Available for rebalancing: {format_seconds(available_for_rebalancing)}"
+def format_reserve_summary(distributable_pool: int, reserve_percent: float) -> str:
+    """Format account reserve summary line.
+
+    `distributable_pool` is the post-reserve seconds available to redistribute
+    (AllocationOptimizer.redistribution_pool()[0]) — i.e. the raw pool already
+    scaled by `1 - reserve_percent/100`.
+    """
+    return f"Reserve: {reserve_percent:.1f}%   Available for rebalancing: {format_seconds(distributable_pool)}"
 
 
 def parse_seconds(value: str) -> int:
@@ -440,7 +444,13 @@ def show(ctx, config: str, api_key: str | None):
             "(not shown below; counted against cap)"
         )
     if config_parser.allocation_reserve_percent > 0:
-        click.echo(format_reserve_summary(account.unallocated_seconds, config_parser.allocation_reserve_percent))
+        pool, _ = AllocationOptimizer(
+            account,
+            config_parser.instance_configs,
+            config_parser.minimum_allocation_seconds,
+            allocation_reserve_percent=config_parser.allocation_reserve_percent,
+        ).redistribution_pool()
+        click.echo(format_reserve_summary(pool, config_parser.allocation_reserve_percent))
     limit_display = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
     click.echo(f"Limit: {limit_display}")
 
@@ -579,7 +589,8 @@ def analyze(ctx, config: str, api_key: str | None):
             "(not modified; counted against cap)"
         )
     if config_parser.allocation_reserve_percent > 0:
-        click.echo(format_reserve_summary(account.unallocated_seconds, config_parser.allocation_reserve_percent))
+        pool, _ = optimizer.redistribution_pool()
+        click.echo(format_reserve_summary(pool, config_parser.allocation_reserve_percent))
     limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
     click.echo(f"Limit: {limit_str}")
     click.echo(f"Configured instances analyzed: {len(instance_configs)}")
