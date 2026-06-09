@@ -820,12 +820,15 @@ def configure(
 
     click.echo("Fetching instances...")
     discovered = client.discover_instances(account_id, plan)
-    if discovered.archived:
-        click.echo(f"Skipping {len(discovered.archived)} archived instance(s)", err=True)
 
     if region is not None:
-        active = tuple(i for i in discovered.active if extract_region_from_crn(i.crn) == region.value)
-        discovered = DiscoveredInstances(active=active, archived=discovered.archived)
+        discovered = DiscoveredInstances(
+            active=tuple(i for i in discovered.active if extract_region_from_crn(i.crn) == region.value),
+            archived=tuple(i for i in discovered.archived if extract_region_from_crn(i.crn) == region.value),
+        )
+
+    if discovered.archived:
+        click.echo(f"Skipping {len(discovered.archived)} archived instance(s)", err=True)
 
     if not discovered.active:
         click.echo("⚠ No active instances found in this account.", err=True)
