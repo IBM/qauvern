@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.0] - 2026-06-xx
 
+## Added
+
+- The `configure` command has an optional `--region` argument to restrict which instances are added. Because all the other commands only run on the instances in your config file, you can use this new argument to restrict `qauvern` to only run on `us-east` or `eu-de`.
 
 ## [0.6.0] - 2026-06-08
 

@@ -241,3 +241,80 @@ def test_configure_excludes_archived_instances(runner: CliRunner, tmp_path: Path
     parsed = yaml.safe_load(output.read_text())
     assert len(parsed["instances"]) == 1
     assert parsed["instances"][0]["crn"] == "crn:test:live"
+
+
+# ---------------------------------------------------------------------------
+# --region filtering
+# ---------------------------------------------------------------------------
+
+US_CRN = "crn:v1:bluemix:public:quantum-computing:us-east:a/acc:us-inst::"
+EU_CRN = "crn:v1:bluemix:public:quantum-computing:eu-de:a/acc:eu-inst::"
+
+
+def test_configure_region_filters_instances(runner: CliRunner, tmp_path: Path) -> None:
+    mock_client = MockIBMQuantumAPIClient()
+    mock_client.setup_account(account_id="acct-1", allocation_budget_seconds=0)
+    mock_client.setup_instance(crn=US_CRN, name="US Instance", allocation_seconds=36000, account_id="acct-1")
+    mock_client.setup_instance(crn=EU_CRN, name="EU Instance", allocation_seconds=36000, account_id="acct-1")
+
+    output = tmp_path / "config.yaml"
+    result = _invoke_configure(
+        runner,
+        mock_client,
+        [
+            "--account-id",
+            "acct-1",
+            "--plan",
+            "internal",
+            "--api-key",
+            "k",
+            "--output",
+            str(output),
+            "--region",
+            "us-east",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    parsed = yaml.safe_load(output.read_text())
+    assert len(parsed["instances"]) == 1
+    assert parsed["instances"][0]["crn"] == US_CRN
+
+
+def test_configure_region_no_match_exits_with_error(runner: CliRunner, tmp_path: Path) -> None:
+    mock_client = MockIBMQuantumAPIClient()
+    mock_client.setup_account(account_id="acct-1", allocation_budget_seconds=0)
+    mock_client.setup_instance(crn=US_CRN, name="US Instance", allocation_seconds=36000, account_id="acct-1")
+
+    output = tmp_path / "config.yaml"
+    result = _invoke_configure(
+        runner,
+        mock_client,
+        [
+            "--account-id",
+            "acct-1",
+            "--plan",
+            "internal",
+            "--api-key",
+            "k",
+            "--output",
+            str(output),
+            "--region",
+            "eu-de",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "No active instances found" in result.output
+    assert not output.exists()
+
+
+def test_configure_region_invalid_value_rejected(runner: CliRunner, tmp_path: Path) -> None:
+    mock_client = MockIBMQuantumAPIClient()
+    result = _invoke_configure(
+        runner,
+        mock_client,
+        ["--account-id", "acct-1", "--plan", "internal", "--api-key", "k", "--region", "invalid"],
+    )
+
+    assert result.exit_code == 2
