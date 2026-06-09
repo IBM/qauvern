@@ -27,7 +27,7 @@ from .formatting import format_fairness, format_limit, format_seconds
 from .models import (
     Account,
     AllocationChange,
-    DiscoveredInstance,
+    DiscoveredInstances,
     InstanceState,
     InstanceConfig,
     InstanceDetailedUsage,
