@@ -269,90 +269,52 @@ def test_format_instance_without_recommendation(
     assert "-" in str(row2) or "No change" in str(row2)
 
 
-def test_allocation_change_properties() -> None:
-    """Test AllocationChange fields and delta property."""
-    chg = AllocationChange(
-        instance_crn="crn:test",
-        current=1000,
-        new=1500,
-        reason="Test reason",
+def test_limit_only_reason_fallback(instance1: InstanceState, instance2: InstanceState, limit1: LimitChange) -> None:
+    """When an instance has only a limit change (no allocation change), reason comes from the limit."""
+    instances = [instance1, instance2]
+    limit_map = {instance1.crn: limit1}
+    columns = ["name", "reason"]
+
+    table_data, _ = format_instance_table(instances, columns=columns, limit_map=limit_map)
+
+    row1 = table_data[0]
+    assert limit1.reason[:30] in str(row1)
+
+    # instance2 has neither change
+    row2 = table_data[1]
+    assert "No change" in str(row2)
+
+
+def test_new_limit_column_from_limit_map(instance1: InstanceState, limit1: LimitChange) -> None:
+    """new_limit column renders the proposed limit from limit_map."""
+    table_data, _ = format_instance_table(
+        [instance1],
+        columns=["name", "new_limit"],
+        limit_map={instance1.crn: limit1},
     )
+    from qauvern.cli import format_seconds
 
-    assert chg.instance_crn == "crn:test"
-    assert chg.current == 1000
-    assert chg.new == 1500
-    assert chg.reason == "Test reason"
-    assert chg.delta == 500
+    assert format_seconds(limit1.new) in str(table_data[0])
 
 
-def test_allocation_change_negative_delta() -> None:
-    """Test AllocationChange with negative delta."""
-    chg = AllocationChange(
-        instance_crn="crn:test",
-        current=2000,
-        new=1000,
-        reason="Reduction",
-    )
-
-    assert chg.delta == -1000
+def test_allocation_change_delta() -> None:
+    """delta is a signed difference; positive for increases, negative for decreases."""
+    assert AllocationChange(instance_crn="crn:test", current=1000, new=1500, reason="t").delta == 500
+    assert AllocationChange(instance_crn="crn:test", current=2000, new=1000, reason="t").delta == -1000
 
 
-def test_limit_change_fields() -> None:
-    """Test LimitChange fields."""
-    chg = LimitChange(
-        instance_crn="crn:test",
-        current=2000,
-        new=3000,
-        reason="Net grant active",
-    )
-
-    assert chg.instance_crn == "crn:test"
-    assert chg.current == 2000
-    assert chg.new == 3000
-    assert chg.reason == "Net grant active"
-
-
-def test_result_decreases_property() -> None:
-    """Test that decreases property filters allocation_changes with delta < 0."""
+def test_result_partitions_by_delta_sign() -> None:
+    """decreases/increases split on delta sign; zero-delta is excluded from both."""
     result = OptimizationResult(
         allocation_changes=(
-            AllocationChange(instance_crn="crn:1", current=2000, new=1000, reason="Reduce"),
-            AllocationChange(instance_crn="crn:2", current=1000, new=2000, reason="Increase"),
-            AllocationChange(instance_crn="crn:3", current=1500, new=500, reason="Reduce more"),
+            AllocationChange(instance_crn="crn:1", current=2000, new=1000, reason="down"),
+            AllocationChange(instance_crn="crn:2", current=1000, new=2000, reason="up"),
+            AllocationChange(instance_crn="crn:3", current=1500, new=1500, reason="flat"),
         ),
         limit_changes=(),
     )
-
-    decreases = result.decreases
-    assert len(decreases) == 2
-    assert all(c.delta < 0 for c in decreases)
-
-
-def test_result_increases_property() -> None:
-    """Test that increases property filters allocation_changes with delta > 0."""
-    result = OptimizationResult(
-        allocation_changes=(
-            AllocationChange(instance_crn="crn:1", current=2000, new=1000, reason="Reduce"),
-            AllocationChange(instance_crn="crn:2", current=1000, new=2000, reason="Increase"),
-            AllocationChange(instance_crn="crn:3", current=500, new=1500, reason="Increase more"),
-        ),
-        limit_changes=(),
-    )
-
-    increases = result.increases
-    assert len(increases) == 2
-    assert all(c.delta > 0 for c in increases)
-
-
-def test_result_no_change() -> None:
-    """A zero-delta AllocationChange appears in neither decreases nor increases."""
-    result = OptimizationResult(
-        allocation_changes=(AllocationChange(instance_crn="crn:1", current=1000, new=1000, reason="No change"),),
-        limit_changes=(),
-    )
-
-    assert len(result.decreases) == 0
-    assert len(result.increases) == 0
+    assert [c.instance_crn for c in result.decreases] == ["crn:1"]
+    assert [c.instance_crn for c in result.increases] == ["crn:2"]
 
 
 def test_none_returns_dash() -> None:
