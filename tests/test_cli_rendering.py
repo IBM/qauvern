@@ -371,13 +371,13 @@ def test_reserve_summary_contains_percent() -> None:
     """Reserve summary includes the reserve percentage."""
     from qauvern.cli import format_reserve_summary
 
-    line = format_reserve_summary(total=500000, reserve_percent=20.0)
+    line = format_reserve_summary(distributable_pool=400000, reserve_percent=20.0)
     assert "20.0%" in line
 
 
 def test_reserve_summary_contains_available() -> None:
-    """Reserve summary includes available-for-rebalancing amount (80% of total)."""
+    """Reserve summary echoes the distributable pool it was passed."""
     from qauvern.cli import format_reserve_summary
 
-    line = format_reserve_summary(total=500000, reserve_percent=20.0)
-    assert format_seconds(400000) in line  # 80% of 500000
+    line = format_reserve_summary(distributable_pool=400000, reserve_percent=20.0)
+    assert format_seconds(400000) in line

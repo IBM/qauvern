@@ -338,6 +338,27 @@ def test_validate_allocations_reserve_violation() -> None:
     assert any("reserve" in e for e in errors)
 
 
+def test_validate_allocations_reserve_silent_when_no_pool() -> None:
+    """When managed instances have no headroom above their floors, invariant 2 stays silent.
+
+    raw_pool clamps to 0 → reserve_amount = 0 → invariant 2 short-circuits even with
+    a non-zero reserve_percent, leaving any breach to invariant 1.
+    """
+    # Only managed instance is parked at its consumed floor; unallocated=0 (account is full).
+    inst = _make_instance("crn:a", 100, consumed=100)
+    account = Account(
+        account_id="test",
+        plan_id="test-plan",
+        allocation_budget_seconds=100,
+        unallocated_seconds=0,
+        limit_seconds=None,
+        instances=(inst,),
+    )
+    optimizer = AllocationOptimizer(account, [_make_config("crn:a")], allocation_reserve_percent=50.0)
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult((), ()))
+    assert is_valid, errors
+
+
 # ---------------------------------------------------------------------------
 # Invariant 3: new_allocation >= 28-day consumed usage
 # ---------------------------------------------------------------------------
@@ -755,6 +776,60 @@ def test_reserve_reduces_allocation_and_validator_agrees() -> None:
     optimizer = AllocationOptimizer(account, [cfg], allocation_reserve_percent=20.0)
     is_valid, errors = optimizer.validate_allocations(with_reserve)
     assert is_valid, errors
+
+
+def test_reserve_with_capped_active_keeps_leftover_reserved() -> None:
+    """When water-fill caps an active instance, the leftover stays reserved (not redistributed).
+
+    The pool is scaled down by reserve_percent before water-fill runs, so a
+    capped instance's surplus never re-enters the budget — total projected
+    allocation must respect the reserve cap.
+    """
+    # budget=1_000_000, single active instance with limit=300, consumed=100, alloc=200.
+    # raw_pool = 999_800 + (200 - 100) = 999_900. With 30% reserve, distributable ~= 699_930.
+    # Water-fill caps the instance at limit=300 (room=200 from floor=100).
+    # Total = 300 + 0 unmanaged = 300, well below budget − reserve (~700_030). Validates.
+    inst = _active_instance("crn:a", allocation=200, consumed=100, limit=300, consumed_24h=10)
+    cfg = _make_config("crn:a")
+    account = _make_account(1_000_000, inst)
+    optimizer = AllocationOptimizer(account, [cfg], allocation_reserve_percent=30.0)
+
+    result = optimizer.optimize()
+    projected = _projected(result, account)
+    assert projected["crn:a"] == 300
+
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+
+
+def test_reserve_preserves_headroom_for_unmanaged_instances() -> None:
+    """With a reserve set, the optimizer leaves room on the account for unconfigured instances.
+
+    Documented use case in README: when most instances are unmanaged, the
+    configured ones can claim every spare second. A reserve carves out
+    headroom that stays unallocated.
+    """
+    # budget=10_000, one managed (alloc=100, very active) and one unmanaged (alloc=100).
+    # unallocated = 9800. Without reserve, managed claws all of it → projected=9900.
+    # With 50% reserve, raw_pool=9800, distributable=4900 → projected=5000.
+    managed = _active_instance("crn:m", allocation=100, consumed_24h=10)
+    unmanaged = _active_instance("crn:u", allocation=100, consumed_24h=5)
+    account = _make_account(10_000, managed, unmanaged)
+
+    no_reserve = AllocationOptimizer(account, [_make_config("crn:m")]).optimize()
+    with_reserve = AllocationOptimizer(account, [_make_config("crn:m")], allocation_reserve_percent=50.0).optimize()
+
+    no_reserve_proj = _projected(no_reserve, account)["crn:m"]
+    with_reserve_proj = _projected(with_reserve, account)["crn:m"]
+
+    # Unmanaged is untouched in both runs.
+    assert "crn:u" not in {c.instance_crn for c in no_reserve.allocation_changes}
+    assert "crn:u" not in {c.instance_crn for c in with_reserve.allocation_changes}
+    # Reserve leaves additional account-level headroom (managed claims less).
+    assert with_reserve_proj < no_reserve_proj
+    # Sanity: 50% reserve leaves at least ~half the redistributable pool unallocated.
+    total_with_reserve = with_reserve_proj + unmanaged.allocation_seconds
+    assert total_with_reserve <= 5_100
 
 
 # ---------------------------------------------------------------------------

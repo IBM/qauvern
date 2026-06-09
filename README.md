@@ -257,9 +257,11 @@ See [Design.md](Design.md) for full algorithm details and the invariants the opt
 Unconfigured instances still consume from the account-wide cap, so the optimizer subtracts their allocation before deciding how much to redistribute. Concretely:
 
 ```
-redistributable = account.allocation_budget
-                  − sum(unconfigured allocations)   ← reserved, untouched
-                  − sum(floors of configured)       ← max(minimum_allocation_seconds, 28-day usage)
+raw_pool = account.allocation_budget
+           − sum(unconfigured allocations)   ← reserved, untouched
+           − sum(floors of configured)       ← max(minimum_allocation_seconds, 28-day usage)
+
+redistributable = raw_pool × (1 − allocation_reserve_percent / 100)
 ```
 
 This means you can safely manage a subset of an account's instances with qauvern: anything you leave out of the config file is opaque to the optimizer except as a fixed reservation. To bring an instance under management, add it to the config (or regenerate with `qauvern configure`).
