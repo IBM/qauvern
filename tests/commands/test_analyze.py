@@ -10,9 +10,16 @@
 
 """Tests for the `qauvern analyze` command and its pure helpers."""
 
+import csv
+import io
 from datetime import datetime, timezone
 
-from qauvern.commands.analyze import AnalyzeReport, format_analyze_table
+from qauvern.commands.analyze import (
+    CSV_COLUMNS,
+    AnalyzeReport,
+    format_analyze_csv,
+    format_analyze_table,
+)
 from qauvern.models import (
     Account,
     AllocationChange,
@@ -282,3 +289,169 @@ def test_table_plan_name_and_instance_count_appear() -> None:
     assert "Plan: paygo" in output
     assert "Configured instances analyzed: 1" in output
     assert "My Instance" in output
+
+
+# ---------------------------------------------------------------------------
+# format_analyze_csv
+# ---------------------------------------------------------------------------
+
+
+def _parse_csv(text: str) -> tuple[list[str], list[dict[str, str]]]:
+    reader = csv.DictReader(io.StringIO(text))
+    rows = list(reader)
+    assert reader.fieldnames is not None
+    return list(reader.fieldnames), rows
+
+
+def test_csv_header_matches_documented_columns() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    output = format_analyze_csv(_report(account, result, cfgs, optimizer))
+    headers, _ = _parse_csv(output)
+    assert tuple(headers) == CSV_COLUMNS
+
+
+def test_csv_one_row_per_instance() -> None:
+    inst_a = _make_instance(CRN_A, allocation=60, name="A")
+    crn_b = "crn:v1:bluemix:public:quantum-computing:us-east:a/acc:inst-b::"
+    inst_b = _make_instance(crn_b, allocation=60, name="B")
+    account = _make_account((inst_a, inst_b), budget=120)
+    cfgs = [_make_config(CRN_A, name="A"), _make_config(crn_b, name="B")]
+    optimizer = AllocationOptimizer(account, cfgs, minimum_allocation_seconds=60)
+    result = optimizer.optimize()
+
+    output = format_analyze_csv(_report(account, result, cfgs, optimizer))
+    _, rows = _parse_csv(output)
+    assert [r["name"] for r in rows] == ["A", "B"]
+
+
+def test_csv_unchanged_instance_keeps_current_values_and_no_reason() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    output = format_analyze_csv(_report(account, result, cfgs, optimizer))
+    _, rows = _parse_csv(output)
+    row = rows[0]
+    assert row["current_allocation"] == "60"
+    assert row["new_allocation"] == "60"
+    assert row["allocation_delta"] == "0"
+    assert row["allocation_reason"] == ""
+
+
+def test_csv_changed_allocation_reflects_delta_and_reason() -> None:
+    inst = _make_instance(CRN_A, allocation=100)
+    account = _make_account((inst,), budget=100)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = OptimizationResult(
+        allocation_changes={CRN_A: AllocationChange(current=100, new=80, reason="Inactive instance")},
+        limit_changes={},
+    )
+
+    output = format_analyze_csv(_report(account, result, [cfg], optimizer))
+    _, rows = _parse_csv(output)
+    row = rows[0]
+    assert row["current_allocation"] == "100"
+    assert row["new_allocation"] == "80"
+    assert row["allocation_delta"] == "-20"
+    assert row["allocation_reason"] == "Inactive instance"
+
+
+def test_csv_unset_limit_stays_empty_when_unchanged() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    output = format_analyze_csv(_report(account, result, cfgs, optimizer))
+    _, rows = _parse_csv(output)
+    row = rows[0]
+    assert row["current_limit"] == ""
+    assert row["new_limit"] == ""
+    assert row["limit_delta"] == ""
+
+
+def test_csv_existing_limit_carried_forward_when_unchanged() -> None:
+    inst = _make_instance(CRN_A, allocation=60, limit=3600)
+    account = _make_account((inst,), budget=60)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = optimizer.optimize()
+
+    output = format_analyze_csv(_report(account, result, [cfg], optimizer))
+    _, rows = _parse_csv(output)
+    row = rows[0]
+    assert row["current_limit"] == "3600"
+    # Unchanged: new_limit still set so it doesn't look like an unset.
+    assert row["new_limit"] == "3600"
+    assert row["limit_delta"] == ""
+
+
+def test_csv_limit_change_from_unset_records_new_value() -> None:
+    inst = _make_instance(CRN_A, allocation=100)
+    account = _make_account((inst,), budget=100)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = OptimizationResult(
+        allocation_changes={},
+        limit_changes={CRN_A: LimitChange(current=None, new=7200)},
+    )
+
+    output = format_analyze_csv(_report(account, result, [cfg], optimizer))
+    _, rows = _parse_csv(output)
+    row = rows[0]
+    assert row["current_limit"] == ""
+    assert row["new_limit"] == "7200"
+    assert row["limit_delta"] == ""  # delta undefined when going from unset
+
+
+def test_csv_limit_change_with_existing_records_delta() -> None:
+    inst = _make_instance(CRN_A, allocation=100, limit=3600)
+    account = _make_account((inst,), budget=100)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = OptimizationResult(
+        allocation_changes={},
+        limit_changes={CRN_A: LimitChange(current=3600, new=7200)},
+    )
+
+    output = format_analyze_csv(_report(account, result, [cfg], optimizer))
+    _, rows = _parse_csv(output)
+    row = rows[0]
+    assert row["current_limit"] == "3600"
+    assert row["new_limit"] == "7200"
+    assert row["limit_delta"] == "3600"
+
+
+def test_csv_no_account_level_columns_leak() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    output = format_analyze_csv(_report(account, result, cfgs, optimizer))
+    headers, _ = _parse_csv(output)
+    for forbidden in ("allocation_budget", "unallocated", "unmanaged_allocation"):
+        assert forbidden not in headers
+
+
+def test_csv_round_trips_through_dictreader() -> None:
+    inst = _make_instance(CRN_A, allocation=100, consumed=10, consumed_24h=5)
+    account = _make_account((inst,), budget=100)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = optimizer.optimize()
+
+    output = format_analyze_csv(_report(account, result, [cfg], optimizer))
+    headers, rows = _parse_csv(output)
+    assert len(rows) == 1
+    assert set(rows[0].keys()) == set(headers)
+
+
+def test_csv_validation_errors_not_in_body() -> None:
+    """Validation errors don't leak into CSV rows — CLI logs them to stderr."""
+    inst = _make_instance(CRN_A, allocation=100)
+    account = _make_account((inst,), budget=100)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = OptimizationResult(
+        allocation_changes={CRN_A: AllocationChange(current=100, new=200, reason="Active")},
+        limit_changes={},
+    )
+
+    report = _report(account, result, [cfg], optimizer)
+    assert report.validation_errors  # precondition
+    output = format_analyze_csv(report)
+    # Body is exactly header + one row per instance — no error block prepended/appended.
+    headers, rows = _parse_csv(output)
+    assert tuple(headers) == CSV_COLUMNS
+    assert len(rows) == 1
