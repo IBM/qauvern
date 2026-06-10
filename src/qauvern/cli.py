@@ -35,7 +35,6 @@ from .models import (
     Account,
     AllocationChange,
     DiscoveredInstance,
-    DiscoveredInstances,
     InstanceConfig,
     InstanceDetailedUsage,
     InstanceState,
