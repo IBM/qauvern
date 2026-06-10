@@ -137,11 +137,7 @@ class AllocationOptimizer:
                 )
 
         limit_changes = {
-            inst.crn: LimitChange(
-                current=inst.limit_seconds,
-                new=new_limit,
-                reason=self._limit_reason_for(inst),
-            )
+            inst.crn: LimitChange(current=inst.limit_seconds, new=new_limit)
             for inst in managed
             if (new_limit := resolved_limits[inst.crn]) is not None and new_limit != inst.limit_seconds
         }
@@ -196,15 +192,6 @@ class AllocationOptimizer:
         capped = effective_limit is not None and projected >= effective_limit
         suffix = " — capped at limit" if capped else ""
         return f"Active (score {inst.activity_score:.1f}, fairness {inst.fairness:.2f}){suffix}"
-
-    def _limit_reason_for(self, inst: InstanceState) -> str:
-        config = self._configs.get(inst.crn)
-        has_active_grant = config is not None and any(
-            g.start_date.date() <= self.today < g.end_date.date() for g in config.net_grants
-        )
-        if has_active_grant:
-            return "Limit from config (+ net grant)"
-        return "Limit from config"
 
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
         """Check that `result` satisfies all allocation invariants.

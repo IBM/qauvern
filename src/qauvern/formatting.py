@@ -149,7 +149,7 @@ def format_instance_analysis_table(
     headers = ["Instance"]
     if include_usage:
         headers += ["Period", "28d", "14d", "7d", "3d", "24h"]
-    headers += ["Allocation", "Limit", "Reason"]
+    headers += ["Allocation", "Limit", "Allocation reason"]
     alloc_map = alloc_map or {}
     limit_map = limit_map or {}
 
@@ -164,12 +164,7 @@ def format_instance_analysis_table(
         new_limit_seconds = limit_rec.new if limit_rec is not None else inst.limit_seconds
         limit = _format_change_arrow(inst.limit_seconds, new_limit_seconds)
 
-        if alloc is not None:
-            reason = _truncate(alloc.reason, 60)
-        elif limit_rec is not None:
-            reason = _truncate(limit_rec.reason, 60)
-        else:
-            reason = "No change"
+        reason = _truncate(alloc.reason, 60) if alloc is not None else "No change"
 
         row = [_truncate(inst.name, 35)]
         if include_usage:

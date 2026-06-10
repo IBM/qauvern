@@ -137,11 +137,7 @@ def alloc2(instance2: InstanceState) -> AllocationChange:
 
 @pytest.fixture
 def limit1(instance1: InstanceState) -> LimitChange:
-    return LimitChange(
-        current=2000,
-        new=3000,
-        reason="Net grant active",
-    )
+    return LimitChange(current=2000, new=3000)
 
 
 # -------------------------------------------------------------------
@@ -205,7 +201,7 @@ def test_analysis_headers(instance1: InstanceState) -> None:
         "24h",
         "Allocation",
         "Limit",
-        "Reason",
+        "Allocation reason",
     ]
 
 
@@ -278,24 +274,23 @@ def test_analysis_no_change(instance1: InstanceState) -> None:
     assert "No change" in row
 
 
-def test_analysis_limit_only_uses_limit_reason(
+def test_analysis_limit_only_shows_no_change_reason(
     instance1: InstanceState,
     limit1: LimitChange,
 ) -> None:
-    """When only a limit change exists, the reason cell falls back to the limit's reason."""
-    table_data, _ = format_instance_analysis_table(
+    """A row with only a limit change has no allocation reason to show."""
+    table_data, headers = format_instance_analysis_table(
         [instance1],
         limit_map={instance1.crn: limit1},
     )
-    row = table_data[0]
-    assert limit1.reason in row
+    assert table_data[0][headers.index("Allocation reason")] == "No change"
 
 
 def test_analysis_reason_truncation_at_60_chars(instance1: InstanceState) -> None:
     long_reason = "x" * 100
     alloc = AllocationChange(current=1000, new=1500, reason=long_reason)
     table_data, headers = format_instance_analysis_table([instance1], alloc_map={instance1.crn: alloc})
-    reason_cell = table_data[0][headers.index("Reason")]
+    reason_cell = table_data[0][headers.index("Allocation reason")]
     assert reason_cell == "x" * 60
 
 
@@ -311,7 +306,7 @@ def test_optimize_table_drops_usage_columns(instance1: InstanceState, alloc1: Al
         alloc_map={instance1.crn: alloc1},
         include_usage=False,
     )
-    assert headers == ["Instance", "Allocation", "Limit", "Reason"]
+    assert headers == ["Instance", "Allocation", "Limit", "Allocation reason"]
 
 
 def test_optimize_table_negative_delta_has_minus(instance2: InstanceState, alloc2: AllocationChange) -> None:
@@ -364,16 +359,17 @@ def test_optimize_table_pulls_reason_from_allocation(instance1: InstanceState, a
         alloc_map={instance1.crn: alloc1},
         include_usage=False,
     )
-    assert rows[0][headers.index("Reason")] == alloc1.reason
+    assert rows[0][headers.index("Allocation reason")] == alloc1.reason
 
 
-def test_optimize_table_pulls_reason_from_limit_when_no_alloc(instance1: InstanceState, limit1: LimitChange) -> None:
+def test_optimize_table_limit_only_row_shows_no_change_reason(instance1: InstanceState, limit1: LimitChange) -> None:
+    """A row with only a limit change shows 'No change' since there is no allocation reason."""
     rows, headers = format_instance_analysis_table(
         [instance1],
         limit_map={instance1.crn: limit1},
         include_usage=False,
     )
-    assert rows[0][headers.index("Reason")] == limit1.reason
+    assert rows[0][headers.index("Allocation reason")] == "No change"
 
 
 def test_optimize_table_limit_only_row_shows_real_allocation(instance1: InstanceState, limit1: LimitChange) -> None:
