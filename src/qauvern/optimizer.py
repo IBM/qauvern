@@ -126,31 +126,27 @@ class AllocationOptimizer:
         if active and pool > 0:
             self._water_fill(active, pool, effective_limits, new_alloc)
 
-        allocation_changes: list[AllocationChange] = []
+        allocation_changes: dict[str, AllocationChange] = {}
         for inst in managed:
             projected = new_alloc[inst.crn]
             if projected != inst.allocation_seconds:
-                allocation_changes.append(
-                    AllocationChange(
-                        instance_crn=inst.crn,
-                        current=inst.allocation_seconds,
-                        new=projected,
-                        reason=self._reason_for(inst, projected, effective_limits[inst.crn]),
-                    )
+                allocation_changes[inst.crn] = AllocationChange(
+                    current=inst.allocation_seconds,
+                    new=projected,
+                    reason=self._reason_for(inst, projected, effective_limits[inst.crn]),
                 )
 
-        limit_changes = tuple(
-            LimitChange(
-                instance_crn=inst.crn,
+        limit_changes = {
+            inst.crn: LimitChange(
                 current=inst.limit_seconds,
                 new=new_limit,
                 reason=self._limit_reason_for(inst),
             )
             for inst in managed
             if (new_limit := resolved_limits[inst.crn]) is not None and new_limit != inst.limit_seconds
-        )
+        }
 
-        return OptimizationResult(tuple(allocation_changes), limit_changes)
+        return OptimizationResult(allocation_changes, limit_changes)
 
     def _water_fill(
         self,
@@ -234,13 +230,12 @@ class AllocationOptimizer:
         """
         errors = []
 
-        alloc_by_crn = {c.instance_crn: c for c in result.allocation_changes}
-        limit_by_crn = {c.instance_crn: c for c in result.limit_changes}
-
         # Invariant 1: total allocation cap
         total_allocated = (
             sum(
-                alloc_by_crn[inst.crn].new if inst.crn in alloc_by_crn else inst.allocation_seconds
+                result.allocation_changes[inst.crn].new
+                if inst.crn in result.allocation_changes
+                else inst.allocation_seconds
                 for inst in self.account.instances
             )
             + self.account.unmanaged_allocation_seconds
@@ -298,7 +293,7 @@ class AllocationOptimizer:
         for inst in self.account.instances:
             if inst.crn not in self._configs:
                 continue
-            alloc_chg = alloc_by_crn.get(inst.crn)
+            alloc_chg = result.allocation_changes.get(inst.crn)
             new_alloc = alloc_chg.new if alloc_chg is not None else inst.allocation_seconds
 
             # Invariant 3: >= 28-day usage
@@ -319,7 +314,7 @@ class AllocationOptimizer:
             # Invariants 3 and 4 win: only fire when the breach exceeds the
             # floor they would force, so a limit tightened below that floor
             # doesn't surface as a separate, unactionable error.
-            limit_chg = limit_by_crn.get(inst.crn)
+            limit_chg = result.limit_changes.get(inst.crn)
             effective_limit = limit_chg.new if limit_chg is not None else inst.limit_seconds
             floor = max(self.minimum_allocation_seconds, inst.consumed_seconds)
             if effective_limit is not None and new_alloc > effective_limit and new_alloc > floor:

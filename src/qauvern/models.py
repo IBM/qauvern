@@ -174,7 +174,6 @@ class Account:
 class AllocationChange:
     """A proposed change to a single instance's allocation."""
 
-    instance_crn: str
     current: int
     new: int
     reason: str
@@ -188,7 +187,6 @@ class AllocationChange:
 class LimitChange:
     """A proposed change to a single instance's limit."""
 
-    instance_crn: str
     current: int | None
     new: int
     reason: str
@@ -196,15 +194,18 @@ class LimitChange:
 
 @dataclass(frozen=True)
 class OptimizationResult:
-    """Results from the optimization algorithm."""
+    """Results from the optimization algorithm.
 
-    allocation_changes: tuple[AllocationChange, ...]
-    limit_changes: tuple[LimitChange, ...]
+    Both dicts are keyed by CRN — at most one entry per instance.
+    """
+
+    allocation_changes: dict[str, AllocationChange]
+    limit_changes: dict[str, LimitChange]
 
     @property
-    def decreases(self) -> list[AllocationChange]:
-        return [c for c in self.allocation_changes if c.delta < 0]
+    def decreases(self) -> dict[str, AllocationChange]:
+        return {crn: c for crn, c in self.allocation_changes.items() if c.delta < 0}
 
     @property
-    def increases(self) -> list[AllocationChange]:
-        return [c for c in self.allocation_changes if c.delta > 0]
+    def increases(self) -> dict[str, AllocationChange]:
+        return {crn: c for crn, c in self.allocation_changes.items() if c.delta > 0}
