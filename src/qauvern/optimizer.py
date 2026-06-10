@@ -144,7 +144,7 @@ class AllocationOptimizer:
                 instance_crn=inst.crn,
                 current=inst.limit_seconds,
                 new=new_limit,
-                reason="Resolved from config (limit_seconds and any active net grants)",
+                reason=self._limit_reason_for(inst),
             )
             for inst in managed
             if (new_limit := resolved_limits[inst.crn]) is not None and new_limit != inst.limit_seconds
@@ -195,11 +195,20 @@ class AllocationOptimizer:
     def _reason_for(self, inst: InstanceState, projected: int, effective_limit: int | None) -> str:
         if inst.activity_score == 0:
             floor = self._floor(inst)
-            label = "28d usage" if floor.source == "consumed_seconds" else "minimum_allocation_seconds"
-            return f"Inactive; set to {label}: {floor.value}s"
+            label = "28d usage" if floor.source == "consumed_seconds" else "config minimum"
+            return f"Inactive — pinned to {label}"
         capped = effective_limit is not None and projected >= effective_limit
-        suffix = " (capped at effective limit)" if capped else ""
-        return f"Active (activity score: {inst.activity_score:.1f}, fairness: {inst.fairness:.2f}){suffix}"
+        suffix = " — capped at limit" if capped else ""
+        return f"Active (score {inst.activity_score:.1f}, fairness {inst.fairness:.2f}){suffix}"
+
+    def _limit_reason_for(self, inst: InstanceState) -> str:
+        config = self._configs.get(inst.crn)
+        has_active_grant = config is not None and any(
+            g.start_date.date() <= self.today < g.end_date.date() for g in config.net_grants
+        )
+        if has_active_grant:
+            return "Limit from config (+ net grant)"
+        return "Limit from config"
 
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
         """Check that `result` satisfies all allocation invariants.

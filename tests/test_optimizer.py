@@ -500,7 +500,7 @@ def test_inactive_with_excess_allocation_drops_to_minimum_floor() -> None:
     # inactive instance always has consumed_seconds=0 — any positive consumption
     # contributes to activity_score — so the inactive branch sources its floor
     # from minimum_allocation_seconds.)
-    assert "minimum_allocation_seconds: 60s" in result.allocation_changes[0].reason
+    assert "config minimum" in result.allocation_changes[0].reason
 
 
 def test_inactive_below_minimum_floor_is_bumped_up() -> None:
