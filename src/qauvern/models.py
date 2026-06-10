@@ -13,7 +13,6 @@
 from functools import cached_property
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -63,14 +62,6 @@ class InstanceNameDrift:
 
     def __str__(self) -> str:
         return f'"{self.config_name}" -> "{self.api_name}" (crn: {self.crn})'
-
-
-@runtime_checkable
-class InstanceRef(Protocol):
-    """Identity fields shared by `InstanceConfig` and `DiscoveredInstance`."""
-
-    crn: str
-    name: str
 
 
 @dataclass(frozen=True)

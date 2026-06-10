@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
-from .models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState, InstanceRef
+from .models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState
 from .plan import Plan, plan_id_for
 from .region import Region, extract_region_from_crn
 
@@ -161,19 +161,16 @@ class IBMQuantumAPIClient:
             )
             raise Exception(details) from e
 
-    def get_instance(self, ref: InstanceRef) -> InstanceState:
-        """Get instance configuration and 28-day rolling window usage."""
-        base_url = self._get_regional_base_url(ref.crn)
-        data = self._request_json("GET", f"{base_url}/v1/instance", crn=ref.crn)
-        usage_data = self._request_json("GET", f"{base_url}/v1/instances/usage", crn=ref.crn)
+    def get_instance(self, discovered: DiscoveredInstance) -> InstanceState:
+        """Get 28-day rolling window usage and combine with the resource-controller record."""
+        base_url = self._get_regional_base_url(discovered.crn)
+        data = self._request_json("GET", f"{base_url}/v1/instances/usage", crn=discovered.crn)
         return InstanceState(
-            crn=ref.crn,
-            name=ref.name,
-            allocation_seconds=int(data.get("usage_allocation_seconds", 0)),
-            limit_seconds=(
-                int(float(data.get("instance_limit_seconds", 0))) if data.get("instance_limit_seconds") else None
-            ),
-            consumed_seconds=int(usage_data.get("usage_consumed_seconds", 0)),
+            crn=discovered.crn,
+            name=discovered.name,
+            allocation_seconds=discovered.allocation_seconds,
+            limit_seconds=discovered.limit_seconds,
+            consumed_seconds=int(data.get("usage_consumed_seconds", 0)),
             detailed_usage=None,
         )
 
@@ -358,8 +355,8 @@ class IBMQuantumAPIClient:
 
         return DiscoveredInstances(active=tuple(live), archived=tuple(archived))
 
-    def get_account(self, account_id: str, plan: Plan, instance_refs: Sequence[InstanceRef]) -> Account:
-        """Get account with instances filtered by plan, populated with full data."""
+    def get_account(self, account_id: str, plan: Plan, instances: Sequence[InstanceState]) -> Account:
+        """Get account-level allocation/usage data for `plan`, attaching the given instances."""
         plan_id = plan_id_for(plan)
         url = f"{self.base_url}/v1/accounts/{account_id}"
         data = self._request_json("GET", url, params={"plan_id": plan_id})
@@ -368,13 +365,6 @@ class IBMQuantumAPIClient:
         if not plans:
             raise ValueError(f"No plan found for plan {plan.value} (plan_id {plan_id})")
         api_plan = plans[0]
-
-        instances = []
-        for ref in instance_refs:
-            try:
-                instances.append(self.get_instance(ref))
-            except Exception as e:
-                print(f"Warning: Could not fetch full data for instance `{ref.name}`, so skipping: {e}")
 
         return Account(
             account_id=account_id,

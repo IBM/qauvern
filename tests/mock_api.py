@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Any
 
-from qauvern.models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState, InstanceRef
+from qauvern.models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState
 from qauvern.plan import Plan, plan_id_for
 
 
@@ -108,11 +108,11 @@ class MockIBMQuantumAPIClient:
         all_days = self.daily_usage_data.get(instance_crn, {})
         return {d: s for d, s in all_days.items() if start_date <= d < end_date}
 
-    def get_instance(self, ref: InstanceRef) -> InstanceState:
+    def get_instance(self, discovered: DiscoveredInstance) -> InstanceState:
         """Get mock instance configuration."""
-        if ref.crn not in self.instances:
-            raise ValueError(f"Instance {ref.crn} not found in mock data")
-        return self.instances[ref.crn]
+        if discovered.crn not in self.instances:
+            raise ValueError(f"Instance {discovered.crn} not found in mock data")
+        return self.instances[discovered.crn]
 
     def get_instance_usage_seconds(
         self, instance_crn: str, start_date: datetime, end_date: datetime, account_id: str
@@ -174,13 +174,12 @@ class MockIBMQuantumAPIClient:
         self,
         account_id: str,
         plan: Plan | None = None,
-        instance_refs: Sequence[InstanceRef] | None = None,
+        instances: Sequence[InstanceState] | None = None,
     ) -> Account:
-        """Get mock account, optionally filtered to the given instance refs."""
+        """Get mock account, optionally attaching the given instances directly."""
         account = self._build_account(account_id)
-        if instance_refs is not None:
-            ref_crns = {ref.crn for ref in instance_refs}
-            return dataclasses.replace(account, instances=tuple(i for i in account.instances if i.crn in ref_crns))
+        if instances is not None:
+            return dataclasses.replace(account, instances=tuple(instances))
         return account
 
     def create_instance(
