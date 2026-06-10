@@ -23,6 +23,7 @@ from tabulate import tabulate
 from .api_client import IBMQuantumAPIClient
 from .config import parse_utc_datetime
 from .commands.configure import build_configure_yaml
+from .commands.update import UpdateActions, UpdateSummary, compute_update
 from .config import ConfigParser
 from .formatting import (
     format_instance_analysis_table,
@@ -649,6 +650,125 @@ def configure(
     click.echo("2. Run `qauvern show` or `qauvern instances` for usage information (`show` requires admin permissions)")
     click.echo("3. Run 'qauvern analyze' to see optimization recommendations")
     click.echo("4. Run 'qauvern optimize' to apply optimizations")
+
+
+@main.command()
+@config_option
+@api_key_option
+@region_option
+@click.option("--dry-run", is_flag=True, help="Show what would change without writing the file")
+@click.option("--no-net-grants", is_flag=True, help="Skip dropping expired net_grants")
+@click.option("--no-add", is_flag=True, help="Skip adding newly discovered instances")
+@click.option("--no-names", is_flag=True, help="Skip fixing instance name drift")
+@click.option("--no-remove", is_flag=True, help="Skip removing archived/missing instances")
+@click.pass_context
+@handle_errors
+def update(
+    ctx,
+    config: str,
+    api_key: str | None,
+    region: Region | None,
+    dry_run: bool,
+    no_net_grants: bool,
+    no_add: bool,
+    no_names: bool,
+    no_remove: bool,
+):
+    """Reconcile a configuration file with the live IBM Quantum API.
+
+    Drops expired ``net_grants``, adds newly discovered instances, fixes
+    instance name drift, and removes archived or missing instances. Each
+    action runs by default; use the ``--no-*`` flags to opt out.
+
+    Comments and customizations in the YAML (custom dates, ``limit_seconds``,
+    ``allocation_reserve_percent``, etc.) are preserved.
+    """
+    from ruamel.yaml import YAML
+
+    yaml_rt = YAML(typ="rt")
+    yaml_rt.preserve_quotes = True
+
+    config_path = Path(config)
+    with open(config_path) as f:
+        doc = yaml_rt.load(f)
+
+    if doc is None or "account_id" not in doc or "plan" not in doc:
+        raise click.ClickException(f"Config file {config} is missing required fields (account_id, plan)")
+
+    account_id = doc["account_id"]
+    plan = plan_from_name(doc["plan"])
+
+    click.echo(f"Connecting to IBM Quantum API for account {account_id} (plan: {plan.value})...")
+    client = _build_client(ctx, api_key)
+
+    click.echo("Fetching instances...")
+    discovered = client.discover_instances(account_id, plan).filter_by_region(region)
+
+    actions = UpdateActions(
+        expire_net_grants=not no_net_grants,
+        add_instances=not no_add,
+        fix_names=not no_names,
+        remove_instances=not no_remove,
+    )
+
+    summary = compute_update(
+        doc,
+        discovered,
+        now=datetime.now(tz=timezone.utc),
+        region=region,
+        actions=actions,
+    )
+
+    _print_update_summary(summary)
+
+    if summary.is_empty:
+        click.echo("\n✓ Config is already up to date.")
+        return
+
+    if dry_run:
+        click.echo("\nDry run — no changes written.")
+        return
+
+    with open(config_path, "w") as f:
+        yaml_rt.dump(doc, f)
+    click.echo(f"\n✓ Updated {config_path}")
+
+    try:
+        ConfigParser(str(config_path))
+    except Exception as e:
+        click.echo(
+            f"\n⚠ Warning: the rewritten file failed to parse: {e}\n"
+            "Inspect the file (e.g. `git diff`) and revert if needed.",
+            err=True,
+        )
+
+
+def _print_update_summary(summary: UpdateSummary) -> None:
+    if summary.is_empty:
+        click.echo("\nNo changes needed.")
+        return
+
+    click.echo("\nPlanned changes:")
+
+    if summary.removed_instances:
+        click.echo(f"  Remove ({len(summary.removed_instances)}):")
+        for r in summary.removed_instances:
+            click.echo(f"    - {r.name or '(unnamed)'} [{r.reason}] ({r.crn})")
+
+    if summary.expired_net_grants:
+        click.echo(f"  Expired net_grants ({len(summary.expired_net_grants)}):")
+        for g in summary.expired_net_grants:
+            click.echo(f"    - {g.instance_name or '(unnamed)'}: {g.start_date.date()} → {g.end_date.date()}")
+
+    if summary.renamed_instances:
+        click.echo(f"  Rename ({len(summary.renamed_instances)}):")
+        for rn in summary.renamed_instances:
+            click.echo(f'    - "{rn.old_name}" → "{rn.new_name}" ({rn.crn})')
+
+    if summary.added_instances:
+        click.echo(f"  Add ({len(summary.added_instances)}):")
+        for a in summary.added_instances:
+            click.echo(f"    - {a.name or '(unnamed)'} ({a.crn})")
 
 
 @main.command()

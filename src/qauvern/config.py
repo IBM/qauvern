@@ -169,11 +169,14 @@ class ConfigParser:
             bullets = "\n".join(f"  - {cfg.name}, {cfg.crn}" for cfg in unrecognized)
             errors.append(
                 f"Config file contains instances not found in account "
-                f"{self.account_id} on plan {self.plan.value}:\n{bullets}"
+                f"{self.account_id} on plan {self.plan.value}:\n{bullets}\n"
+                "(run `qauvern update` to fix automatically)"
             )
         if archived:
             bullets = "\n".join(f"  - {cfg.name}, {cfg.crn}" for cfg in archived)
-            errors.append(f"Config file contains archived instances:\n{bullets}")
+            errors.append(
+                f"Config file contains archived instances:\n{bullets}\n(run `qauvern update` to fix automatically)"
+            )
         if errors:
             raise ValueError("\n\n".join(errors))
 
