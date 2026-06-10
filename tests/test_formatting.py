@@ -11,19 +11,15 @@
 """Tests for formatting helpers and table builders."""
 
 import pytest
-from datetime import datetime
 from qauvern.formatting import (
     format_fairness,
     format_instance_analysis_table,
     format_instance_summary_table,
-    format_limit_display,
-    format_optimize_changes_table,
     format_reserve_summary,
     format_seconds,
 )
 from qauvern.models import (
     AllocationChange,
-    InstanceConfig,
     InstanceDetailedUsage,
     InstanceState,
     LimitChange,
@@ -122,26 +118,6 @@ def instance2() -> InstanceState:
 
 
 @pytest.fixture
-def cfg1(instance1: InstanceState) -> InstanceConfig:
-    return InstanceConfig(
-        name="Instance 1",
-        crn=instance1.crn,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-
-
-@pytest.fixture
-def cfg2(instance2: InstanceState) -> InstanceConfig:
-    return InstanceConfig(
-        name="Instance 2",
-        crn=instance2.crn,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
-    )
-
-
-@pytest.fixture
 def alloc1(instance1: InstanceState) -> AllocationChange:
     return AllocationChange(
         instance_crn=instance1.crn,
@@ -220,8 +196,8 @@ def test_summary_zero_allocation() -> None:
 # -------------------------------------------------------------------
 
 
-def test_analysis_headers(instance1: InstanceState, cfg1: InstanceConfig) -> None:
-    _, headers = format_instance_analysis_table([instance1], instance_configs=[cfg1])
+def test_analysis_headers(instance1: InstanceState) -> None:
+    _, headers = format_instance_analysis_table([instance1])
     assert headers == [
         "Instance",
         "Period",
@@ -231,135 +207,194 @@ def test_analysis_headers(instance1: InstanceState, cfg1: InstanceConfig) -> Non
         "3d",
         "24h",
         "Allocation",
-        "Cur Limit",
-        "New Limit",
-        "Recommended",
-        "Change",
+        "Limit",
         "Reason",
     ]
 
 
-def test_analysis_increase(
+def test_analysis_allocation_inlines_delta_on_change(
     instance1: InstanceState,
-    cfg1: InstanceConfig,
     alloc1: AllocationChange,
 ) -> None:
-    table_data, _ = format_instance_analysis_table(
+    """Allocation cell renders `cur → new (+delta)` when changing."""
+    table_data, headers = format_instance_analysis_table(
         [instance1],
-        instance_configs=[cfg1],
         alloc_map={instance1.crn: alloc1},
     )
-    row = table_data[0]
-    assert format_seconds(1500) in row
-    assert any(cell.startswith("+") for cell in row if isinstance(cell, str))
-    assert alloc1.reason[:30] in row
+    alloc_cell = table_data[0][headers.index("Allocation")]
+    assert "→" in alloc_cell
+    assert format_seconds(alloc1.current) in alloc_cell
+    assert format_seconds(alloc1.new) in alloc_cell
+    assert f"(+{format_seconds(alloc1.delta)})" in alloc_cell
+
+
+def test_analysis_allocation_no_arrow_when_unchanged(instance1: InstanceState) -> None:
+    table_data, headers = format_instance_analysis_table([instance1])
+    alloc_cell = table_data[0][headers.index("Allocation")]
+    assert "→" not in alloc_cell
+    assert alloc_cell == format_seconds(instance1.allocation_seconds)
+
+
+def test_analysis_limit_inlines_delta_on_change(instance1: InstanceState, limit1: LimitChange) -> None:
+    table_data, headers = format_instance_analysis_table(
+        [instance1],
+        limit_map={instance1.crn: limit1},
+    )
+    limit_cell = table_data[0][headers.index("Limit")]
+    assert "→" in limit_cell
+    assert format_seconds(limit1.new) in limit_cell
+    assert limit1.current is not None
+    assert limit1.current is not None
+    assert f"(+{format_seconds(limit1.new - limit1.current)})" in limit_cell
+
+
+def test_analysis_increase(
+    instance1: InstanceState,
+    alloc1: AllocationChange,
+) -> None:
+    table_data, headers = format_instance_analysis_table(
+        [instance1],
+        alloc_map={instance1.crn: alloc1},
+    )
+    alloc_cell = table_data[0][headers.index("Allocation")]
+    assert format_seconds(1500) in alloc_cell
+    assert "(+" in alloc_cell
+    assert alloc1.reason in table_data[0]
 
 
 def test_analysis_decrease_uses_minus_sign(
     instance2: InstanceState,
-    cfg2: InstanceConfig,
     alloc2: AllocationChange,
 ) -> None:
-    """Negative deltas in the analysis change column are prefixed with '-'."""
-    table_data, _ = format_instance_analysis_table(
+    """Negative allocation deltas are prefixed with '-' in the inline delta."""
+    table_data, headers = format_instance_analysis_table(
         [instance2],
-        instance_configs=[cfg2],
         alloc_map={instance2.crn: alloc2},
     )
-    row = table_data[0]
-    assert any(cell.startswith("-") and cell != "-" for cell in row if isinstance(cell, str))
+    alloc_cell = table_data[0][headers.index("Allocation")]
+    assert "(-" in alloc_cell
 
 
-def test_analysis_no_change(instance1: InstanceState, cfg1: InstanceConfig) -> None:
-    table_data, _ = format_instance_analysis_table([instance1], instance_configs=[cfg1])
+def test_analysis_no_change(instance1: InstanceState) -> None:
+    table_data, _ = format_instance_analysis_table([instance1])
     row = table_data[0]
     assert "No change" in row
 
 
 def test_analysis_limit_only_uses_limit_reason(
     instance1: InstanceState,
-    cfg1: InstanceConfig,
     limit1: LimitChange,
 ) -> None:
     """When only a limit change exists, the reason cell falls back to the limit's reason."""
     table_data, _ = format_instance_analysis_table(
         [instance1],
-        instance_configs=[cfg1],
         limit_map={instance1.crn: limit1},
     )
     row = table_data[0]
-    assert limit1.reason[:30] in row
+    assert limit1.reason in row
 
 
-def test_analysis_new_limit_from_map(
-    instance1: InstanceState,
-    cfg1: InstanceConfig,
-    limit1: LimitChange,
-) -> None:
-    table_data, _ = format_instance_analysis_table(
+def test_analysis_reason_truncation_at_60_chars(instance1: InstanceState) -> None:
+    long_reason = "x" * 100
+    alloc = AllocationChange(instance_crn=instance1.crn, current=1000, new=1500, reason=long_reason)
+    table_data, headers = format_instance_analysis_table([instance1], alloc_map={instance1.crn: alloc})
+    reason_cell = table_data[0][headers.index("Reason")]
+    assert reason_cell == "x" * 60
+
+
+# -------------------------------------------------------------------
+# format_instance_analysis_table with include_usage=False (optimize view)
+# -------------------------------------------------------------------
+
+
+def test_optimize_table_drops_usage_columns(instance1: InstanceState, alloc1: AllocationChange) -> None:
+    """include_usage=False yields the same shape as analyze minus the usage block."""
+    _, headers = format_instance_analysis_table(
         [instance1],
-        instance_configs=[cfg1],
-        limit_map={instance1.crn: limit1},
+        alloc_map={instance1.crn: alloc1},
+        include_usage=False,
     )
-    assert format_seconds(limit1.new) in table_data[0]
-
-
-# -------------------------------------------------------------------
-# format_optimize_changes_table
-# -------------------------------------------------------------------
+    assert headers == ["Instance", "Allocation", "Limit", "Reason"]
 
 
 def test_optimize_table_negative_delta_has_minus(instance2: InstanceState, alloc2: AllocationChange) -> None:
-    """Issue #21: negative changes in the optimize table must be prefixed with '-'."""
-    rows, headers = format_optimize_changes_table(
-        allocation_changes=[alloc2],
-        limit_changes=[],
-        instance_map={instance2.crn: instance2.name},
+    """Issue #21: negative allocation deltas inline as `(-x)` in the Allocation cell."""
+    rows, headers = format_instance_analysis_table(
+        [instance2],
+        alloc_map={instance2.crn: alloc2},
+        include_usage=False,
     )
-    assert headers == ["Instance Name", "Current", "New", "Change", "New Limit"]
-    assert len(rows) == 1
-    change_cell = rows[0][3]
-    assert change_cell.startswith("-")
-    assert change_cell != "-"
+    alloc_cell = rows[0][headers.index("Allocation")]
+    assert "(-" in alloc_cell
 
 
 def test_optimize_table_positive_delta_has_plus(instance1: InstanceState, alloc1: AllocationChange) -> None:
-    rows, _ = format_optimize_changes_table(
-        allocation_changes=[alloc1],
-        limit_changes=[],
-        instance_map={instance1.crn: instance1.name},
+    rows, headers = format_instance_analysis_table(
+        [instance1],
+        alloc_map={instance1.crn: alloc1},
+        include_usage=False,
     )
-    assert rows[0][3].startswith("+")
+    assert "(+" in rows[0][headers.index("Allocation")]
 
 
-def test_optimize_table_limit_only_row(instance1: InstanceState, limit1: LimitChange) -> None:
-    """A row with only a limit change shows '-' for allocation columns and a real limit value."""
-    rows, _ = format_optimize_changes_table(
-        allocation_changes=[],
-        limit_changes=[limit1],
-        instance_map={instance1.crn: instance1.name},
+def test_optimize_table_allocation_only_shows_actual_limit(instance1: InstanceState, alloc1: AllocationChange) -> None:
+    """When only allocation changes, the Limit cell shows the instance's real current limit (not a placeholder)."""
+    rows, headers = format_instance_analysis_table(
+        [instance1],
+        alloc_map={instance1.crn: alloc1},
+        include_usage=False,
+    )
+    assert rows[0][headers.index("Limit")] == format_seconds(instance1.limit_seconds or 0)
+    assert "→" not in rows[0][headers.index("Limit")]
+
+
+def test_optimize_table_allocation_arrow_on_change(instance1: InstanceState, alloc1: AllocationChange) -> None:
+    rows, headers = format_instance_analysis_table(
+        [instance1],
+        alloc_map={instance1.crn: alloc1},
+        include_usage=False,
+    )
+    alloc_cell = rows[0][headers.index("Allocation")]
+    assert "→" in alloc_cell
+    assert format_seconds(alloc1.current) in alloc_cell
+    assert format_seconds(alloc1.new) in alloc_cell
+    assert f"(+{format_seconds(alloc1.delta)})" in alloc_cell
+
+
+def test_optimize_table_pulls_reason_from_allocation(instance1: InstanceState, alloc1: AllocationChange) -> None:
+    rows, headers = format_instance_analysis_table(
+        [instance1],
+        alloc_map={instance1.crn: alloc1},
+        include_usage=False,
+    )
+    assert rows[0][headers.index("Reason")] == alloc1.reason
+
+
+def test_optimize_table_pulls_reason_from_limit_when_no_alloc(instance1: InstanceState, limit1: LimitChange) -> None:
+    rows, headers = format_instance_analysis_table(
+        [instance1],
+        limit_map={instance1.crn: limit1},
+        include_usage=False,
+    )
+    assert rows[0][headers.index("Reason")] == limit1.reason
+
+
+def test_optimize_table_limit_only_row_shows_real_allocation(instance1: InstanceState, limit1: LimitChange) -> None:
+    """A row with only a limit change shows the instance's actual current allocation (not a placeholder)."""
+    rows, headers = format_instance_analysis_table(
+        [instance1],
+        limit_map={instance1.crn: limit1},
+        include_usage=False,
     )
     assert len(rows) == 1
-    name, current, new, change, new_limit = rows[0]
-    assert name == instance1.name
-    assert current == "-"
-    assert new == "-"
-    assert change == "-"
-    assert new_limit == format_seconds(limit1.new)
-
-
-def test_optimize_table_sorted_by_instance_name(
-    instance1: InstanceState,
-    instance2: InstanceState,
-    alloc1: AllocationChange,
-    alloc2: AllocationChange,
-) -> None:
-    rows, _ = format_optimize_changes_table(
-        allocation_changes=[alloc2, alloc1],
-        limit_changes=[],
-        instance_map={instance1.crn: instance1.name, instance2.crn: instance2.name},
-    )
-    assert [r[0] for r in rows] == sorted([instance1.name, instance2.name])
+    alloc_cell = rows[0][headers.index("Allocation")]
+    limit_cell = rows[0][headers.index("Limit")]
+    assert alloc_cell == format_seconds(instance1.allocation_seconds)
+    assert "→" not in alloc_cell
+    assert "→" in limit_cell
+    assert format_seconds(limit1.new) in limit_cell
+    assert limit1.current is not None
+    assert f"(+{format_seconds(limit1.new - limit1.current)})" in limit_cell
 
 
 # -------------------------------------------------------------------
@@ -383,42 +418,6 @@ def test_result_partitions_by_delta_sign() -> None:
     )
     assert [c.instance_crn for c in result.decreases] == ["crn:1"]
     assert [c.instance_crn for c in result.increases] == ["crn:2"]
-
-
-# -------------------------------------------------------------------
-# format_limit_display
-# -------------------------------------------------------------------
-
-
-def test_limit_display_none_returns_dash() -> None:
-    assert format_limit_display(None) == "-"
-
-
-def test_limit_display_no_override() -> None:
-    assert format_limit_display(30000) == format_seconds(30000)
-
-
-def test_limit_display_with_grant_annotated() -> None:
-    result = format_limit_display(30000, has_grant=True)
-    assert "(+grant)" in result
-    assert format_seconds(30000) in result
-
-
-def test_limit_display_with_debt_shows_exclamation() -> None:
-    result = format_limit_display(30000, in_debt=True)
-    assert "!" in result
-
-
-def test_limit_display_no_annotations() -> None:
-    result = format_limit_display(30000)
-    assert "grant" not in result.lower()
-    assert "!" not in result
-
-
-def test_limit_display_both_grant_and_debt() -> None:
-    result = format_limit_display(30000, has_grant=True, in_debt=True)
-    assert "(+grant)" in result
-    assert "!" in result
 
 
 # -------------------------------------------------------------------

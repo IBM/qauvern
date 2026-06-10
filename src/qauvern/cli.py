@@ -25,7 +25,6 @@ from .config import ConfigParser
 from .formatting import (
     format_instance_analysis_table,
     format_instance_summary_table,
-    format_optimize_changes_table,
     format_reserve_summary,
     format_seconds,
     parse_seconds,
@@ -394,7 +393,6 @@ def analyze(ctx, config: str, api_key: str | None):
 
     table_data, headers = format_instance_analysis_table(
         account.instances,
-        instance_configs=instance_configs,
         alloc_map=alloc_map,
         limit_map=limit_map,
     )
@@ -479,7 +477,19 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
 
     instance_map = {inst.crn: inst.name for inst in account.instances}
 
-    rec_data, rec_headers = format_optimize_changes_table(result.allocation_changes, result.limit_changes, instance_map)
+    alloc_map = {c.instance_crn: c for c in result.allocation_changes}
+    limit_map = {c.instance_crn: c for c in result.limit_changes}
+    changed_crns = set(alloc_map) | set(limit_map)
+    changed_instances = sorted(
+        (inst for inst in account.instances if inst.crn in changed_crns),
+        key=lambda inst: inst.name,
+    )
+    rec_data, rec_headers = format_instance_analysis_table(
+        changed_instances,
+        alloc_map=alloc_map,
+        limit_map=limit_map,
+        include_usage=False,
+    )
     click.echo(tabulate(rec_data, headers=rec_headers, tablefmt="grid"))
 
     if dry_run:
@@ -514,8 +524,14 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
         instance_name = instance_map.get(chg.instance_crn, chg.instance_crn[:40] + "...")
         if len(instance_name) > 40:
             instance_name = instance_name[:37] + "..."
+        if chg.current is None:
+            transition = f"Setting limit for {instance_name}: {format_seconds(chg.new)}"
+        else:
+            transition = (
+                f"Updating limit for {instance_name}: {format_seconds(chg.current)} → {format_seconds(chg.new)}"
+            )
         try:
-            click.echo(f"  Setting limit for {instance_name}: {format_seconds(chg.new)}")
+            click.echo(f"  {transition}")
             client.update_instance_limit(chg.instance_crn, chg.new)
             success_count += 1
             click.echo("    ✓ Success")
