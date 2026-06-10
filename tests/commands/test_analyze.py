@@ -12,12 +12,14 @@
 
 import csv
 import io
+import json
 from datetime import datetime, timezone
 
 from qauvern.commands.analyze import (
     CSV_COLUMNS,
     AnalyzeReport,
     format_analyze_csv,
+    format_analyze_json,
     format_analyze_table,
 )
 from qauvern.models import (
@@ -455,3 +457,175 @@ def test_csv_validation_errors_not_in_body() -> None:
     headers, rows = _parse_csv(output)
     assert tuple(headers) == CSV_COLUMNS
     assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# format_analyze_json
+# ---------------------------------------------------------------------------
+
+
+def test_json_top_level_keys_present() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
+    assert set(payload.keys()) == {"plan", "account", "reserve", "validation_errors", "instances"}
+
+
+def test_json_round_trips() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    output = format_analyze_json(_report(account, result, cfgs, optimizer))
+    # Must be valid JSON.
+    json.loads(output)
+
+
+def test_json_plan_value_is_string() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer, plan=Plan.PAYGO)))
+    assert payload["plan"] == "paygo"
+
+
+def test_json_account_includes_unmanaged_allocation() -> None:
+    inst = _make_instance(CRN_A, allocation=60)
+    # budget=100, configured=60 → unmanaged=40
+    account = _make_account((inst,), budget=100)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = optimizer.optimize()
+
+    payload = json.loads(format_analyze_json(_report(account, result, [cfg], optimizer)))
+    assert payload["account"]["unmanaged_allocation_seconds"] == 40
+    assert payload["account"]["allocation_budget_seconds"] == 100
+
+
+def test_json_reserve_zero_when_unset() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
+    assert payload["reserve"]["percent"] == 0
+    assert payload["reserve"]["distributable_pool_seconds"] == 0
+
+
+def test_json_reserve_populated_when_set() -> None:
+    inst = _make_instance(CRN_A, allocation=60)
+    account = _make_account((inst,), budget=60)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60, allocation_reserve_percent=10.0)
+    result = optimizer.optimize()
+
+    payload = json.loads(format_analyze_json(_report(account, result, [cfg], optimizer)))
+    assert payload["reserve"]["percent"] == 10.0
+    expected_pool, _ = optimizer.redistribution_pool()
+    assert payload["reserve"]["distributable_pool_seconds"] == expected_pool
+
+
+def test_json_unchanged_instance_keeps_current_values() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
+    inst = payload["instances"][0]
+    assert inst["current_allocation_seconds"] == 60
+    # Always emit new value, even when unchanged, so consumers don't read None as "unset".
+    assert inst["new_allocation_seconds"] == 60
+    assert inst["allocation_delta_seconds"] == 0
+    assert inst["allocation_change_reason"] is None
+
+
+def test_json_changed_allocation_records_delta_and_reason() -> None:
+    inst = _make_instance(CRN_A, allocation=100)
+    account = _make_account((inst,), budget=100)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = OptimizationResult(
+        allocation_changes={CRN_A: AllocationChange(current=100, new=80, reason="Inactive instance")},
+        limit_changes={},
+    )
+
+    payload = json.loads(format_analyze_json(_report(account, result, [cfg], optimizer)))
+    inst_row = payload["instances"][0]
+    assert inst_row["current_allocation_seconds"] == 100
+    assert inst_row["new_allocation_seconds"] == 80
+    assert inst_row["allocation_delta_seconds"] == -20
+    assert inst_row["allocation_change_reason"] == "Inactive instance"
+
+
+def test_json_unset_limit_stays_null_when_unchanged() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
+    inst = payload["instances"][0]
+    assert inst["current_limit_seconds"] is None
+    assert inst["new_limit_seconds"] is None
+    assert inst["limit_delta_seconds"] is None
+
+
+def test_json_existing_limit_carried_forward_when_unchanged() -> None:
+    inst = _make_instance(CRN_A, allocation=60, limit=3600)
+    account = _make_account((inst,), budget=60)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = optimizer.optimize()
+
+    payload = json.loads(format_analyze_json(_report(account, result, [cfg], optimizer)))
+    row = payload["instances"][0]
+    assert row["current_limit_seconds"] == 3600
+    # Always emit new value, even when unchanged, so consumers don't read None as "unset".
+    assert row["new_limit_seconds"] == 3600
+    assert row["limit_delta_seconds"] == 0
+
+
+def test_json_limit_change_from_unset_records_new_value() -> None:
+    inst = _make_instance(CRN_A, allocation=100)
+    account = _make_account((inst,), budget=100)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = OptimizationResult(
+        allocation_changes={},
+        limit_changes={CRN_A: LimitChange(current=None, new=7200)},
+    )
+
+    payload = json.loads(format_analyze_json(_report(account, result, [cfg], optimizer)))
+    row = payload["instances"][0]
+    assert row["current_limit_seconds"] is None
+    assert row["new_limit_seconds"] == 7200
+    # Delta is undefined when the prior limit was unset.
+    assert row["limit_delta_seconds"] is None
+
+
+def test_json_limit_change_with_existing_records_delta() -> None:
+    inst = _make_instance(CRN_A, allocation=100, limit=3600)
+    account = _make_account((inst,), budget=100)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = OptimizationResult(
+        allocation_changes={},
+        limit_changes={CRN_A: LimitChange(current=3600, new=7200)},
+    )
+
+    payload = json.loads(format_analyze_json(_report(account, result, [cfg], optimizer)))
+    row = payload["instances"][0]
+    assert row["current_limit_seconds"] == 3600
+    assert row["new_limit_seconds"] == 7200
+    assert row["limit_delta_seconds"] == 3600
+
+
+def test_json_validation_errors_populated_when_invalid() -> None:
+    inst = _make_instance(CRN_A, allocation=100)
+    account = _make_account((inst,), budget=100)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = OptimizationResult(
+        allocation_changes={CRN_A: AllocationChange(current=100, new=200, reason="Active")},
+        limit_changes={},
+    )
+
+    payload = json.loads(format_analyze_json(_report(account, result, [cfg], optimizer)))
+    assert payload["validation_errors"]
+
+
+def test_json_one_entry_per_instance() -> None:
+    inst_a = _make_instance(CRN_A, allocation=60, name="A")
+    crn_b = "crn:v1:bluemix:public:quantum-computing:us-east:a/acc:inst-b::"
+    inst_b = _make_instance(crn_b, allocation=60, name="B")
+    account = _make_account((inst_a, inst_b), budget=120)
+    cfgs = [_make_config(CRN_A, name="A"), _make_config(crn_b, name="B")]
+    optimizer = AllocationOptimizer(account, cfgs, minimum_allocation_seconds=60)
+    result = optimizer.optimize()
+
+    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
+    assert [i["name"] for i in payload["instances"]] == ["A", "B"]

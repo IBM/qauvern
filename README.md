@@ -215,15 +215,31 @@ qauvern analyze --config config.yaml
 
 This command identifies underutilized instances, calculates optimal reallocations, and shows what changes would be made. The output includes a **Cur Limit** column (the live API value) and a **New Limit** column (what the optimizer would set). A `(+grant)` annotation indicates an active net grant is boosting the limit; `!` indicates the instance is in debt.
 
-Use `--format` to control the output. The default `table` is human-readable; `csv` emits one row per configured instance for scripting. `csv` writes the data to stdout and any validation errors as `Warning: ...` lines on stderr, so it pipes cleanly to a file:
+> **Scope:** `analyze` only considers instances listed in your config file. Allocation held by unconfigured instances on the same account+plan is left untouched, but it is counted against the account cap so the recommendations never overcommit. The summary block reports it on the `Held by unconfigured instances` line.
+
+##### Output formats
+
+Use `--format` to choose how results are rendered:
+
+- `table` (default) — human-readable summary block plus an instance table.
+- `csv` — one row per configured instance, suitable for spreadsheets or quick pipelines. Account-level info is omitted because CSV is a flat row-based format.
+- `json` — a structured payload for scripts. Includes account-level info, the reserve, validation errors, and per-instance rows with pre-computed allocation and limit deltas.
+
+Both `csv` and `json` write data to stdout and logs to stderr, allowing you to pipe the stdout:
 
 ```bash
-qauvern analyze --config config.yaml --format csv > analysis.csv
+qauvern analyze --config config.yaml --format csv  > analysis.csv
+qauvern analyze --config config.yaml --format json > analysis.json
 ```
 
-Each CSV row carries the current allocation/limit, the new value (always set, even when unchanged, so it never reads as an unset), the delta, the change reason, and per-window usage. All durations are raw integer seconds.
+`json` writes validatoin errors to a `validation_errors` array, whereas `csv` logs the errors to stderr.
 
-> **Scope:** `analyze` only considers instances listed in your config file. Allocation held by unconfigured instances on the same account+plan is left untouched, but it is counted against the account cap so the recommendations never overcommit. The summary block reports it on the `Held by unconfigured instances` line.
+Common notes for both machine formats:
+
+- All durations are raw integer seconds.
+- The "new" allocation/limit value is always emitted, even if it is the same as the current value. Use the delta fields to quickly determine if there was a change, such as `limit_delta_seconds` with `json`. 
+
+Inspect the JSON schema with `jq keys` and `jq '.instances[0] | keys'` against a real run.
 
 #### Optimize Allocations
 
@@ -333,11 +349,26 @@ qauvern optimize --config config.yaml
 
 After the initial setup, run `qauvern update --config config.yaml` periodically to keep the config in sync with the live API (new instances, renames, archived instances, expired net_grants).
 
-### Continuous Optimization
+### Automations
 
-Run the optimizer periodically (e.g., weekly) to maintain optimal allocations:
+`qauvern optimize --yes` skips the confirmation prompt, and `qauvern analyze --format json` emits a structured report — together they make the tool easy to drive from cron, CI, or a monitoring script.
+
+Run the optimizer on a schedule to keep allocations balanced:
 
 ```bash
-# Apply without a confirmation prompt — suitable for scheduled jobs or CI
-qauvern optimize --config /path/to/config.yaml --yes
+# Add to crontab for weekly optimization
+0 0 * * 0 qauvern optimize --config /path/to/config.yaml --yes
+```
+
+Capture a periodic analysis snapshot for dashboards or alerting:
+
+```bash
+qauvern analyze --config /path/to/config.yaml --format json > /var/log/qauvern/$(date +%Y-%m-%d).json
+```
+
+For example, surface instances the optimizer wants to shrink:
+
+```bash
+qauvern analyze --config config.yaml --format json \
+  | jq '.instances[] | select(.allocation_delta_seconds < 0) | {name, allocation_delta_seconds, allocation_change_reason}'
 ```

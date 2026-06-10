@@ -21,7 +21,7 @@ import click
 from tabulate import tabulate
 
 from .api_client import IBMQuantumAPIClient
-from .commands.analyze import AnalyzeReport, format_analyze_csv, format_analyze_table
+from .commands.analyze import AnalyzeReport, format_analyze_csv, format_analyze_json, format_analyze_table
 from .commands.configure import build_configure_yaml
 from .commands.update import (
     UpdateActions,
@@ -354,10 +354,10 @@ def instances(ctx, config: str, api_key: str | None):
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(["table", "csv"], case_sensitive=False),
+    type=click.Choice(["table", "json", "csv"], case_sensitive=False),
     default="table",
     show_default=True,
-    help="Output format. table (default, human-readable), csv (instances only).",
+    help="Output format. table (default, human-readable), json (structured), csv (instances only).",
 )
 @click.pass_context
 @handle_errors
@@ -400,6 +400,8 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str):
         for error in report.validation_errors:
             click.echo(f"Warning: {error}", err=True)
         click.echo(format_analyze_csv(report), nl=False)
+    elif fmt == "json":
+        click.echo(format_analyze_json(report))
     else:
         click.echo(format_analyze_table(report))
 

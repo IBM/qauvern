@@ -10,7 +10,10 @@
 
 import csv
 import io
+import json
+import math
 from dataclasses import dataclass
+from typing import Any
 
 from tabulate import tabulate
 
@@ -139,6 +142,74 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         lines += ["", "✓ No optimization recommendations. Allocations are optimal."]
 
     return "\n".join(lines)
+
+
+def format_analyze_json(report: AnalyzeReport) -> str:
+    """Render the report as structured JSON for scripts.
+
+    Includes account-level info plus per-instance rows with pre-computed
+    deltas for allocations and limits. The new allocation/limit value is
+    always emitted (equal to the current value when unchanged) so consumers
+    don't read a missing field as "unset".
+    """
+    account = report.account
+    alloc_map = report.result.allocation_changes
+    limit_map = report.result.limit_changes
+
+    instances: list[dict[str, Any]] = []
+    for inst in account.instances:
+        alloc = alloc_map.get(inst.crn)
+        limit_rec = limit_map.get(inst.crn)
+
+        new_allocation = alloc.new if alloc is not None else inst.allocation_seconds
+        new_limit = limit_rec.new if limit_rec is not None else inst.limit_seconds
+        limit_delta: int | None = (
+            new_limit - inst.limit_seconds if new_limit is not None and inst.limit_seconds is not None else None
+        )
+        fairness = inst.fairness
+        if not math.isfinite(fairness):
+            fairness = None
+
+        instances.append(
+            {
+                "name": inst.name,
+                "crn": inst.crn,
+                "current_allocation_seconds": inst.allocation_seconds,
+                "new_allocation_seconds": new_allocation,
+                "allocation_delta_seconds": new_allocation - inst.allocation_seconds,
+                "allocation_change_reason": alloc.reason if alloc is not None else None,
+                "current_limit_seconds": inst.limit_seconds,
+                "new_limit_seconds": new_limit,
+                "limit_delta_seconds": limit_delta,
+                "consumed_balance_period_seconds": inst.usage.consumed_balance_period,
+                "consumed_28day_seconds": inst.consumed_seconds,
+                "consumed_14day_seconds": inst.usage.consumed_14day,
+                "consumed_7day_seconds": inst.usage.consumed_7day,
+                "consumed_3day_seconds": inst.usage.consumed_3day,
+                "consumed_24h_seconds": inst.usage.consumed_24h,
+                "fairness": fairness,
+                "activity_score": inst.activity_score,
+            }
+        )
+
+    payload = {
+        "plan": report.plan.value,
+        "account": {
+            "account_id": account.account_id,
+            "allocation_budget_seconds": account.allocation_budget_seconds,
+            "unallocated_seconds": account.unallocated_seconds,
+            "consumed_seconds": account.consumed_seconds,
+            "limit_seconds": account.limit_seconds,
+            "unmanaged_allocation_seconds": account.unmanaged_allocation_seconds,
+        },
+        "reserve": {
+            "percent": report.allocation_reserve_percent,
+            "distributable_pool_seconds": report.redistribution_pool_seconds,
+        },
+        "validation_errors": list(report.validation_errors),
+        "instances": instances,
+    }
+    return json.dumps(payload, indent=2)
 
 
 def format_analyze_csv(report: AnalyzeReport) -> str:
