@@ -2,7 +2,7 @@
 
 This is a Python CLI tool for optimizing IBM Quantum resource allocations across cloud accounts,
 using fairness-based scheduling to rebalance QAU allocations among service instances. See
-`Design.md` for full architecture, algorithm details, and API endpoint documentation.
+`Design.md` for full architecture and algorithm details.
 
 ## Development Setup
 
@@ -32,8 +32,8 @@ All commits must be DCO signed-off. Use `git commit -s`.
 
 ## Key Prohibitions
 
-- Do not run `qauvern optimize` against a real account to verify behavior — use `analyze`
-  with `--dry-run` or write a test with `mock_api.py`.
+- Do not run `qauvern optimize` against a real account to verify behavior — use
+  `analyze`, `optimize --dry-run`, or write a test with `mock_api.py`.
 - Do not hardcode API keys or CRNs in source files.
 
 ## Release Process
@@ -45,16 +45,10 @@ Releases are automated via GitHub Actions. To release a new version:
 3. Add the version link at the bottom of `CHANGELOG.md`
 4. Merge to `main`
 
-The release workflow triggers on any push to `main` that changes `pyproject.toml`. It will:
-- Validate the version format and check no tag already exists
-- Run the full test suite across all supported Python versions
-- Build the distribution
-- Publish to PyPI via trusted publishing
-- Create a git tag and GitHub Release with changelog notes
-
-PyPI publishing uses trusted publishing (OIDC), configured via the `pypi` GitHub environment.
+The release workflow triggers on any push to `main` that changes `pyproject.toml`.
 
 ## Maintenance Rule
 
-After any design change (algorithm, API endpoints, data model, config format), update `Design.md`
-so the project can be reconstructed from that document alone.
+After any relevant design change (algorithm, config format, etc), update `Design.md`
+so the document accurately describes the project. We do not document every detail there
+because often it's sufficient to read the source code.
