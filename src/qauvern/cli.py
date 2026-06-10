@@ -12,6 +12,8 @@
 
 import functools
 import sys
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -32,9 +34,11 @@ from .formatting import (
 from .models import (
     Account,
     AllocationChange,
+    DiscoveredInstance,
     DiscoveredInstances,
     InstanceConfig,
     InstanceDetailedUsage,
+    InstanceState,
     LimitChange,
 )
 from .optimizer import AllocationOptimizer
@@ -148,9 +152,16 @@ def _build_client(ctx: click.Context, api_key: str | None) -> IBMQuantumAPIClien
     return IBMQuantumAPIClient(api_key=api_key, staging=staging)
 
 
-def _load_config_and_client(
-    ctx: click.Context, config: str, api_key: str | None
-) -> tuple[ConfigParser, IBMQuantumAPIClient]:
+@dataclass(frozen=True)
+class CommandSession:
+    """Bundle of state shared by every command that loads a config + live API view."""
+
+    config: ConfigParser
+    client: IBMQuantumAPIClient
+    configured_instances: tuple[DiscoveredInstance, ...]
+
+
+def _open_session(ctx: click.Context, config: str, api_key: str | None) -> CommandSession:
     config_parser = ConfigParser(config)
     client = _build_client(ctx, api_key)
     discovered = client.discover_instances(config_parser.account_id, config_parser.plan)
@@ -163,7 +174,22 @@ def _load_config_and_client(
             f"Update your config:\n{bullets}",
             err=True,
         )
-    return config_parser, client
+    by_crn = {d.crn: d for d in discovered.active}
+    configured = tuple(by_crn[cfg.crn] for cfg in config_parser.instance_configs if cfg.crn in by_crn)
+    return CommandSession(config=config_parser, client=client, configured_instances=configured)
+
+
+def _fetch_instance_states(
+    client: IBMQuantumAPIClient, discovered: Sequence[DiscoveredInstance]
+) -> list[InstanceState]:
+    """Fetch live usage for each instance, warning and skipping any that fail."""
+    states: list[InstanceState] = []
+    for d in discovered:
+        try:
+            states.append(client.get_instance(d))
+        except Exception as e:
+            click.echo(f"Warning: Could not fetch full data for instance `{d.name}`, so skipping: {e}", err=True)
+    return states
 
 
 def handle_errors(func):
@@ -213,12 +239,15 @@ def show(ctx, config: str, api_key: str | None):
     the config file; allocation held by unmanaged instances is reported
     separately so the cap math is transparent.
     """
-    config_parser, client = _load_config_and_client(ctx, config, api_key)
+    session = _open_session(ctx, config, api_key)
+    config_parser = session.config
+    client = session.client
 
     click.echo(
         f"Fetching account information and {len(config_parser.instance_configs)} configured instances from {config}..."
     )
-    account = client.get_account(config_parser.account_id, config_parser.plan, config_parser.instance_configs)
+    instance_states = _fetch_instance_states(client, session.configured_instances)
+    account = client.get_account(config_parser.account_id, config_parser.plan, instance_states)
 
     click.echo("\n" + "=" * 80)
     click.echo("ACCOUNT SUMMARY")
@@ -266,18 +295,15 @@ def instances(ctx, config: str, api_key: str | None):
     totals (and unmanaged-instance allocation) are not available here
     because that data requires admin access — use `show` for that view.
     """
-    config_parser, client = _load_config_and_client(ctx, config, api_key)
+    session = _open_session(ctx, config, api_key)
+    config_parser = session.config
+    client = session.client
 
     click.echo(
         f"Fetching usage information for {len(config_parser.instance_configs)} configured instances from {config}"
     )
 
-    instances_data = []
-    for instance_config in config_parser.instance_configs:
-        try:
-            instances_data.append(client.get_instance(instance_config))
-        except Exception as e:
-            click.echo(f"Warning: Could not fetch instance {instance_config.crn}: {e}", err=True)
+    instances_data = _fetch_instance_states(client, session.configured_instances)
 
     if not instances_data:
         click.echo("No instances found or accessible.", err=True)
@@ -326,13 +352,16 @@ def analyze(ctx, config: str, api_key: str | None):
     Allocation held by unmanaged instances is preserved as-is and
     counted toward the account cap.
     """
-    config_parser, client = _load_config_and_client(ctx, config, api_key)
+    session = _open_session(ctx, config, api_key)
+    config_parser = session.config
+    client = session.client
     account_id = config_parser.account_id
     plan = config_parser.plan
     instance_configs = config_parser.instance_configs
 
     click.echo(f"Fetching account information for {len(instance_configs)} configured instances on plan {plan.value}...")
-    account = client.get_account(account_id, plan, instance_configs)
+    instance_states = _fetch_instance_states(client, session.configured_instances)
+    account = client.get_account(account_id, plan, instance_states)
 
     # Enrich instances with target usage and detailed usage data
     click.echo("Fetching usage data for different time periods...")
@@ -426,13 +455,16 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     if not dry_run:
         click.confirm("Are you sure you want to optimize allocations?", abort=True)
 
-    config_parser, client = _load_config_and_client(ctx, config, api_key)
+    session = _open_session(ctx, config, api_key)
+    config_parser = session.config
+    client = session.client
     account_id = config_parser.account_id
     plan = config_parser.plan
     instance_configs = config_parser.instance_configs
 
     click.echo(f"Fetching account information for {len(instance_configs)} configured instances on plan {plan.value}...")
-    account = client.get_account(account_id, plan, instance_configs)
+    instance_states = _fetch_instance_states(client, session.configured_instances)
+    account = client.get_account(account_id, plan, instance_states)
 
     # Enrich instances with target usage (no detailed usage needed for optimize)
     enrich_instances_with_usage_data(account, instance_configs, client)
