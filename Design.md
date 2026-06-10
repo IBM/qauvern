@@ -2,9 +2,8 @@
 
 ## Terminology
 
-* QAU - Quantum Allocation Unit. 1 QAU represents 1600 minutes allocated to use on the IBM Quantum fleet during our 28 day rolling window
 * Rolling window - a backward looking 28 days of usage. The window rolls forward continuously. As clients use minutes in the quantum system, their available minutes for consumption decrease.
-* Account - all quantum access is based on an IBM Cloud account. IBM admins set the account level allocation based on the contracted QAUs that the client has provided
+* Account - all quantum access is based on an IBM Cloud account. IBM admins set the account level allocation based on the contracted time the client has purchased.
 * [Instance](https://quantum.cloud.ibm.com/docs/en/guides/instances.md) - A client will create one or more quantum service instances and set an allocation in seconds to configure the time that the instance should consume during the 28 day rolling window.
 * [Limits](https://quantum.cloud.ibm.com/docs/en/guides/allocation-limits.md) - in addition to allocations on instances, admins can optionally set limits on the instance, which provide a hard cap on the amount of time that the instance can consume.
 * [Allocations](https://quantum.cloud.ibm.com/docs/en/guides/allocation-limits.md) - the amount of time that an instance is targetted to consume during the 28 day rolling window. When setting allocations on instances, sum of all the allocations must be less than or equal to the account level allocation.

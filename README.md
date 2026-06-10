@@ -2,6 +2,8 @@
 
 A Python CLI tool for optimizing quantum allocations across instances to maximize utilization of IBM Quantum resources.
 
+> The name comes from **QAU** (Quantum Allocation Unit) + **govern** — managing and governing those allocations.
+
 ## Overview
 
 qauvern helps administrators manage quantum computing allocations efficiently by:
@@ -13,7 +15,6 @@ qauvern helps administrators manage quantum computing allocations efficiently by
 
 ## Key Concepts
 
-- **QAU (Quantum Allocation Unit)**: 1 QAU = 1600 minutes of quantum computing time
 - **Rolling Window**: 28-day backward-looking usage period
 - **Fairness**: Ratio of consumed time to allocated time (lower fairness = higher priority)
 - **Allocation**: Target consumption for an instance during the rolling window

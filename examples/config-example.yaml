@@ -50,11 +50,11 @@ instances:
 
   - name: "Quantum Machine Learning"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-2::"
-    limit_seconds: 108000  # 30 hours (~0.625 QAU)
+    limit_seconds: 108000  # 30 hours
 
   - name: "Quantum Optimization"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-3::"
-    limit_seconds: 72000  # 20 hours (~0.417 QAU)
+    limit_seconds: 72000  # 20 hours
 
   - name: "Educational Projects"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-4::"
