@@ -14,6 +14,8 @@ from functools import cached_property
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from .region import Region, extract_region_from_crn
+
 
 @dataclass(frozen=True)
 class NetGrant:
@@ -50,6 +52,14 @@ class DiscoveredInstances:
 
     active: tuple[DiscoveredInstance, ...]
     archived: tuple[DiscoveredInstance, ...]
+
+    def filter_by_region(self, region: Region | None) -> "DiscoveredInstances":
+        if region is None:
+            return self
+        return DiscoveredInstances(
+            active=tuple(i for i in self.active if extract_region_from_crn(i.crn) == region),
+            archived=tuple(i for i in self.archived if extract_region_from_crn(i.crn) == region),
+        )
 
 
 @dataclass(frozen=True)

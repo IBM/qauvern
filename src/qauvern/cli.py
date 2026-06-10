@@ -43,7 +43,7 @@ from .models import (
 )
 from .optimizer import AllocationOptimizer
 from .plan import Plan, plan_from_name
-from .region import Region, extract_region_from_crn
+from .region import Region
 
 
 def enrich_instances_with_usage_data(
@@ -628,13 +628,7 @@ def configure(
     client = _build_client(ctx, api_key)
 
     click.echo("Fetching instances...")
-    discovered = client.discover_instances(account_id, plan)
-
-    if region is not None:
-        discovered = DiscoveredInstances(
-            active=tuple(i for i in discovered.active if extract_region_from_crn(i.crn) == region),
-            archived=tuple(i for i in discovered.archived if extract_region_from_crn(i.crn) == region),
-        )
+    discovered = client.discover_instances(account_id, plan).filter_by_region(region)
 
     if discovered.archived:
         click.echo(f"Skipping {len(discovered.archived)} archived instance(s)", err=True)
