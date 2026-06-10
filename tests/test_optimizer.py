@@ -127,7 +127,12 @@ def _make_config(crn: str, *, name: str | None = None, target_limit_seconds: int
 
 def _projected(result: OptimizationResult, account: Account) -> dict[str, int]:
     """Return projected allocation per crn, applying any AllocationChange."""
-    return {inst.crn: result.allocation_changes[inst.crn].new if inst.crn in result.allocation_changes else inst.allocation_seconds for inst in account.instances}
+    return {
+        inst.crn: result.allocation_changes[inst.crn].new
+        if inst.crn in result.allocation_changes
+        else inst.allocation_seconds
+        for inst in account.instances
+    }
 
 
 # ---------------------------------------------------------------------------
