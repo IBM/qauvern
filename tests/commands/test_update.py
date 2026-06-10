@@ -20,7 +20,15 @@ from click.testing import CliRunner, Result
 from ruamel.yaml import YAML
 
 from qauvern.cli import main
-from qauvern.commands.update import UpdateActions, compute_update
+from qauvern.commands.update import (
+    ExpiredGrant,
+    InstanceRename,
+    RemovedInstance,
+    UpdateActions,
+    UpdateSummary,
+    compute_update,
+    format_update_summary,
+)
 from qauvern.config import ConfigParser
 from qauvern.models import DiscoveredInstance, DiscoveredInstances
 from tests.mock_api import MockIBMQuantumAPIClient
@@ -261,32 +269,6 @@ instances:
     assert doc["instances"][0]["net_grants"][0]["net_grant_seconds"] == 1000
 
 
-def test_region_filtered_discovery_also_removes_other_region_entries() -> None:
-    """The CLI filters ``discovered`` by region before calling ``compute_update``.
-
-    Once filtered, an EU entry already in the config has no matching CRN in
-    ``discovered`` and is removed as ``missing`` — exactly what we want when a
-    user runs ``--region us-east``: stale eu-de entries get cleaned up too.
-    """
-    text = (
-        BASE_HEADER
-        + f"""\
-instances:
-  - name: Stale EU
-    crn: '{EU_CRN_A}'
-"""
-    )
-    doc = _load_yaml(text)
-    summary = compute_update(
-        doc,
-        _discovered(active=(_disc(US_CRN_A, "US A"),)),
-        now=datetime(2026, 5, 1, tzinfo=timezone.utc),
-    )
-    crns = [entry["crn"] for entry in doc["instances"]]
-    assert crns == [US_CRN_A]
-    assert summary.removed_instances[0].crn == EU_CRN_A
-    assert summary.added_instances[0].crn == US_CRN_A
-
 
 def test_round_trip_preserves_comments_and_unrelated_keys() -> None:
     text = (
@@ -323,6 +305,41 @@ def test_compute_update_raises_when_instances_missing() -> None:
 
 
 # ---------------------------------------------------------------------------
+# format_update_summary
+# ---------------------------------------------------------------------------
+
+
+def test_format_update_summary_empty() -> None:
+    assert format_update_summary(UpdateSummary()) == "No changes needed."
+
+
+def test_format_update_summary_all_sections() -> None:
+    summary = UpdateSummary(
+        removed_instances=[RemovedInstance(crn=US_CRN_B, name="Gone", reason="archived")],
+        expired_net_grants=[
+            ExpiredGrant(
+                instance_name="A",
+                crn=US_CRN_A,
+                start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                end_date=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            )
+        ],
+        renamed_instances=[InstanceRename(crn=US_CRN_A, old_name="Old", new_name="New")],
+        added_instances=[_disc(US_CRN_C, "Fresh")],
+    )
+    text = format_update_summary(summary)
+    assert text.startswith("Planned changes:")
+    assert "Remove (1)" in text
+    assert "Gone" in text and "archived" in text
+    assert "Expired net_grants (1)" in text
+    assert "2026-01-01" in text and "2026-02-01" in text
+    assert "Rename (1)" in text
+    assert '"Old"' in text and '"New"' in text
+    assert "Add (1)" in text
+    assert "Fresh" in text
+
+
+# ---------------------------------------------------------------------------
 # CLI integration
 # ---------------------------------------------------------------------------
 
@@ -332,9 +349,15 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
-def _invoke_update(runner: CliRunner, mock_client: MockIBMQuantumAPIClient, args: list[str]) -> Result:
+def _invoke_update(
+    runner: CliRunner,
+    mock_client: MockIBMQuantumAPIClient,
+    args: list[str],
+    *,
+    input: str | None = "y\n",
+) -> Result:
     with patch("qauvern.cli.IBMQuantumAPIClient", return_value=mock_client):
-        return runner.invoke(main, ["update", *args])
+        return runner.invoke(main, ["update", *args], input=input)
 
 
 def _write_config(path: Path, instances_block: str) -> None:
@@ -450,6 +473,57 @@ def test_update_region_filters_adds(runner: CliRunner, tmp_path: Path) -> None:
         doc = yaml_rt.load(f)
     crns = [entry["crn"] for entry in doc["instances"]]
     assert crns == [US_CRN_A]
+
+
+def test_update_region_removes_other_region_config_entries(runner: CliRunner, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config(
+        config_path,
+        f"""\
+instances:
+  - name: US A
+    crn: '{US_CRN_A}'
+  - name: EU A
+    crn: '{EU_CRN_A}'
+""",
+    )
+
+    mock_client = MockIBMQuantumAPIClient()
+    mock_client.setup_account(account_id="acct-1", allocation_budget_seconds=0)
+    mock_client.setup_instance(crn=US_CRN_A, name="US A", allocation_seconds=36000, account_id="acct-1")
+    mock_client.setup_instance(crn=EU_CRN_A, name="EU A", allocation_seconds=36000, account_id="acct-1")
+
+    result = _invoke_update(
+        runner, mock_client, ["--config", str(config_path), "--api-key", "k", "--region", "us-east"]
+    )
+    assert result.exit_code == 0, result.output
+
+    yaml_rt = YAML(typ="rt")
+    with open(config_path) as f:
+        doc = yaml_rt.load(f)
+    crns = [entry["crn"] for entry in doc["instances"]]
+    assert crns == [US_CRN_A]
+
+
+def test_update_aborts_on_negative_confirmation(runner: CliRunner, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    original = (
+        BASE_HEADER
+        + f"""\
+instances:
+  - name: Old Name
+    crn: '{US_CRN_A}'
+"""
+    )
+    config_path.write_text(original)
+
+    mock_client = MockIBMQuantumAPIClient()
+    mock_client.setup_account(account_id="acct-1", allocation_budget_seconds=0)
+    mock_client.setup_instance(crn=US_CRN_A, name="Renamed", allocation_seconds=36000, account_id="acct-1")
+
+    result = _invoke_update(runner, mock_client, ["--config", str(config_path), "--api-key", "k"], input="n\n")
+    assert result.exit_code != 0
+    assert config_path.read_text() == original
 
 
 def test_update_no_changes_reports_already_up_to_date(runner: CliRunner, tmp_path: Path) -> None:

@@ -100,7 +100,9 @@ instances:
     limit_seconds: 72000
 ```
 
-See [`examples/config-example.yaml`](examples/config-example.yaml) for a complete example. Use [`qauvern configure`](#configure-generate-configuration) to generate your initial file.
+See [`examples/config-example.yaml`](examples/config-example.yaml) for a complete example. Use [`qauvern configure`](#configure-generate-configuration) to generate your initial file. Use [`qauvern update`](#update-reconcile-configuration) to automatically update the config file, such as adding new instances.
+
+You should check in this file to version control.
 
 ## Usage
 
@@ -132,11 +134,7 @@ Generate a base configuration file from an existing IBM Cloud account:
 qauvern configure --account-id your-account-id --plan premium --output config.yaml
 ```
 
-This command will:
-1. Connect to the IBM Quantum API
-2. List instances in the specified account that belong to the given plan
-3. Generate a base YAML configuration
-4. Display a summary of found instances
+This queries the IBM Quantum API to discover active instances for the given account and plan, then writes a YAML config file you can then edit.
 
 Options:
 - `--account-id, -a`: IBM Cloud account ID (required)
@@ -144,10 +142,46 @@ Options:
 - `--api-key, -k`: IBM Cloud API key (or use `IBMCLOUD_API_KEY` env var)
 - `--region`: Limit to instances in a specific region (e.g., `us-east`, `eu-de`). Because all other commands only operate on instances in your config file, you can use this to restrict `qauvern` to a single region.
 - `--output, -o`: Output file path (default: `config.yaml`)
-- `--balance-start`: Balance period start date (ISO format)
-- `--balance-end`: Balance period end date (ISO format)
+- `--balance-start`: Balance period start date (ISO format, default: `2026-01-01T00:00:00+00:00`)
+- `--balance-end`: Balance period end date (ISO format, default: `2026-12-31T23:59:59+00:00`)
 
-After generating the configuration, optionally set `limit_seconds` and `net_grants` per instance to control hard caps and temporary bonuses.
+After generating the configuration, optionally make these edits:
+
+- Set `limit_seconds` and `net_grants` per instance to control hard caps and temporary bonuses.
+- Change `minimum_allocation_seconds` from its default of 60 seconds.
+- Set `allocation_reserve_percent` from `[0, 100)` to reserve a buffer of allocation.
+
+Use [`qauvern update`](#update-reconcile-configuration) to keep the file in sync as instances are added, removed, or renamed.
+
+#### Update (Reconcile Configuration)
+
+Reconcile an existing configuration file with the live IBM Quantum API:
+
+```bash
+qauvern update --config config.yaml
+qauvern update --config config.yaml --dry-run   # preview changes only
+```
+
+The `update` command asks for confirmation before making edits.
+
+Whereas `configure` generates a fresh file from scratch, `update` is for ongoing maintenance of an existing config. It performs four reconciliation steps by default:
+
+- **Expire net_grants**: drops `net_grants` entries whose `end_date` has passed
+- **Remove instances**: removes entries for archived or missing instances
+- **Fix names**: updates instance names that have drifted from the live API
+- **Add instances**: appends newly discovered instances
+
+Comments and customizations (`limit_seconds`, `allocation_reserve_percent`, custom dates, etc.) are preserved because the file is rewritten in round-trip YAML mode.
+
+Options:
+- `--config, -c`: Path to the config file (required)
+- `--api-key, -k`: IBM Cloud API key (or use `IBMCLOUD_API_KEY` env var)
+- `--region`: Limit discovery to a specific region, like `us-east` or `eu-de`.
+- `--dry-run`: Print planned changes without writing the file
+- `--no-net-grants`: Skip expiring `net_grants`
+- `--no-add`: Skip adding newly discovered instances
+- `--no-names`: Skip fixing instance name drift
+- `--no-remove`: Skip removing archived/missing instances
 
 #### Show Current Allocations
 
@@ -188,14 +222,13 @@ Apply optimization recommendations to update instance allocations:
 ```bash
 qauvern optimize --config config.yaml
 qauvern optimize --config config.yaml --dry-run   # preview only
-qauvern optimize --config config.yaml --yes        # skip confirmation (for automation)
 ```
 
 This command will:
-1. Confirm you want to proceed (bypass with `--yes`)
-2. Calculate optimal allocations
-3. Display proposed changes
-4. Apply allocation and limit updates via API
+1. Calculate optimal allocations.
+2. Display proposed changes.
+3. Prompt for confirmation.
+4. Apply allocation and limit updates via API.
 
 Use `--dry-run` to compute and display changes without applying them.
 
@@ -276,7 +309,7 @@ This means you can safely manage a subset of an account's instances with qauvern
 # 1. Generate initial configuration from your account
 qauvern configure --account-id your-account-id --plan premium --output config.yaml
 
-# 2. Edit config.yaml to edit instance allocations
+# 2. Edit config.yaml to customize limits, net_grants, and other config like `allocation_reserve_percent`.
 
 # 3. Check current status
 qauvern show --config config.yaml
@@ -288,11 +321,13 @@ qauvern analyze --config config.yaml
 qauvern optimize --config config.yaml
 ```
 
+After the initial setup, run `qauvern update --config config.yaml` periodically to keep the config in sync with the live API (new instances, renames, archived instances, expired net_grants).
+
 ### Continuous Optimization
 
 Run the optimizer periodically (e.g., weekly) to maintain optimal allocations:
 
 ```bash
-# Add to crontab for weekly optimization
-0 0 * * 0 qauvern optimize --config /path/to/config.yaml --yes
+# Preview what would change — safe to run in automation
+qauvern optimize --config /path/to/config.yaml --dry-run
 ```

@@ -21,7 +21,7 @@ For clients that have a large number of instances, the easy thing to do is alloc
 
 `qauvern` only operates on the instances listed in the config file. Any other instance on the same account+plan is **unconfigured** and is left exactly as-is — its allocation and limit are never touched. The optimizer still subtracts unconfigured allocation from the account budget when deciding how much to redistribute, so it never overcommits the cap.
 
-The config file is generated once with `configure` and is expected to be checked into version control. Drift between the file and the live API (instances added, archived, renamed; net grants expiring) is reconciled with `update`, which mutates the YAML in place via `ruamel.yaml` round-trip mode so user comments and unrelated customizations survive. By default `update` performs all four reconciliations (drop expired net grants, add discovered instances, fix names, remove archived/missing); each can be opted out individually with a `--no-*` flag, and `--region` restricts additions and renames to a single region.
+The config file is generated once with `configure` and is expected to be checked into version control. Drift between the file and the live API (instances added, archived, renamed; net grants expiring) is reconciled with `update`.
 
 ## Core load balancing algorithm
 

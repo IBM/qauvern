@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 
-- New `update` command reconciles an existing config file with the live IBM Quantum API. It drops expired `net_grants`, adds newly discovered instances, fixes instance name drift, and removes archived/missing instances. All four actions are run by default, but can be opted out with `--no-net-grants`, `--no-add`, `--no-names`, or `--no-remove`. Use `--dry-run` to preview, and `--region` to restrict additions/renames to a single region.
+- New `update` command reconciles an existing config file with the live IBM Quantum API. It drops expired `net_grants`, adds newly discovered instances, fixes instance name drift, and removes archived/missing instances. All four actions are run by default, but can be opted out with `--no-net-grants`, `--no-add`, `--no-names`, or `--no-remove`. Use `--dry-run` to preview, and `--region` to restric to a single region.
 
 ## Changed
 

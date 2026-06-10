@@ -15,9 +15,8 @@ from typing import Any, Literal
 
 from ruamel.yaml import YAML
 
-from ..config import ConfigParser, parse_net_grant_dates
+from ..config import parse_net_grant_dates
 from ..models import DiscoveredInstance, DiscoveredInstances
-from ..plan import Plan, plan_from_name
 
 
 @dataclass(frozen=True)
@@ -209,38 +208,14 @@ def _make_yaml() -> YAML:
     return yaml_rt
 
 
-@dataclass(frozen=True)
-class LoadedConfig:
-    doc: Any
-    account_id: str
-    plan: Plan
-
-
-def load_config_doc(config_path: Path) -> LoadedConfig:
-    """Load a YAML config in round-trip mode, returning the doc + key fields.
-
-    Bypasses `ConfigParser` because `update` is meant to fix exactly the
-    drift that would cause `ConfigParser` to raise. We still need
-    `account_id`` and `plan` to call the API, so pull them directly.
-    """
+def load_config_doc(config_path: Path) -> Any:
+    """Load a YAML config in round-trip mode for in-place mutation."""
     yaml_rt = _make_yaml()
     with open(config_path) as f:
-        doc = yaml_rt.load(f)
-    if doc is None or "account_id" not in doc or "plan" not in doc:
-        raise ValueError(f"Config file {config_path} is missing required fields (account_id, plan)")
-    return LoadedConfig(doc=doc, account_id=doc["account_id"], plan=plan_from_name(doc["plan"]))
+        return yaml_rt.load(f)
 
 
 def write_config_doc(config_path: Path, doc: Any) -> None:
     yaml_rt = _make_yaml()
     with open(config_path, "w") as f:
         yaml_rt.dump(doc, f)
-
-
-def validate_written_config(config_path: Path) -> str | None:
-    """Re-parse the written file with ``ConfigParser``. Return any error message."""
-    try:
-        ConfigParser(str(config_path))
-    except Exception as e:
-        return str(e)
-    return None
