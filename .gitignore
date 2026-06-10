@@ -71,7 +71,6 @@ Thumbs.db
 
 # Local config
 .envrc
-CLAUDE.md
 docs/superpowers/
 
 # Project specific
