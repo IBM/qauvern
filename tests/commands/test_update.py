@@ -269,7 +269,6 @@ instances:
     assert doc["instances"][0]["net_grants"][0]["net_grant_seconds"] == 1000
 
 
-
 def test_round_trip_preserves_comments_and_unrelated_keys() -> None:
     text = (
         BASE_HEADER
