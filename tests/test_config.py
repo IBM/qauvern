@@ -628,7 +628,9 @@ def test_validate_instances_against_api_raises_on_unrecognized_crn() -> None:
         with pytest.raises(ValueError) as excinfo:
             parser.validate_instances_against_api(client.discover_instances("acc-1"))
         assert str(excinfo.value) == (
-            "Config file contains instances not found in account acc-1 on plan internal:\n  - Project B, crn:test:2"
+            "Config file contains instances not found in account acc-1 on plan internal:\n"
+            "  - Project B, crn:test:2\n"
+            "(run `qauvern update` to fix automatically)"
         )
     finally:
         os.unlink(path)

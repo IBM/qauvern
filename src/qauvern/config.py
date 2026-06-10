@@ -26,6 +26,17 @@ def parse_utc_datetime(s: str, *, provenance: str) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def parse_net_grant_dates(grant: dict, *, provenance: str) -> tuple[datetime, datetime]:
+    """Parse a net-grant's start/end dates, defaulting end to start + 28 days."""
+    start = parse_utc_datetime(grant["start_date"], provenance=f"{provenance}.start_date")
+    end = (
+        parse_utc_datetime(grant["end_date"], provenance=f"{provenance}.end_date")
+        if "end_date" in grant
+        else start + timedelta(days=28)
+    )
+    return start, end
+
+
 class ConfigParser:
     """Parser for YAML configuration files."""
 
@@ -115,12 +126,7 @@ class ConfigParser:
             net_grants = []
             for i, grant_data in enumerate(entry.get("net_grants", [])):
                 grant_provenance = f"instances[{inst}].net_grants[{i}]"
-                grant_start = parse_utc_datetime(grant_data["start_date"], provenance=f"{grant_provenance}.start_date")
-                grant_end = (
-                    parse_utc_datetime(grant_data["end_date"], provenance=f"{grant_provenance}.end_date")
-                    if "end_date" in grant_data
-                    else grant_start + timedelta(days=28)
-                )
+                grant_start, grant_end = parse_net_grant_dates(grant_data, provenance=grant_provenance)
                 if grant_end <= grant_start:
                     raise ValueError(f"{grant_provenance}: end_date must be after start_date")
                 if grant_data["net_grant_seconds"] <= 0:
@@ -169,11 +175,14 @@ class ConfigParser:
             bullets = "\n".join(f"  - {cfg.name}, {cfg.crn}" for cfg in unrecognized)
             errors.append(
                 f"Config file contains instances not found in account "
-                f"{self.account_id} on plan {self.plan.value}:\n{bullets}"
+                f"{self.account_id} on plan {self.plan.value}:\n{bullets}\n"
+                "(run `qauvern update` to fix automatically)"
             )
         if archived:
             bullets = "\n".join(f"  - {cfg.name}, {cfg.crn}" for cfg in archived)
-            errors.append(f"Config file contains archived instances:\n{bullets}")
+            errors.append(
+                f"Config file contains archived instances:\n{bullets}\n(run `qauvern update` to fix automatically)"
+            )
         if errors:
             raise ValueError("\n\n".join(errors))
 

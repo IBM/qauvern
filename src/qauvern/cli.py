@@ -21,9 +21,15 @@ import click
 from tabulate import tabulate
 
 from .api_client import IBMQuantumAPIClient
-from .config import parse_utc_datetime
 from .commands.configure import build_configure_yaml
-from .config import ConfigParser
+from .commands.update import (
+    UpdateActions,
+    compute_update,
+    format_update_summary,
+    load_config_doc,
+    write_config_doc,
+)
+from .config import ConfigParser, parse_utc_datetime
 from .formatting import (
     format_instance_analysis_table,
     format_instance_summary_table,
@@ -649,6 +655,73 @@ def configure(
     click.echo("2. Run `qauvern show` or `qauvern instances` for usage information (`show` requires admin permissions)")
     click.echo("3. Run 'qauvern analyze' to see optimization recommendations")
     click.echo("4. Run 'qauvern optimize' to apply optimizations")
+
+
+@main.command()
+@config_option
+@api_key_option
+@region_option
+@click.option("--dry-run", is_flag=True, help="Show what would change without writing the file")
+@click.option("--no-net-grants", is_flag=True, help="Skip dropping expired net_grants")
+@click.option("--no-add", is_flag=True, help="Skip adding newly discovered instances")
+@click.option("--no-names", is_flag=True, help="Skip fixing instance name drift")
+@click.option("--no-remove", is_flag=True, help="Skip removing archived/missing instances")
+@click.pass_context
+@handle_errors
+def update(
+    ctx,
+    config: str,
+    api_key: str | None,
+    region: Region | None,
+    dry_run: bool,
+    no_net_grants: bool,
+    no_add: bool,
+    no_names: bool,
+    no_remove: bool,
+):
+    """Reconcile a configuration file with the live IBM Quantum API.
+
+    Drops expired `net_grants`, adds newly discovered instances, fixes
+    instance name drift, and removes archived or missing instances. Each
+    action runs by default; use the `--no-*` flags to opt out.
+
+    Comments and customizations in the YAML (custom dates, `limit_seconds`,
+    `allocation_reserve_percent`, etc.) are preserved.
+    """
+    config_path = Path(config)
+    config_parser = ConfigParser(config)
+
+    click.echo(
+        f"Connecting to IBM Quantum API for account {config_parser.account_id} (plan: {config_parser.plan.value})..."
+    )
+    client = _build_client(ctx, api_key)
+
+    click.echo("Fetching instances...")
+    discovered = client.discover_instances(config_parser.account_id, config_parser.plan).filter_by_region(region)
+
+    actions = UpdateActions(
+        expire_net_grants=not no_net_grants,
+        add_instances=not no_add,
+        fix_names=not no_names,
+        remove_instances=not no_remove,
+    )
+
+    doc = load_config_doc(config_path)
+    summary = compute_update(doc, discovered, now=datetime.now(tz=timezone.utc), actions=actions)
+
+    click.echo("\n" + format_update_summary(summary))
+
+    if summary.is_empty:
+        click.echo("\n✓ Config is already up to date.")
+        return
+
+    if dry_run:
+        click.echo("\nDry run — no changes written.")
+        return
+
+    click.confirm(f"\nApply these changes to {config_path}?", abort=True)
+    write_config_doc(config_path, doc)
+    click.echo(f"\n✓ Updated {config_path}")
 
 
 @main.command()
