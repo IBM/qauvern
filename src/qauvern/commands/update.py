@@ -8,28 +8,21 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Pure helpers for the `qauvern update` command.
-
-Reconcile a YAML configuration document against the live API, mutating the
-document in place and returning a structured summary of the changes.
-
-The document is a `ruamel.yaml` round-trip mapping so that user comments,
-field ordering, and unrelated keys (e.g. ``allocation_reserve_percent``,
-per-instance ``start_date``/``end_date``) survive the rewrite.
-"""
-
-from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
-from ..config import parse_utc_datetime
+from ruamel.yaml import YAML
+
+from ..config import ConfigParser, parse_net_grant_dates
 from ..models import DiscoveredInstance, DiscoveredInstances
-from ..region import Region, extract_region_from_crn
+from ..plan import Plan, plan_from_name
 
 
 @dataclass(frozen=True)
 class UpdateActions:
-    """Which reconciliation actions to perform. Each defaults to True."""
+    """Which reconciliation actions to perform."""
 
     expire_net_grants: bool = True
     add_instances: bool = True
@@ -59,28 +52,19 @@ class RemovedInstance:
     reason: Literal["archived", "missing"]
 
 
-@dataclass(frozen=True)
+@dataclass
 class UpdateSummary:
-    expired_net_grants: tuple[ExpiredGrant, ...] = ()
-    added_instances: tuple[DiscoveredInstance, ...] = ()
-    renamed_instances: tuple[InstanceRename, ...] = ()
-    removed_instances: tuple[RemovedInstance, ...] = ()
+    expired_net_grants: list[ExpiredGrant] = field(default_factory=list)
+    added_instances: list[DiscoveredInstance] = field(default_factory=list)
+    renamed_instances: list[InstanceRename] = field(default_factory=list)
+    removed_instances: list[RemovedInstance] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
         return not (self.expired_net_grants or self.added_instances or self.renamed_instances or self.removed_instances)
 
 
-def _grant_end_date(grant: dict, *, provenance: str) -> datetime:
-    """Mirror ``ConfigParser.instance_configs`` net-grant end-date defaulting."""
-    if "end_date" in grant:
-        return parse_utc_datetime(grant["end_date"], provenance=f"{provenance}.end_date")
-    start = parse_utc_datetime(grant["start_date"], provenance=f"{provenance}.start_date")
-    return start + timedelta(days=28)
-
-
-def _expire_net_grants(doc_instances: list, now: datetime) -> list[ExpiredGrant]:
-    expired: list[ExpiredGrant] = []
+def _expire_net_grants(doc_instances: list, now: datetime, summary: UpdateSummary) -> None:
     for entry in doc_instances:
         grants = entry.get("net_grants")
         if not grants:
@@ -88,13 +72,13 @@ def _expire_net_grants(doc_instances: list, now: datetime) -> list[ExpiredGrant]
         kept = []
         for i, grant in enumerate(grants):
             provenance = f"instances[{entry.get('name', '?')}].net_grants[{i}]"
-            end_date = _grant_end_date(grant, provenance=provenance)
+            start_date, end_date = parse_net_grant_dates(grant, provenance=provenance)
             if end_date <= now:
-                expired.append(
+                summary.expired_net_grants.append(
                     ExpiredGrant(
                         instance_name=entry.get("name", ""),
                         crn=entry.get("crn", ""),
-                        start_date=parse_utc_datetime(grant["start_date"], provenance=f"{provenance}.start_date"),
+                        start_date=start_date,
                         end_date=end_date,
                     )
                 )
@@ -104,43 +88,34 @@ def _expire_net_grants(doc_instances: list, now: datetime) -> list[ExpiredGrant]
             del entry["net_grants"]
         elif len(kept) != len(grants):
             entry["net_grants"] = kept
-    return expired
 
 
-def _remove_instances(doc_instances: list, archived_crns: set[str], known_crns: set[str]) -> list[RemovedInstance]:
-    removed: list[RemovedInstance] = []
+def _remove_instances(
+    doc_instances: list, archived_crns: set[str], known_crns: set[str], summary: UpdateSummary
+) -> None:
     survivors = []
     for entry in doc_instances:
         crn = entry.get("crn", "")
         name = entry.get("name", "")
         if crn in archived_crns:
-            removed.append(RemovedInstance(crn=crn, name=name, reason="archived"))
+            summary.removed_instances.append(RemovedInstance(crn=crn, name=name, reason="archived"))
         elif crn not in known_crns:
-            removed.append(RemovedInstance(crn=crn, name=name, reason="missing"))
+            summary.removed_instances.append(RemovedInstance(crn=crn, name=name, reason="missing"))
         else:
             survivors.append(entry)
     doc_instances[:] = survivors
-    return removed
 
 
-def _fix_names(
-    doc_instances: list,
-    active_by_crn: dict[str, str],
-    region: Region | None,
-) -> list[InstanceRename]:
-    renames: list[InstanceRename] = []
+def _fix_names(doc_instances: list, active_by_crn: dict[str, str], summary: UpdateSummary) -> None:
     for entry in doc_instances:
         crn = entry.get("crn", "")
         if crn not in active_by_crn:
             continue
-        if region is not None and extract_region_from_crn(crn) != region:
-            continue
         api_name = active_by_crn[crn]
         old_name = entry.get("name", "")
         if api_name != old_name:
-            renames.append(InstanceRename(crn=crn, old_name=old_name, new_name=api_name))
+            summary.renamed_instances.append(InstanceRename(crn=crn, old_name=old_name, new_name=api_name))
             entry["name"] = api_name
-    return renames
 
 
 def _new_instance_entry(inst: DiscoveredInstance, fallback_name: str) -> dict[str, Any]:
@@ -153,22 +128,14 @@ def _new_instance_entry(inst: DiscoveredInstance, fallback_name: str) -> dict[st
     return entry
 
 
-def _add_instances(
-    doc_instances: list,
-    active: tuple[DiscoveredInstance, ...],
-    region: Region | None,
-) -> list[DiscoveredInstance]:
+def _add_instances(doc_instances: list, active: tuple[DiscoveredInstance, ...], summary: UpdateSummary) -> None:
     existing_crns = {entry.get("crn", "") for entry in doc_instances}
-    candidates = [
-        inst
-        for inst in active
-        if inst.crn not in existing_crns and (region is None or extract_region_from_crn(inst.crn) == region)
-    ]
+    candidates = [inst for inst in active if inst.crn not in existing_crns]
     sorted_candidates = sorted(candidates, key=lambda x: (x.name == "", x.name))
     start_index = len(doc_instances) + 1
     for offset, inst in enumerate(sorted_candidates):
         doc_instances.append(_new_instance_entry(inst, fallback_name=f"Instance {start_index + offset}"))
-    return sorted_candidates
+    summary.added_instances.extend(sorted_candidates)
 
 
 def compute_update(
@@ -176,19 +143,11 @@ def compute_update(
     discovered: DiscoveredInstances,
     *,
     now: datetime,
-    region: Region | None = None,
     actions: UpdateActions = UpdateActions(),
 ) -> UpdateSummary:
     """Reconcile a config document against the discovered API state in place.
 
-    ``doc`` is mutated; the returned summary describes what changed. The
-    function does not perform I/O or call the API. Use ``ruamel.yaml`` (round-trip
-    mode) to load the document so user comments are preserved.
-
-    The ``region`` filter restricts *additions* and *renames* to instances in
-    that region. Existing config entries are still subject to expiration and
-    removal regardless of region — otherwise ``--region us-east`` would
-    silently leave behind stale entries from other regions.
+    `doc` is mutated; the returned summary describes what changed.
     """
     doc_instances = doc.get("instances")
     if doc_instances is None:
@@ -199,24 +158,89 @@ def compute_update(
     if actions.remove_instances:
         archived_crns = {d.crn for d in discovered.archived}
         known_crns = archived_crns | {d.crn for d in discovered.active}
-        removed = _remove_instances(doc_instances, archived_crns, known_crns)
-        summary = _replace_summary(summary, removed_instances=tuple(removed))
+        _remove_instances(doc_instances, archived_crns, known_crns, summary)
 
     if actions.expire_net_grants:
-        expired = _expire_net_grants(doc_instances, now)
-        summary = _replace_summary(summary, expired_net_grants=tuple(expired))
+        _expire_net_grants(doc_instances, now, summary)
 
     if actions.fix_names:
         active_by_crn = {d.crn: d.name for d in discovered.active}
-        renames = _fix_names(doc_instances, active_by_crn, region)
-        summary = _replace_summary(summary, renamed_instances=tuple(renames))
+        _fix_names(doc_instances, active_by_crn, summary)
 
     if actions.add_instances:
-        added = _add_instances(doc_instances, discovered.active, region)
-        summary = _replace_summary(summary, added_instances=tuple(added))
+        _add_instances(doc_instances, discovered.active, summary)
 
     return summary
 
 
-def _replace_summary(summary: UpdateSummary, **changes: Any) -> UpdateSummary:
-    return replace(summary, **changes)
+def format_update_summary(summary: UpdateSummary) -> str:
+    """Render an `UpdateSummary` as a human-readable multi-line string."""
+    if summary.is_empty:
+        return "No changes needed."
+
+    lines = ["Planned changes:"]
+
+    if summary.removed_instances:
+        lines.append(f"  Remove ({len(summary.removed_instances)}):")
+        for r in summary.removed_instances:
+            lines.append(f"    - {r.name or '(unnamed)'} [{r.reason}] ({r.crn})")
+
+    if summary.expired_net_grants:
+        lines.append(f"  Expired net_grants ({len(summary.expired_net_grants)}):")
+        for g in summary.expired_net_grants:
+            lines.append(f"    - {g.instance_name or '(unnamed)'}: {g.start_date.date()} → {g.end_date.date()}")
+
+    if summary.renamed_instances:
+        lines.append(f"  Rename ({len(summary.renamed_instances)}):")
+        for rn in summary.renamed_instances:
+            lines.append(f'    - "{rn.old_name}" → "{rn.new_name}" ({rn.crn})')
+
+    if summary.added_instances:
+        lines.append(f"  Add ({len(summary.added_instances)}):")
+        for a in summary.added_instances:
+            lines.append(f"    - {a.name or '(unnamed)'} ({a.crn})")
+
+    return "\n".join(lines)
+
+
+def _make_yaml() -> YAML:
+    yaml_rt = YAML(typ="rt")
+    yaml_rt.preserve_quotes = True
+    return yaml_rt
+
+
+@dataclass(frozen=True)
+class LoadedConfig:
+    doc: Any
+    account_id: str
+    plan: Plan
+
+
+def load_config_doc(config_path: Path) -> LoadedConfig:
+    """Load a YAML config in round-trip mode, returning the doc + key fields.
+
+    Bypasses `ConfigParser` because `update` is meant to fix exactly the
+    drift that would cause `ConfigParser` to raise. We still need
+    `account_id`` and `plan` to call the API, so pull them directly.
+    """
+    yaml_rt = _make_yaml()
+    with open(config_path) as f:
+        doc = yaml_rt.load(f)
+    if doc is None or "account_id" not in doc or "plan" not in doc:
+        raise ValueError(f"Config file {config_path} is missing required fields (account_id, plan)")
+    return LoadedConfig(doc=doc, account_id=doc["account_id"], plan=plan_from_name(doc["plan"]))
+
+
+def write_config_doc(config_path: Path, doc: Any) -> None:
+    yaml_rt = _make_yaml()
+    with open(config_path, "w") as f:
+        yaml_rt.dump(doc, f)
+
+
+def validate_written_config(config_path: Path) -> str | None:
+    """Re-parse the written file with ``ConfigParser``. Return any error message."""
+    try:
+        ConfigParser(str(config_path))
+    except Exception as e:
+        return str(e)
+    return None

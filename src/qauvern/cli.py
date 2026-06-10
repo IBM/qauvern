@@ -23,7 +23,14 @@ from tabulate import tabulate
 from .api_client import IBMQuantumAPIClient
 from .config import parse_utc_datetime
 from .commands.configure import build_configure_yaml
-from .commands.update import UpdateActions, UpdateSummary, compute_update
+from .commands.update import (
+    UpdateActions,
+    compute_update,
+    format_update_summary,
+    load_config_doc,
+    validate_written_config,
+    write_config_doc,
+)
 from .config import ConfigParser
 from .formatting import (
     format_instance_analysis_table,
@@ -683,26 +690,14 @@ def update(
     Comments and customizations in the YAML (custom dates, ``limit_seconds``,
     ``allocation_reserve_percent``, etc.) are preserved.
     """
-    from ruamel.yaml import YAML
-
-    yaml_rt = YAML(typ="rt")
-    yaml_rt.preserve_quotes = True
-
     config_path = Path(config)
-    with open(config_path) as f:
-        doc = yaml_rt.load(f)
+    loaded = load_config_doc(config_path)
 
-    if doc is None or "account_id" not in doc or "plan" not in doc:
-        raise click.ClickException(f"Config file {config} is missing required fields (account_id, plan)")
-
-    account_id = doc["account_id"]
-    plan = plan_from_name(doc["plan"])
-
-    click.echo(f"Connecting to IBM Quantum API for account {account_id} (plan: {plan.value})...")
+    click.echo(f"Connecting to IBM Quantum API for account {loaded.account_id} (plan: {loaded.plan.value})...")
     client = _build_client(ctx, api_key)
 
     click.echo("Fetching instances...")
-    discovered = client.discover_instances(account_id, plan).filter_by_region(region)
+    discovered = client.discover_instances(loaded.account_id, loaded.plan).filter_by_region(region)
 
     actions = UpdateActions(
         expire_net_grants=not no_net_grants,
@@ -711,15 +706,9 @@ def update(
         remove_instances=not no_remove,
     )
 
-    summary = compute_update(
-        doc,
-        discovered,
-        now=datetime.now(tz=timezone.utc),
-        region=region,
-        actions=actions,
-    )
+    summary = compute_update(loaded.doc, discovered, now=datetime.now(tz=timezone.utc), actions=actions)
 
-    _print_update_summary(summary)
+    click.echo("\n" + format_update_summary(summary))
 
     if summary.is_empty:
         click.echo("\n✓ Config is already up to date.")
@@ -729,46 +718,16 @@ def update(
         click.echo("\nDry run — no changes written.")
         return
 
-    with open(config_path, "w") as f:
-        yaml_rt.dump(doc, f)
+    write_config_doc(config_path, loaded.doc)
     click.echo(f"\n✓ Updated {config_path}")
 
-    try:
-        ConfigParser(str(config_path))
-    except Exception as e:
+    parse_error = validate_written_config(config_path)
+    if parse_error is not None:
         click.echo(
-            f"\n⚠ Warning: the rewritten file failed to parse: {e}\n"
+            f"\n⚠ Warning: the rewritten file failed to parse: {parse_error}\n"
             "Inspect the file (e.g. `git diff`) and revert if needed.",
             err=True,
         )
-
-
-def _print_update_summary(summary: UpdateSummary) -> None:
-    if summary.is_empty:
-        click.echo("\nNo changes needed.")
-        return
-
-    click.echo("\nPlanned changes:")
-
-    if summary.removed_instances:
-        click.echo(f"  Remove ({len(summary.removed_instances)}):")
-        for r in summary.removed_instances:
-            click.echo(f"    - {r.name or '(unnamed)'} [{r.reason}] ({r.crn})")
-
-    if summary.expired_net_grants:
-        click.echo(f"  Expired net_grants ({len(summary.expired_net_grants)}):")
-        for g in summary.expired_net_grants:
-            click.echo(f"    - {g.instance_name or '(unnamed)'}: {g.start_date.date()} → {g.end_date.date()}")
-
-    if summary.renamed_instances:
-        click.echo(f"  Rename ({len(summary.renamed_instances)}):")
-        for rn in summary.renamed_instances:
-            click.echo(f'    - "{rn.old_name}" → "{rn.new_name}" ({rn.crn})')
-
-    if summary.added_instances:
-        click.echo(f"  Add ({len(summary.added_instances)}):")
-        for a in summary.added_instances:
-            click.echo(f"    - {a.name or '(unnamed)'} ({a.crn})")
 
 
 @main.command()

@@ -23,7 +23,6 @@ from qauvern.cli import main
 from qauvern.commands.update import UpdateActions, compute_update
 from qauvern.config import ConfigParser
 from qauvern.models import DiscoveredInstance, DiscoveredInstances
-from qauvern.region import Region
 from tests.mock_api import MockIBMQuantumAPIClient
 
 
@@ -262,7 +261,13 @@ instances:
     assert doc["instances"][0]["net_grants"][0]["net_grant_seconds"] == 1000
 
 
-def test_region_filter_restricts_adds_and_renames_but_not_removes() -> None:
+def test_region_filtered_discovery_also_removes_other_region_entries() -> None:
+    """The CLI filters ``discovered`` by region before calling ``compute_update``.
+
+    Once filtered, an EU entry already in the config has no matching CRN in
+    ``discovered`` and is removed as ``missing`` — exactly what we want when a
+    user runs ``--region us-east``: stale eu-de entries get cleaned up too.
+    """
     text = (
         BASE_HEADER
         + f"""\
@@ -276,7 +281,6 @@ instances:
         doc,
         _discovered(active=(_disc(US_CRN_A, "US A"),)),
         now=datetime(2026, 5, 1, tzinfo=timezone.utc),
-        region=Region.US_EAST,
     )
     crns = [entry["crn"] for entry in doc["instances"]]
     assert crns == [US_CRN_A]
