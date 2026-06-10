@@ -21,7 +21,7 @@ import click
 from tabulate import tabulate
 
 from .api_client import IBMQuantumAPIClient
-from .commands.analyze import AnalyzeReport, format_analyze_table
+from .commands.analyze import AnalyzeReport, format_analyze_csv, format_analyze_table
 from .commands.configure import build_configure_yaml
 from .commands.update import (
     UpdateActions,
@@ -351,9 +351,17 @@ def instances(ctx, config: str, api_key: str | None):
 @main.command()
 @config_option
 @api_key_option
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "csv"], case_sensitive=False),
+    default="table",
+    show_default=True,
+    help="Output format. table (default, human-readable), csv (instances only).",
+)
 @click.pass_context
 @handle_errors
-def analyze(ctx, config: str, api_key: str | None):
+def analyze(ctx, config: str, api_key: str | None, output_format: str):
     """Analyze allocations and show optimization recommendations.
 
     Only instances listed in the config file are analyzed and modified.
@@ -387,7 +395,13 @@ def analyze(ctx, config: str, api_key: str | None):
     result = optimizer.optimize()
 
     report = AnalyzeReport.from_optimizer(account, result, plan, instance_configs, optimizer)
-    click.echo(format_analyze_table(report))
+    fmt = output_format.lower()
+    if fmt == "csv":
+        for error in report.validation_errors:
+            click.echo(f"Warning: {error}", err=True)
+        click.echo(format_analyze_csv(report), nl=False)
+    else:
+        click.echo(format_analyze_table(report))
 
 
 @main.command()

@@ -8,6 +8,8 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
+import csv
+import io
 from dataclasses import dataclass
 
 from tabulate import tabulate
@@ -16,6 +18,26 @@ from ..formatting import format_instance_analysis_table, format_reserve_summary,
 from ..models import Account, InstanceConfig, OptimizationResult
 from ..optimizer import AllocationOptimizer
 from ..plan import Plan
+
+CSV_COLUMNS: tuple[str, ...] = (
+    "name",
+    "crn",
+    "current_allocation",
+    "new_allocation",
+    "allocation_delta",
+    "allocation_reason",
+    "current_limit",
+    "new_limit",
+    "limit_delta",
+    "consumed_balance_period",
+    "consumed_28d",
+    "consumed_14d",
+    "consumed_7d",
+    "consumed_3d",
+    "consumed_24h",
+    "fairness",
+    "activity_score",
+)
 
 
 @dataclass(frozen=True)
@@ -117,3 +139,54 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         lines += ["", "✓ No optimization recommendations. Allocations are optimal."]
 
     return "\n".join(lines)
+
+
+def format_analyze_csv(report: AnalyzeReport) -> str:
+    """Render the report's per-instance rows as CSV.
+
+    Account-level info is intentionally omitted — CSV is a flat row-based
+    format, and consumers wanting account context should use `--format json`
+    or `--format table`. Validation errors, when present, are not encoded in
+    the CSV body (the CLI logs them to stderr instead).
+    """
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=list(CSV_COLUMNS), lineterminator="\n")
+    writer.writeheader()
+
+    alloc_map = report.result.allocation_changes
+    limit_map = report.result.limit_changes
+    for inst in report.account.instances:
+        alloc = alloc_map.get(inst.crn)
+        limit_rec = limit_map.get(inst.crn)
+
+        new_allocation = alloc.new if alloc is not None else inst.allocation_seconds
+        allocation_delta = new_allocation - inst.allocation_seconds
+
+        new_limit = limit_rec.new if limit_rec is not None else inst.limit_seconds
+        if limit_rec is not None and inst.limit_seconds is not None:
+            limit_delta: int | str = limit_rec.new - inst.limit_seconds
+        else:
+            limit_delta = ""
+
+        writer.writerow(
+            {
+                "name": inst.name,
+                "crn": inst.crn,
+                "current_allocation": inst.allocation_seconds,
+                "new_allocation": new_allocation,
+                "allocation_delta": allocation_delta,
+                "allocation_reason": alloc.reason if alloc is not None else "",
+                "current_limit": inst.limit_seconds if inst.limit_seconds is not None else "",
+                "new_limit": new_limit if new_limit is not None else "",
+                "limit_delta": limit_delta,
+                "consumed_balance_period": inst.usage.consumed_balance_period,
+                "consumed_28d": inst.consumed_seconds,
+                "consumed_14d": inst.usage.consumed_14day,
+                "consumed_7d": inst.usage.consumed_7day,
+                "consumed_3d": inst.usage.consumed_3day,
+                "consumed_24h": inst.usage.consumed_24h,
+                "fairness": f"{inst.fairness:.6f}",
+                "activity_score": f"{inst.activity_score:.6f}",
+            }
+        )
+    return buf.getvalue()

@@ -215,6 +215,14 @@ qauvern analyze --config config.yaml
 
 This command identifies underutilized instances, calculates optimal reallocations, and shows what changes would be made. The output includes a **Cur Limit** column (the live API value) and a **New Limit** column (what the optimizer would set). A `(+grant)` annotation indicates an active net grant is boosting the limit; `!` indicates the instance is in debt.
 
+Use `--format` to control the output. The default `table` is human-readable; `csv` emits one row per configured instance for scripting. `csv` writes the data to stdout and any validation errors as `Warning: ...` lines on stderr, so it pipes cleanly to a file:
+
+```bash
+qauvern analyze --config config.yaml --format csv > analysis.csv
+```
+
+Each CSV row carries the current allocation/limit, the new value (always set, even when unchanged, so it never reads as an unset), the delta, the change reason, and per-window usage. All durations are raw integer seconds.
+
 > **Scope:** `analyze` only considers instances listed in your config file. Allocation held by unconfigured instances on the same account+plan is left untouched, but it is counted against the account cap so the recommendations never overcommit. The summary block reports it on the `Held by unconfigured instances` line.
 
 #### Optimize Allocations
