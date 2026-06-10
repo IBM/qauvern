@@ -5,7 +5,7 @@ All notable changes to qauvern will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.0] - 2026-06-xx
+## [0.7.0] - 2026-06-10
 
 ## Added
 
@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - When an active instance hits its effective limit, the surplus from its proportional share is now redistributed to other active instances in proportion to activity score. Previously that surplus was silently dropped, leaving allocation on the table.
   - If every active instance is capped by limits, leftover capacity stays unallocated rather than being forced onto any instance — no more phantom overshoots.
 - Improved the error message for when `analyze` and `optimize` propose a plan that would exceed your account's allocation budget.
-- Revamp the output for better clarity, such as making more clear when an existing limit is unmodified.
+- Revamped the output for better clarity, such as making more clear when an existing limit is unmodified.
 - `minimum_allocation_seconds` is now a required field in the config file rather than an implicit 60-second default. `qauvern configure` still generates `60`, so freshly generated configs work unchanged; existing configs without the field will fail to load until you set it explicitly. This change is to make the default less surprising.
 
 ## [0.6.0] - 2026-06-08
