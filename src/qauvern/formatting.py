@@ -64,8 +64,7 @@ def format_reserve_summary(distributable_pool: int, reserve_percent: float) -> s
 def parse_seconds(value: str) -> int:
     """Parse a human-friendly time string into seconds.
 
-    Accepts plain integers (as seconds), suffixed values (10h, 30m, 2.5d, 96000s),
-    or QAU units (1qau = 96000 seconds).
+    Accepts plain integers (as seconds) or suffixed values (10h, 30m, 2.5d, 96000s).
     """
     value = value.strip().lower()
 
@@ -75,7 +74,6 @@ def parse_seconds(value: str) -> int:
         pass
 
     suffixes = {
-        "qau": 96000,
         "d": 86400,
         "h": 3600,
         "m": 60,
@@ -91,7 +89,7 @@ def parse_seconds(value: str) -> int:
                 pass
 
     raise click.BadParameter(
-        f"Cannot parse '{value}' as a time duration. Use plain seconds, or a suffix: 30m, 10h, 2.5d, 1qau"
+        f"Cannot parse '{value}' as a time duration. Use plain seconds, or a suffix: 30m, 10h, 2.5d"
     )
 
 

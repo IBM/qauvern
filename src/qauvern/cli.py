@@ -744,13 +744,13 @@ def update(
     "--allocation",
     "-a",
     default=None,
-    help="Initial allocation (e.g., 96000, 10h, 2.5d, 1qau)",
+    help="Initial allocation (e.g., 96000, 10h, 2.5d)",
 )
 @click.option(
     "--limit",
     "-l",
     default=None,
-    help="Instance limit (e.g., 96000, 10h, 2.5d, 1qau). Set after creation.",
+    help="Instance limit (e.g., 96000, 10h, 2.5d). Set after creation.",
 )
 @click.option(
     "--tag",

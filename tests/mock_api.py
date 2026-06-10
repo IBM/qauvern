@@ -218,7 +218,7 @@ def create_test_scenario_basic() -> MockIBMQuantumAPIClient:
     """
     client = MockIBMQuantumAPIClient()
 
-    # Setup account with 30 QAU = 30 * 1600 * 60 = 2,880,000 seconds
+    # Setup account with 2,880,000 seconds (800 hours)
     client.setup_account(account_id="test-account-123", allocation_budget_seconds=2880000)
 
     # Setup instances
@@ -269,7 +269,7 @@ def create_test_scenario_overallocated() -> MockIBMQuantumAPIClient:
     """
     client = MockIBMQuantumAPIClient()
 
-    # Setup account with 10 QAU = 960,000 seconds
+    # Setup account with 960,000 seconds (~267 hours)
     client.setup_account(account_id="test-account-456", allocation_budget_seconds=960000)
 
     # Setup instances with total allocation exceeding account

@@ -1,7 +1,7 @@
 # AGENTS.md
 
 This is a Python CLI tool for optimizing IBM Quantum resource allocations across cloud accounts,
-using fairness-based scheduling to rebalance QAU allocations among service instances. See
+using fairness-based scheduling to rebalance allocations among service instances. See
 `Design.md` for full architecture and algorithm details.
 
 ## Development Setup

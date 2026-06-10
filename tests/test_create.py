@@ -49,14 +49,6 @@ def test_fractional_hours() -> None:
     assert parse_seconds("1.5h") == 5400
 
 
-def test_qau() -> None:
-    assert parse_seconds("1qau") == 96000
-
-
-def test_fractional_qau() -> None:
-    assert parse_seconds("0.5qau") == 48000
-
-
 def test_case_insensitive() -> None:
     assert parse_seconds("10H") == 36000
 
