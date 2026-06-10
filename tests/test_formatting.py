@@ -120,7 +120,6 @@ def instance2() -> InstanceState:
 @pytest.fixture
 def alloc1(instance1: InstanceState) -> AllocationChange:
     return AllocationChange(
-        instance_crn=instance1.crn,
         current=1000,
         new=1500,
         reason="Increased usage detected",
@@ -130,7 +129,6 @@ def alloc1(instance1: InstanceState) -> AllocationChange:
 @pytest.fixture
 def alloc2(instance2: InstanceState) -> AllocationChange:
     return AllocationChange(
-        instance_crn=instance2.crn,
         current=2000,
         new=1000,
         reason="Reduced due to low activity",
@@ -140,7 +138,6 @@ def alloc2(instance2: InstanceState) -> AllocationChange:
 @pytest.fixture
 def limit1(instance1: InstanceState) -> LimitChange:
     return LimitChange(
-        instance_crn=instance1.crn,
         current=2000,
         new=3000,
         reason="Net grant active",
@@ -296,7 +293,7 @@ def test_analysis_limit_only_uses_limit_reason(
 
 def test_analysis_reason_truncation_at_60_chars(instance1: InstanceState) -> None:
     long_reason = "x" * 100
-    alloc = AllocationChange(instance_crn=instance1.crn, current=1000, new=1500, reason=long_reason)
+    alloc = AllocationChange(current=1000, new=1500, reason=long_reason)
     table_data, headers = format_instance_analysis_table([instance1], alloc_map={instance1.crn: alloc})
     reason_cell = table_data[0][headers.index("Reason")]
     assert reason_cell == "x" * 60
@@ -403,21 +400,21 @@ def test_optimize_table_limit_only_row_shows_real_allocation(instance1: Instance
 
 
 def test_allocation_change_delta() -> None:
-    assert AllocationChange(instance_crn="crn:test", current=1000, new=1500, reason="t").delta == 500
-    assert AllocationChange(instance_crn="crn:test", current=2000, new=1000, reason="t").delta == -1000
+    assert AllocationChange(current=1000, new=1500, reason="t").delta == 500
+    assert AllocationChange(current=2000, new=1000, reason="t").delta == -1000
 
 
 def test_result_partitions_by_delta_sign() -> None:
     result = OptimizationResult(
-        allocation_changes=(
-            AllocationChange(instance_crn="crn:1", current=2000, new=1000, reason="down"),
-            AllocationChange(instance_crn="crn:2", current=1000, new=2000, reason="up"),
-            AllocationChange(instance_crn="crn:3", current=1500, new=1500, reason="flat"),
-        ),
-        limit_changes=(),
+        allocation_changes={
+            "crn:1": AllocationChange(current=2000, new=1000, reason="down"),
+            "crn:2": AllocationChange(current=1000, new=2000, reason="up"),
+            "crn:3": AllocationChange(current=1500, new=1500, reason="flat"),
+        },
+        limit_changes={},
     )
-    assert [c.instance_crn for c in result.decreases] == ["crn:1"]
-    assert [c.instance_crn for c in result.increases] == ["crn:2"]
+    assert list(result.decreases) == ["crn:1"]
+    assert list(result.increases) == ["crn:2"]
 
 
 # -------------------------------------------------------------------

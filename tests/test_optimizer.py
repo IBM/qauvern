@@ -127,8 +127,7 @@ def _make_config(crn: str, *, name: str | None = None, target_limit_seconds: int
 
 def _projected(result: OptimizationResult, account: Account) -> dict[str, int]:
     """Return projected allocation per crn, applying any AllocationChange."""
-    chg = {c.instance_crn: c.new for c in result.allocation_changes}
-    return {inst.crn: chg.get(inst.crn, inst.allocation_seconds) for inst in account.instances}
+    return {inst.crn: result.allocation_changes[inst.crn].new if inst.crn in result.allocation_changes else inst.allocation_seconds for inst in account.instances}
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +141,7 @@ def test_validate_allocations_valid() -> None:
     account = _make_account(1000, _make_instance("crn:test:1", 100))
     cfg = _make_config("crn:test:1")
 
-    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult((), ()))
+    is_valid, errors = AllocationOptimizer(account, [cfg]).validate_allocations(OptimizationResult({}, {}))
 
     assert is_valid
     assert errors == []
@@ -154,7 +153,7 @@ def test_validate_allocations_catches_preexisting_violation() -> None:
     inst = _make_instance("crn:test:1", 50, consumed=100)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:test:1")])
 
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((), ()))
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({}, {}))
 
     assert not is_valid
     assert any("28-day usage" in e for e in errors)
@@ -166,13 +165,13 @@ def test_validate_allocations_uses_result_overrides() -> None:
     optimizer = AllocationOptimizer(account, [])
 
     # Current state is valid (4 <= 5).
-    is_valid, _ = optimizer.validate_allocations(OptimizationResult((), ()))
+    is_valid, _ = optimizer.validate_allocations(OptimizationResult({}, {}))
     assert is_valid
 
     # Bumping to 6 projects the total over the cap.
     over_cap = OptimizationResult(
-        allocation_changes=(AllocationChange(instance_crn="crn:test:1", current=4, new=6, reason="test"),),
-        limit_changes=(),
+        allocation_changes={"crn:test:1": AllocationChange(current=4, new=6, reason="test")},
+        limit_changes={},
     )
     is_valid, errors = optimizer.validate_allocations(over_cap)
     assert not is_valid
@@ -195,16 +194,16 @@ def test_validate_allocations_includes_unmanaged() -> None:
 
     # Bumping the loaded instance to 5 fits the cap exactly (5 + 5 unmanaged = 10).
     fits = OptimizationResult(
-        allocation_changes=(AllocationChange(instance_crn="crn:test:1", current=4, new=5, reason="test"),),
-        limit_changes=(),
+        allocation_changes={"crn:test:1": AllocationChange(current=4, new=5, reason="test")},
+        limit_changes={},
     )
     is_valid, errors = optimizer.validate_allocations(fits)
     assert is_valid, errors
 
     # Bumping to 6 overflows: 6 + 5 unmanaged > 10.
     over = OptimizationResult(
-        allocation_changes=(AllocationChange(instance_crn="crn:test:1", current=4, new=6, reason="test"),),
-        limit_changes=(),
+        allocation_changes={"crn:test:1": AllocationChange(current=4, new=6, reason="test")},
+        limit_changes={},
     )
     is_valid, errors = optimizer.validate_allocations(over)
     assert not is_valid
@@ -322,8 +321,8 @@ def test_validate_allocations_reserve_passes() -> None:
     # projected total = 820 ≤ 820 → valid
     inst = _make_instance("crn:a", 200, consumed=100)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], allocation_reserve_percent=20.0)
-    chg = AllocationChange(instance_crn="crn:a", current=200, new=820, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=200, new=820, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert is_valid, errors
 
 
@@ -332,8 +331,8 @@ def test_validate_allocations_reserve_violation() -> None:
     # same fixture; new=821 > effective_budget=820, but 821 ≤ 1000 so only reserve fires
     inst = _make_instance("crn:a", 200, consumed=100)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], allocation_reserve_percent=20.0)
-    chg = AllocationChange(instance_crn="crn:a", current=200, new=821, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=200, new=821, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert not is_valid
     assert any("reserve" in e for e in errors)
 
@@ -355,7 +354,7 @@ def test_validate_allocations_reserve_silent_when_no_pool() -> None:
         instances=(inst,),
     )
     optimizer = AllocationOptimizer(account, [_make_config("crn:a")], allocation_reserve_percent=50.0)
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((), ()))
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({}, {}))
     assert is_valid, errors
 
 
@@ -368,8 +367,8 @@ def test_validate_allocations_usage_floor_passes() -> None:
     """new_allocation equal to consumed_seconds passes invariant 3."""
     inst = _make_instance("crn:a", 200, consumed=100)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
-    chg = AllocationChange(instance_crn="crn:a", current=200, new=100, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=200, new=100, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert is_valid, errors
 
 
@@ -377,8 +376,8 @@ def test_validate_allocations_usage_floor_violation() -> None:
     """new allocation below consumed_seconds is rejected."""
     inst = _make_instance("crn:a", 200, consumed=150)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
-    chg = AllocationChange(instance_crn="crn:a", current=200, new=100, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=200, new=100, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert not is_valid
     assert any("28-day usage" in e for e in errors)
 
@@ -392,8 +391,8 @@ def test_validate_allocations_minimum_floor_passes() -> None:
     """new_allocation equal to minimum_allocation_seconds passes invariant 4."""
     inst = _make_instance("crn:a", 200)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], minimum_allocation_seconds=60)
-    chg = AllocationChange(instance_crn="crn:a", current=200, new=60, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=200, new=60, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert is_valid, errors
 
 
@@ -401,8 +400,8 @@ def test_validate_allocations_minimum_floor_violation() -> None:
     """new allocation below minimum_allocation_seconds is rejected."""
     inst = _make_instance("crn:a", 200)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], minimum_allocation_seconds=60)
-    chg = AllocationChange(instance_crn="crn:a", current=200, new=30, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=200, new=30, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert not is_valid
     assert any("minimum" in e for e in errors)
 
@@ -416,8 +415,8 @@ def test_validate_allocations_limit_ceiling_passes() -> None:
     """new_allocation at inst.limit_seconds passes invariant 5."""
     inst = _make_instance("crn:a", 200, limit=500)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
-    chg = AllocationChange(instance_crn="crn:a", current=200, new=500, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=200, new=500, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert is_valid, errors
 
 
@@ -425,8 +424,8 @@ def test_validate_allocations_limit_ceiling_violation() -> None:
     """new allocation above inst.limit_seconds is rejected."""
     inst = _make_instance("crn:a", 200, limit=500)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
-    chg = AllocationChange(instance_crn="crn:a", current=200, new=600, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=200, new=600, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert not is_valid
     assert any("effective limit" in e for e in errors)
 
@@ -436,9 +435,9 @@ def test_validate_allocations_new_limit_takes_precedence() -> None:
     inst = _make_instance("crn:a", 200, limit=500)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
     # limit_chg tightens the ceiling to 400; alloc_chg of 450 exceeds it
-    alloc_chg = AllocationChange(instance_crn="crn:a", current=200, new=450, reason="t")
-    limit_chg = LimitChange(instance_crn="crn:a", current=500, new=400, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((alloc_chg,), (limit_chg,)))
+    alloc_chg = AllocationChange(current=200, new=450, reason="t")
+    limit_chg = LimitChange(current=500, new=400, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": alloc_chg}, {"crn:a": limit_chg}))
     assert not is_valid
     assert any("effective limit" in e for e in errors)
 
@@ -451,8 +450,8 @@ def test_validate_allocations_consumed_floor_beats_limit_ceiling() -> None:
     """
     inst = _make_instance("crn:a", 600, consumed=600, limit=500)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
-    chg = AllocationChange(instance_crn="crn:a", current=600, new=600, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=600, new=600, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert is_valid, errors
 
 
@@ -461,8 +460,8 @@ def test_validate_allocations_gratuitous_breach_above_floor_still_fires() -> Non
     inst = _make_instance("crn:a", 600, consumed=600, limit=500)
     optimizer = AllocationOptimizer(_make_account(2000, inst), [_make_config("crn:a")])
     # consumed=600 forces a floor of 600; 700 exceeds both that floor and the limit.
-    chg = AllocationChange(instance_crn="crn:a", current=600, new=700, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=600, new=700, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert not is_valid
     assert any("effective limit" in e for e in errors)
 
@@ -476,8 +475,8 @@ def test_validate_allocations_no_archive_violation() -> None:
     """new_allocation == 0 is rejected regardless of minimum_allocation_seconds."""
     inst = _make_instance("crn:a", 200)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], minimum_allocation_seconds=0)
-    chg = AllocationChange(instance_crn="crn:a", current=200, new=0, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult((chg,), ()))
+    chg = AllocationChange(current=200, new=0, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert not is_valid
     assert any("archiving" in e for e in errors)
 
@@ -500,7 +499,7 @@ def test_inactive_with_excess_allocation_drops_to_minimum_floor() -> None:
     # inactive instance always has consumed_seconds=0 — any positive consumption
     # contributes to activity_score — so the inactive branch sources its floor
     # from minimum_allocation_seconds.)
-    assert "config minimum" in result.allocation_changes[0].reason
+    assert "config minimum" in result.allocation_changes["crn:a"].reason
 
 
 def test_inactive_below_minimum_floor_is_bumped_up() -> None:
@@ -684,7 +683,7 @@ def test_cap_uses_resolved_limit_not_stale_iqp_limit() -> None:
     # With the resolved limit (500), allocation grows to 500.
     assert projected["crn:a"] == 500
     # The LimitChange should also reflect the resolved limit.
-    limit_chg = next(c for c in result.limit_changes if c.instance_crn == "crn:a")
+    limit_chg = result.limit_changes["crn:a"]
     assert limit_chg.new == 500
 
 
@@ -709,7 +708,7 @@ def test_target_limit_emitted_as_limit_change_and_used_as_ceiling() -> None:
     projected = _projected(result, optimizer.account)
 
     assert projected["crn:a"] == 300
-    assert any(c.new == 300 for c in result.limit_changes)
+    assert any(c.new == 300 for c in result.limit_changes.values())
 
 
 def test_no_config_limit_means_no_ceiling_and_no_limit_change() -> None:
@@ -721,7 +720,7 @@ def test_no_config_limit_means_no_ceiling_and_no_limit_change() -> None:
     projected = _projected(result, optimizer.account)
 
     assert projected["crn:a"] == 5_000  # the entire pool flows to it
-    assert result.limit_changes == ()
+    assert not result.limit_changes
 
 
 # ---------------------------------------------------------------------------
@@ -769,8 +768,8 @@ def test_reserve_reduces_allocation_and_validator_agrees() -> None:
     with_reserve = AllocationOptimizer(account, [cfg], allocation_reserve_percent=20.0).optimize()
     without_reserve = AllocationOptimizer(account, [cfg], allocation_reserve_percent=0.0).optimize()
 
-    a_with = next(c.new for c in with_reserve.allocation_changes if c.instance_crn == "crn:a")
-    a_without = next(c.new for c in without_reserve.allocation_changes if c.instance_crn == "crn:a")
+    a_with = with_reserve.allocation_changes["crn:a"].new
+    a_without = without_reserve.allocation_changes["crn:a"].new
     assert a_with < a_without
 
     optimizer = AllocationOptimizer(account, [cfg], allocation_reserve_percent=20.0)
@@ -823,8 +822,8 @@ def test_reserve_preserves_headroom_for_unmanaged_instances() -> None:
     with_reserve_proj = _projected(with_reserve, account)["crn:m"]
 
     # Unmanaged is untouched in both runs.
-    assert "crn:u" not in {c.instance_crn for c in no_reserve.allocation_changes}
-    assert "crn:u" not in {c.instance_crn for c in with_reserve.allocation_changes}
+    assert "crn:u" not in no_reserve.allocation_changes
+    assert "crn:u" not in with_reserve.allocation_changes
     # Reserve leaves additional account-level headroom (managed claims less).
     assert with_reserve_proj < no_reserve_proj
     # Sanity: 50% reserve leaves at least ~half the redistributable pool unallocated.
@@ -847,7 +846,7 @@ def test_unmanaged_instances_are_ignored_by_optimizer() -> None:
     )
 
     result = optimizer.optimize()
-    crns_changed = {c.instance_crn for c in result.allocation_changes}
+    crns_changed = set(result.allocation_changes)
 
     assert "crn:u" not in crns_changed
     is_valid, errors = optimizer.validate_allocations(result)

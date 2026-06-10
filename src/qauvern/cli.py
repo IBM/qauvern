@@ -388,13 +388,10 @@ def analyze(ctx, config: str, api_key: str | None):
     click.echo("INSTANCE ANALYSIS")
     click.echo("=" * 80)
 
-    alloc_map = {c.instance_crn: c for c in result.allocation_changes}
-    limit_map = {c.instance_crn: c for c in result.limit_changes}
-
     table_data, headers = format_instance_analysis_table(
         account.instances,
-        alloc_map=alloc_map,
-        limit_map=limit_map,
+        alloc_map=result.allocation_changes,
+        limit_map=result.limit_changes,
     )
 
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
@@ -477,17 +474,15 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
 
     instance_map = {inst.crn: inst.name for inst in account.instances}
 
-    alloc_map = {c.instance_crn: c for c in result.allocation_changes}
-    limit_map = {c.instance_crn: c for c in result.limit_changes}
-    changed_crns = set(alloc_map) | set(limit_map)
+    changed_crns = set(result.allocation_changes) | set(result.limit_changes)
     changed_instances = sorted(
         (inst for inst in account.instances if inst.crn in changed_crns),
         key=lambda inst: inst.name,
     )
     rec_data, rec_headers = format_instance_analysis_table(
         changed_instances,
-        alloc_map=alloc_map,
-        limit_map=limit_map,
+        alloc_map=result.allocation_changes,
+        limit_map=result.limit_changes,
         include_usage=False,
     )
     click.echo(tabulate(rec_data, headers=rec_headers, tablefmt="grid"))
@@ -501,9 +496,9 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     success_count = 0
     error_count = 0
 
-    def _apply_allocation(chg: AllocationChange) -> None:
+    def _apply_allocation(crn: str, chg: AllocationChange) -> None:
         nonlocal success_count, error_count
-        instance_name = instance_map.get(chg.instance_crn, chg.instance_crn[:40] + "...")
+        instance_name = instance_map.get(crn, crn[:40] + "...")
         if len(instance_name) > 40:
             instance_name = instance_name[:37] + "..."
         delta = chg.delta
@@ -512,16 +507,16 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
             click.echo(
                 f"  Updating {instance_name}: {format_seconds(chg.current)} → {format_seconds(chg.new)} ({change_str})"
             )
-            client.update_instance_allocation(chg.instance_crn, chg.new)
+            client.update_instance_allocation(crn, chg.new)
             success_count += 1
             click.echo("    ✓ Success")
         except Exception as e:
             click.echo(f"    ❌ Failed: {e}", err=True)
             error_count += 1
 
-    def _apply_limit(chg: LimitChange) -> None:
+    def _apply_limit(crn: str, chg: LimitChange) -> None:
         nonlocal success_count, error_count
-        instance_name = instance_map.get(chg.instance_crn, chg.instance_crn[:40] + "...")
+        instance_name = instance_map.get(crn, crn[:40] + "...")
         if len(instance_name) > 40:
             instance_name = instance_name[:37] + "..."
         if chg.current is None:
@@ -532,19 +527,19 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
             )
         try:
             click.echo(f"  {transition}")
-            client.update_instance_limit(chg.instance_crn, chg.new)
+            client.update_instance_limit(crn, chg.new)
             success_count += 1
             click.echo("    ✓ Success")
         except Exception as e:
             click.echo(f"    ❌ Failed: {e}", err=True)
             error_count += 1
 
-    for chg in result.decreases:
-        _apply_allocation(chg)
-    for chg in result.limit_changes:
-        _apply_limit(chg)
-    for chg in result.increases:
-        _apply_allocation(chg)
+    for crn, chg in result.decreases.items():
+        _apply_allocation(crn, chg)
+    for crn, chg in result.limit_changes.items():
+        _apply_limit(crn, chg)
+    for crn, chg in result.increases.items():
+        _apply_allocation(crn, chg)
 
     click.echo(f"\n✓ Successfully updated {success_count} instances")
     if error_count > 0:
