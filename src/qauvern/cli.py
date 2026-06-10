@@ -21,7 +21,7 @@ import click
 from tabulate import tabulate
 
 from .api_client import IBMQuantumAPIClient
-from .commands.analyze import format_analyze_output
+from .commands.analyze import AnalyzeReport, format_analyze_table
 from .commands.configure import build_configure_yaml
 from .commands.update import (
     UpdateActions,
@@ -386,7 +386,8 @@ def analyze(ctx, config: str, api_key: str | None):
     )
     result = optimizer.optimize()
 
-    click.echo(format_analyze_output(account, result, plan, instance_configs, optimizer))
+    report = AnalyzeReport.from_optimizer(account, result, plan, instance_configs, optimizer)
+    click.echo(format_analyze_table(report))
 
 
 @main.command()

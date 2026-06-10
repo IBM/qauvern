@@ -8,7 +8,7 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Pure helper for the `qauvern analyze` command."""
+from dataclasses import dataclass
 
 from tabulate import tabulate
 
@@ -18,20 +18,51 @@ from ..optimizer import AllocationOptimizer
 from ..plan import Plan
 
 
-def format_analyze_output(
-    account: Account,
-    result: OptimizationResult,
-    plan: Plan,
-    instance_configs: list[InstanceConfig],
-    optimizer: AllocationOptimizer,
-) -> str:
-    """Return the full analyze command output as a single string."""
+@dataclass(frozen=True)
+class AnalyzeReport:
+    """Everything a formatter needs to render `analyze` output."""
+
+    plan: Plan
+    account: Account
+    result: OptimizationResult
+    instance_configs: tuple[InstanceConfig, ...]
+    validation_errors: tuple[str, ...]
+    allocation_reserve_percent: float
+    redistribution_pool_seconds: int
+
+    @classmethod
+    def from_optimizer(
+        cls,
+        account: Account,
+        result: OptimizationResult,
+        plan: Plan,
+        instance_configs: list[InstanceConfig],
+        optimizer: AllocationOptimizer,
+    ) -> "AnalyzeReport":
+        _, errors = optimizer.validate_allocations(result)
+        pool_seconds = 0
+        if optimizer.allocation_reserve_percent > 0:
+            pool_seconds, _ = optimizer.redistribution_pool()
+        return cls(
+            plan=plan,
+            account=account,
+            result=result,
+            instance_configs=tuple(instance_configs),
+            validation_errors=tuple(errors),
+            allocation_reserve_percent=optimizer.allocation_reserve_percent,
+            redistribution_pool_seconds=pool_seconds,
+        )
+
+
+def format_analyze_table(report: AnalyzeReport) -> str:
+    """Render the report as the human-readable table (default `--format table`)."""
+    account = report.account
+    result = report.result
     lines: list[str] = []
 
-    is_valid, errors = optimizer.validate_allocations(result)
-    if not is_valid:
+    if report.validation_errors:
         lines += ["", "=" * 80, "VALIDATION ERRORS", "=" * 80]
-        for error in errors:
+        for error in report.validation_errors:
             lines.append(f"❌ {error}")
 
     total_balance_consumed = sum(inst.usage.consumed_balance_period for inst in account.instances)
@@ -42,7 +73,7 @@ def format_analyze_output(
         "=" * 80,
         "ACCOUNT PLAN ALLOCATION SUMMARY",
         "=" * 80,
-        f"Plan: {plan.value}",
+        f"Plan: {report.plan.value}",
         f"Allocation budget: {format_seconds(account.allocation_budget_seconds)}",
         f"Unallocated: {format_seconds(account.unallocated_seconds)}",
         f"Consumed (Balance Period, configured): {format_seconds(total_balance_consumed)}",
@@ -55,13 +86,12 @@ def format_analyze_output(
             "(not modified; counted against cap)"
         )
 
-    if optimizer.allocation_reserve_percent > 0:
-        pool, _ = optimizer.redistribution_pool()
-        lines.append(format_reserve_summary(pool, optimizer.allocation_reserve_percent))
+    if report.allocation_reserve_percent > 0:
+        lines.append(format_reserve_summary(report.redistribution_pool_seconds, report.allocation_reserve_percent))
 
     lines += [
         f"Limit: {limit_str}",
-        f"Configured instances analyzed: {len(instance_configs)}",
+        f"Configured instances analyzed: {len(report.instance_configs)}",
         "",
         "=" * 80,
         "INSTANCE ANALYSIS",
