@@ -441,7 +441,7 @@ def test_validate_allocations_new_limit_takes_precedence() -> None:
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
     # limit_chg tightens the ceiling to 400; alloc_chg of 450 exceeds it
     alloc_chg = AllocationChange(current=200, new=450, reason="t")
-    limit_chg = LimitChange(current=500, new=400, reason="t")
+    limit_chg = LimitChange(current=500, new=400)
     is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": alloc_chg}, {"crn:a": limit_chg}))
     assert not is_valid
     assert any("effective limit" in e for e in errors)

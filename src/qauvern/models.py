@@ -189,7 +189,6 @@ class LimitChange:
 
     current: int | None
     new: int
-    reason: str
 
 
 @dataclass(frozen=True)
