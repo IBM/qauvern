@@ -21,6 +21,7 @@ import click
 from tabulate import tabulate
 
 from .api_client import IBMQuantumAPIClient
+from .commands.analyze import format_analyze_output
 from .commands.configure import build_configure_yaml
 from .commands.update import (
     UpdateActions,
@@ -368,76 +369,19 @@ def analyze(ctx, config: str, api_key: str | None):
     instance_states = _fetch_instance_states(client, session.configured_instances)
     account = client.get_account(account_id, plan, instance_states)
 
-    # Enrich instances with target usage and detailed usage data
     click.echo("Fetching usage data for different time periods...")
     enrich_instances_with_usage_data(account, instance_configs, client)
 
-    # Get minimum allocation from config
-    minimum_allocation_seconds = config_parser.minimum_allocation_seconds
-
-    # Run optimization analysis
     click.echo("Analyzing allocations...")
     optimizer = AllocationOptimizer(
         account,
         instance_configs,
-        minimum_allocation_seconds,
+        config_parser.minimum_allocation_seconds,
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
     )
     result = optimizer.optimize()
 
-    is_valid, errors = optimizer.validate_allocations(result)
-
-    if not is_valid:
-        click.echo("\n" + "=" * 80)
-        click.echo("VALIDATION ERRORS")
-        click.echo("=" * 80)
-        for error in errors:
-            click.echo(f"❌ {error}")
-
-    # Display account summary with target usage and percentage
-    click.echo("\n" + "=" * 80)
-    click.echo("ACCOUNT PLAN ALLOCATION SUMMARY")
-    click.echo("=" * 80)
-    click.echo(f"Plan: {plan.value}")
-    click.echo(f"Allocation budget: {format_seconds(account.allocation_budget_seconds)}")
-    click.echo(f"Unallocated: {format_seconds(account.unallocated_seconds)}")
-
-    total_balance_consumed = sum(inst.usage.consumed_balance_period for inst in account.instances)
-    click.echo(f"Consumed (Balance Period, configured): {format_seconds(total_balance_consumed)}")
-    click.echo(f"Consumed (28-day, configured): {format_seconds(account.consumed_seconds)}")
-    if account.unmanaged_allocation_seconds > 0:
-        click.echo(
-            f"Held by unconfigured instances: {format_seconds(account.unmanaged_allocation_seconds)} "
-            "(not modified; counted against cap)"
-        )
-    if config_parser.allocation_reserve_percent > 0:
-        pool, _ = optimizer.redistribution_pool()
-        click.echo(format_reserve_summary(pool, config_parser.allocation_reserve_percent))
-    limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
-    click.echo(f"Limit: {limit_str}")
-    click.echo(f"Configured instances analyzed: {len(instance_configs)}")
-
-    # Display instance analysis table (show ALL instances) using utility function
-    click.echo("\n" + "=" * 80)
-    click.echo("INSTANCE ANALYSIS")
-    click.echo("=" * 80)
-
-    table_data, headers = format_instance_analysis_table(
-        account.instances,
-        alloc_map=result.allocation_changes,
-        limit_map=result.limit_changes,
-    )
-
-    click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
-
-    total_changes = len(result.allocation_changes) + len(result.limit_changes)
-    if total_changes:
-        click.echo(
-            f"\nTotal changes: {total_changes} ({len(result.allocation_changes)} allocation, {len(result.limit_changes)} limit)"
-        )
-        click.echo("\nTo apply these recommendations, run: qauvern optimize")
-    else:
-        click.echo("\n✓ No optimization recommendations. Allocations are optimal.")
+    click.echo(format_analyze_output(account, result, plan, instance_configs, optimizer))
 
 
 @main.command()
