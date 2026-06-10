@@ -250,7 +250,8 @@ def show(ctx, config: str, api_key: str | None):
     client = session.client
 
     click.echo(
-        f"Fetching account information and {len(config_parser.instance_configs)} configured instances from {config}..."
+        f"Fetching account information and {len(config_parser.instance_configs)} configured instances from {config}...",
+        err=True,
     )
     instance_states = _fetch_instance_states(client, session.configured_instances)
     account = client.get_account(config_parser.account_id, config_parser.plan, instance_states)
@@ -306,7 +307,8 @@ def instances(ctx, config: str, api_key: str | None):
     client = session.client
 
     click.echo(
-        f"Fetching usage information for {len(config_parser.instance_configs)} configured instances from {config}"
+        f"Fetching usage information for {len(config_parser.instance_configs)} configured instances from {config}",
+        err=True,
     )
 
     instances_data = _fetch_instance_states(client, session.configured_instances)
@@ -365,14 +367,17 @@ def analyze(ctx, config: str, api_key: str | None):
     plan = config_parser.plan
     instance_configs = config_parser.instance_configs
 
-    click.echo(f"Fetching account information for {len(instance_configs)} configured instances on plan {plan.value}...")
+    click.echo(
+        f"Fetching account information for {len(instance_configs)} configured instances on plan {plan.value}...",
+        err=True,
+    )
     instance_states = _fetch_instance_states(client, session.configured_instances)
     account = client.get_account(account_id, plan, instance_states)
 
-    click.echo("Fetching usage data for different time periods...")
+    click.echo("Fetching usage data for different time periods...", err=True)
     enrich_instances_with_usage_data(account, instance_configs, client)
 
-    click.echo("Analyzing allocations...")
+    click.echo("Analyzing allocations...", err=True)
     optimizer = AllocationOptimizer(
         account,
         instance_configs,
@@ -409,7 +414,10 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
     plan = config_parser.plan
     instance_configs = config_parser.instance_configs
 
-    click.echo(f"Fetching account information for {len(instance_configs)} configured instances on plan {plan.value}...")
+    click.echo(
+        f"Fetching account information for {len(instance_configs)} configured instances on plan {plan.value}...",
+        err=True,
+    )
     instance_states = _fetch_instance_states(client, session.configured_instances)
     account = client.get_account(account_id, plan, instance_states)
 
@@ -420,7 +428,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
 
     # Run optimization
-    click.echo("Computing optimal allocations...")
+    click.echo("Computing optimal allocations...", err=True)
     optimizer = AllocationOptimizer(
         account,
         instance_configs,
@@ -574,10 +582,10 @@ def configure(
     Queries the IBM Quantum API to list instances in the specified account
     that belong to the given plan, then generates a YAML configuration file.
     """
-    click.echo(f"Connecting to IBM Quantum API for account {account_id} (plan: {plan.value})...")
+    click.echo(f"Connecting to IBM Quantum API for account {account_id} (plan: {plan.value})...", err=True)
     client = _build_client(ctx, api_key)
 
-    click.echo("Fetching instances...")
+    click.echo("Fetching instances...", err=True)
     discovered = client.discover_instances(account_id, plan).filter_by_region(region)
 
     if discovered.archived:
@@ -639,11 +647,12 @@ def update(
     config_parser = ConfigParser(config)
 
     click.echo(
-        f"Connecting to IBM Quantum API for account {config_parser.account_id} (plan: {config_parser.plan.value})..."
+        f"Connecting to IBM Quantum API for account {config_parser.account_id} (plan: {config_parser.plan.value})...",
+        err=True,
     )
     client = _build_client(ctx, api_key)
 
-    click.echo("Fetching instances...")
+    click.echo("Fetching instances...", err=True)
     discovered = client.discover_instances(config_parser.account_id, config_parser.plan).filter_by_region(region)
 
     actions = UpdateActions(
@@ -736,9 +745,9 @@ def create(
 
     client = _build_client(ctx, api_key)
 
-    click.echo(f"Creating instance '{name}' in {target} with plan {plan.value}...")
+    click.echo(f"Creating instance '{name}' in {target} with plan {plan.value}...", err=True)
     if allocation_seconds is not None:
-        click.echo(f"  Initial allocation: {format_seconds(allocation_seconds)}")
+        click.echo(f"  Initial allocation: {format_seconds(allocation_seconds)}", err=True)
 
     tags = list(tag) if tag else None
     result = client.create_instance(

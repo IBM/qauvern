@@ -30,6 +30,11 @@ Use `just run` to start the CLI, such as `just run --help`.
 
 All commits must be DCO signed-off. Use `git commit -s`.
 
+## CLI Output Rules
+
+Progress/log messages must use `click.echo(..., err=True)` so stdout stays clean for data output
+(e.g. JSON from `analyze --export`). Only final structured output goes to stdout.
+
 ## Key Prohibitions
 
 - Do not run `qauvern optimize` against a real account to verify behavior — use
