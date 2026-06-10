@@ -448,18 +448,16 @@ def analyze(ctx, config: str, api_key: str | None):
     is_flag=True,
     help="Show what would be changed without making actual changes",
 )
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (for automation)")
 @click.pass_context
 @handle_errors
-def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
+def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
     """Optimize instance allocations and apply changes for a specific plan.
 
     Only instances listed in the config file are modified. Allocation held
     by unmanaged instances is preserved and counted toward the account
     cap so we never overcommit.
     """
-    if not dry_run:
-        click.confirm("Are you sure you want to optimize allocations?", abort=True)
-
     session = _open_session(ctx, config, api_key)
     config_parser = session.config
     client = session.client
@@ -527,6 +525,9 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool):
     if dry_run:
         click.echo("\n[DRY RUN] No changes were made.")
         return
+
+    if not dry_run and not yes:
+        click.confirm("Apply these changes?", abort=True)
 
     # Apply in safe order: decreases first (free headroom), then limits, then increases
     click.echo("\nApplying changes...")
@@ -662,6 +663,7 @@ def configure(
 @api_key_option
 @region_option
 @click.option("--dry-run", is_flag=True, help="Show what would change without writing the file")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (for automation)")
 @click.option("--no-net-grants", is_flag=True, help="Skip dropping expired net_grants")
 @click.option("--no-add", is_flag=True, help="Skip adding newly discovered instances")
 @click.option("--no-names", is_flag=True, help="Skip fixing instance name drift")
@@ -674,6 +676,7 @@ def update(
     api_key: str | None,
     region: Region | None,
     dry_run: bool,
+    yes: bool,
     no_net_grants: bool,
     no_add: bool,
     no_names: bool,
@@ -719,7 +722,8 @@ def update(
         click.echo("\nDry run — no changes written.")
         return
 
-    click.confirm(f"\nApply these changes to {config_path}?", abort=True)
+    if not yes:
+        click.confirm(f"\nApply these changes to {config_path}?", abort=True)
     write_config_doc(config_path, doc)
     click.echo(f"\n✓ Updated {config_path}")
 

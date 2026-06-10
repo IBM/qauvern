@@ -179,6 +179,7 @@ Options:
 - `--api-key, -k`: IBM Cloud API key (or use `IBMCLOUD_API_KEY` env var)
 - `--region`: Limit discovery to a specific region, like `us-east` or `eu-de`.
 - `--dry-run`: Print planned changes without writing the file
+- `--yes, -y`: Skip the confirmation prompt (for automation)
 - `--no-net-grants`: Skip expiring `net_grants`
 - `--no-add`: Skip adding newly discovered instances
 - `--no-names`: Skip fixing instance name drift
@@ -231,7 +232,7 @@ This command will:
 3. Prompt for confirmation.
 4. Apply allocation and limit updates via API.
 
-Use `--dry-run` to compute and display changes without applying them.
+Use `--dry-run` to compute and display changes without applying them. Use `--yes` / `-y` to skip the confirmation prompt in automated pipelines.
 
 > **Scope:** Like `analyze`, `optimize` only modifies instances listed in your config file. Unconfigured instances keep their existing allocation and limit; their allocation is reserved against the account cap when computing the new distribution. To bring an instance under management, add it to the config (or regenerate via `qauvern configure`).
 
@@ -251,8 +252,8 @@ Options:
 - `--target, -t`: Deployment region (required, e.g., `us-east`, `eu-de`)
 - `--resource-group, -g`: IBM Cloud resource group ID (required)
 - `--plan, -p`: Plan name — `internal`, `premium`, or `paygo` (required)
-- `--allocation, -a`: Initial allocation (e.g., `96000`, `10h`, `2.5d`, `1qau`)
-- `--limit, -l`: Instance limit, set after creation (e.g., `10h`, `1qau`)
+- `--allocation, -a`: Initial allocation (e.g., `96000`, `10h`, `2.5d`)
+- `--limit, -l`: Instance limit, set after creation (e.g., `9600`, `10h`)
 - `--tag`: Tags to apply (repeatable)
 
 ### Staging Environment
@@ -273,7 +274,7 @@ The `--staging` flag is a global option and applies to all commands.
 
 For each managed instance, qauvern:
 
-1. **Resolves the effective limit** from `limit_seconds` and any active `net_grants`. This is the upper bound on the instance's allocation.
+1. **Resolves the effective limit** from `limit_seconds` and any active `net_grants` in the config file. If the config file does not set `limit_seconds` or `net_grants`, use the live limit in IBM Quantum Platform, if any. This is the upper bound on the instance's allocation.
 2. **Computes an activity score** by exponentially weighting recent usage (24h carries 16× the weight of 28d). Instances with no usage across all buckets get score 0 and are classified inactive.
 
 Then, account-wide:
@@ -329,6 +330,6 @@ After the initial setup, run `qauvern update --config config.yaml` periodically 
 Run the optimizer periodically (e.g., weekly) to maintain optimal allocations:
 
 ```bash
-# Preview what would change — safe to run in automation
-qauvern optimize --config /path/to/config.yaml --dry-run
+# Apply without a confirmation prompt — suitable for scheduled jobs or CI
+qauvern optimize --config /path/to/config.yaml --yes
 ```
