@@ -23,6 +23,7 @@ from qauvern.cli import main
 from qauvern.commands.update import (
     ExpiredGrant,
     InstanceRename,
+    LimitAdded,
     RemovedInstance,
     UpdateActions,
     UpdateSummary,
@@ -261,6 +262,7 @@ instances:
             add_instances=False,
             fix_names=False,
             remove_instances=False,
+            add_missing_limits=False,
         ),
     )
     assert summary.is_empty
@@ -297,6 +299,84 @@ instances:
     assert "2026-09-01" in output
 
 
+def test_add_missing_limits_pulls_in_live_limit_when_config_has_none() -> None:
+    text = (
+        BASE_HEADER
+        + f"""\
+instances:
+  - name: A
+    crn: '{US_CRN_A}'
+"""
+    )
+    doc = _load_yaml(text)
+    summary = compute_update(
+        doc,
+        _discovered(active=(_disc(US_CRN_A, "A", limit=42000),)),
+        now=datetime(2026, 5, 1, tzinfo=timezone.utc),
+    )
+    assert doc["instances"][0]["limit_seconds"] == 42000
+    assert [(la.crn, la.limit_seconds) for la in summary.added_limits] == [(US_CRN_A, 42000)]
+
+
+def test_add_missing_limits_does_not_overwrite_existing_limit() -> None:
+    text = (
+        BASE_HEADER
+        + f"""\
+instances:
+  - name: A
+    crn: '{US_CRN_A}'
+    limit_seconds: 50000
+"""
+    )
+    doc = _load_yaml(text)
+    summary = compute_update(
+        doc,
+        _discovered(active=(_disc(US_CRN_A, "A", limit=99999),)),
+        now=datetime(2026, 5, 1, tzinfo=timezone.utc),
+    )
+    assert doc["instances"][0]["limit_seconds"] == 50000
+    assert summary.added_limits == []
+
+
+def test_add_missing_limits_skips_when_live_has_no_limit() -> None:
+    text = (
+        BASE_HEADER
+        + f"""\
+instances:
+  - name: A
+    crn: '{US_CRN_A}'
+"""
+    )
+    doc = _load_yaml(text)
+    summary = compute_update(
+        doc,
+        _discovered(active=(_disc(US_CRN_A, "A", limit=None),)),
+        now=datetime(2026, 5, 1, tzinfo=timezone.utc),
+    )
+    assert "limit_seconds" not in doc["instances"][0]
+    assert summary.added_limits == []
+
+
+def test_add_missing_limits_can_be_disabled() -> None:
+    text = (
+        BASE_HEADER
+        + f"""\
+instances:
+  - name: A
+    crn: '{US_CRN_A}'
+"""
+    )
+    doc = _load_yaml(text)
+    summary = compute_update(
+        doc,
+        _discovered(active=(_disc(US_CRN_A, "A", limit=42000),)),
+        now=datetime(2026, 5, 1, tzinfo=timezone.utc),
+        actions=UpdateActions(add_missing_limits=False),
+    )
+    assert "limit_seconds" not in doc["instances"][0]
+    assert summary.added_limits == []
+
+
 def test_compute_update_raises_when_instances_missing() -> None:
     doc = _load_yaml(BASE_HEADER + "")
     with pytest.raises(ValueError, match="instances"):
@@ -325,6 +405,7 @@ def test_format_update_summary_all_sections() -> None:
         ],
         renamed_instances=[InstanceRename(crn=US_CRN_A, old_name="Old", new_name="New")],
         added_instances=[_disc(US_CRN_C, "Fresh")],
+        added_limits=[LimitAdded(crn=US_CRN_A, name="A", limit_seconds=42000)],
     )
     text = format_update_summary(summary)
     assert text.startswith("Planned changes:")
@@ -334,6 +415,8 @@ def test_format_update_summary_all_sections() -> None:
     assert "2026-01-01" in text and "2026-02-01" in text
     assert "Rename (1)" in text
     assert '"Old"' in text and '"New"' in text
+    assert "Add limit_seconds (1)" in text
+    assert "42000" in text
     assert "Add (1)" in text
     assert "Fresh" in text
 
@@ -523,6 +606,67 @@ instances:
     result = _invoke_update(runner, mock_client, ["--config", str(config_path), "--api-key", "k"], input="n\n")
     assert result.exit_code != 0
     assert config_path.read_text() == original
+
+
+def test_update_pulls_in_missing_limit(runner: CliRunner, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config(
+        config_path,
+        f"""\
+instances:
+  - name: A
+    crn: '{US_CRN_A}'
+  - name: B
+    crn: '{US_CRN_B}'
+    limit_seconds: 50000
+""",
+    )
+
+    mock_client = MockIBMQuantumAPIClient()
+    mock_client.setup_account(account_id="acct-1", allocation_budget_seconds=0)
+    mock_client.setup_instance(
+        crn=US_CRN_A, name="A", allocation_seconds=36000, account_id="acct-1", limit_seconds=42000
+    )
+    mock_client.setup_instance(
+        crn=US_CRN_B, name="B", allocation_seconds=36000, account_id="acct-1", limit_seconds=99999
+    )
+
+    result = _invoke_update(runner, mock_client, ["--config", str(config_path), "--api-key", "k"])
+    assert result.exit_code == 0, result.output
+
+    yaml_rt = YAML(typ="rt")
+    with open(config_path) as f:
+        doc = yaml_rt.load(f)
+    by_crn = {entry["crn"]: entry for entry in doc["instances"]}
+    assert by_crn[US_CRN_A]["limit_seconds"] == 42000
+    # Existing limit must NOT be overwritten by the live value.
+    assert by_crn[US_CRN_B]["limit_seconds"] == 50000
+
+
+def test_update_no_limits_flag_skips_pulling_limit(runner: CliRunner, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    _write_config(
+        config_path,
+        f"""\
+instances:
+  - name: A
+    crn: '{US_CRN_A}'
+""",
+    )
+
+    mock_client = MockIBMQuantumAPIClient()
+    mock_client.setup_account(account_id="acct-1", allocation_budget_seconds=0)
+    mock_client.setup_instance(
+        crn=US_CRN_A, name="A", allocation_seconds=36000, account_id="acct-1", limit_seconds=42000
+    )
+
+    result = _invoke_update(runner, mock_client, ["--config", str(config_path), "--api-key", "k", "--no-limits"])
+    assert result.exit_code == 0, result.output
+
+    yaml_rt = YAML(typ="rt")
+    with open(config_path) as f:
+        doc = yaml_rt.load(f)
+    assert "limit_seconds" not in doc["instances"][0]
 
 
 def test_update_no_changes_reports_already_up_to_date(runner: CliRunner, tmp_path: Path) -> None:

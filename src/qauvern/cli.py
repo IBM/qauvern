@@ -645,6 +645,11 @@ def configure(
 @click.option("--no-add", is_flag=True, help="Skip adding newly discovered instances")
 @click.option("--no-names", is_flag=True, help="Skip fixing instance name drift")
 @click.option("--no-remove", is_flag=True, help="Skip removing archived/missing instances")
+@click.option(
+    "--no-limits",
+    is_flag=True,
+    help="Skip adding limit_seconds for instances that have a live limit but none in the config",
+)
 @click.pass_context
 @handle_errors
 def update(
@@ -658,12 +663,15 @@ def update(
     no_add: bool,
     no_names: bool,
     no_remove: bool,
+    no_limits: bool,
 ):
     """Reconcile a configuration file with the live IBM Quantum API.
 
     Drops expired `net_grants`, adds newly discovered instances, fixes
-    instance name drift, and removes archived or missing instances. Each
-    action runs by default; use the `--no-*` flags to opt out.
+    instance name drift, removes archived or missing instances, and pulls
+    in `limit_seconds` from the live API for instances that don't yet
+    have one configured (existing `limit_seconds` are never overwritten).
+    Each action runs by default; use the `--no-*` flags to opt out.
 
     Comments and customizations in the YAML (custom dates, `limit_seconds`,
     `allocation_reserve_percent`, etc.) are preserved.
@@ -685,6 +693,7 @@ def update(
         add_instances=not no_add,
         fix_names=not no_names,
         remove_instances=not no_remove,
+        add_missing_limits=not no_limits,
     )
 
     doc = load_config_doc(config_path)

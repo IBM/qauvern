@@ -27,6 +27,7 @@ class UpdateActions:
     add_instances: bool = True
     fix_names: bool = True
     remove_instances: bool = True
+    add_missing_limits: bool = True
 
 
 @dataclass(frozen=True)
@@ -51,16 +52,30 @@ class RemovedInstance:
     reason: Literal["archived", "missing"]
 
 
+@dataclass(frozen=True)
+class LimitAdded:
+    crn: str
+    name: str
+    limit_seconds: int
+
+
 @dataclass
 class UpdateSummary:
     expired_net_grants: list[ExpiredGrant] = field(default_factory=list)
     added_instances: list[DiscoveredInstance] = field(default_factory=list)
     renamed_instances: list[InstanceRename] = field(default_factory=list)
     removed_instances: list[RemovedInstance] = field(default_factory=list)
+    added_limits: list[LimitAdded] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
-        return not (self.expired_net_grants or self.added_instances or self.renamed_instances or self.removed_instances)
+        return not (
+            self.expired_net_grants
+            or self.added_instances
+            or self.renamed_instances
+            or self.removed_instances
+            or self.added_limits
+        )
 
 
 def _expire_net_grants(doc_instances: list, now: datetime, summary: UpdateSummary) -> None:
@@ -117,6 +132,20 @@ def _fix_names(doc_instances: list, active_by_crn: dict[str, str], summary: Upda
             entry["name"] = api_name
 
 
+def _add_missing_limits(
+    doc_instances: list, active_by_crn: dict[str, DiscoveredInstance], summary: UpdateSummary
+) -> None:
+    for entry in doc_instances:
+        if "limit_seconds" in entry:
+            continue
+        crn = entry.get("crn", "")
+        live = active_by_crn.get(crn)
+        if live is None or live.limit_seconds is None:
+            continue
+        entry["limit_seconds"] = live.limit_seconds
+        summary.added_limits.append(LimitAdded(crn=crn, name=entry.get("name", ""), limit_seconds=live.limit_seconds))
+
+
 def _new_instance_entry(inst: DiscoveredInstance, fallback_name: str) -> dict[str, Any]:
     entry: dict[str, Any] = {
         "name": inst.name or fallback_name,
@@ -162,9 +191,13 @@ def compute_update(
     if actions.expire_net_grants:
         _expire_net_grants(doc_instances, now, summary)
 
+    active_by_crn = {d.crn: d for d in discovered.active}
+
     if actions.fix_names:
-        active_by_crn = {d.crn: d.name for d in discovered.active}
-        _fix_names(doc_instances, active_by_crn, summary)
+        _fix_names(doc_instances, {crn: d.name for crn, d in active_by_crn.items()}, summary)
+
+    if actions.add_missing_limits:
+        _add_missing_limits(doc_instances, active_by_crn, summary)
 
     if actions.add_instances:
         _add_instances(doc_instances, discovered.active, summary)
@@ -193,6 +226,11 @@ def format_update_summary(summary: UpdateSummary) -> str:
         lines.append(f"  Rename ({len(summary.renamed_instances)}):")
         for rn in summary.renamed_instances:
             lines.append(f'    - "{rn.old_name}" → "{rn.new_name}" ({rn.crn})')
+
+    if summary.added_limits:
+        lines.append(f"  Add limit_seconds ({len(summary.added_limits)}):")
+        for la in summary.added_limits:
+            lines.append(f"    - {la.name or '(unnamed)'}: {la.limit_seconds} ({la.crn})")
 
     if summary.added_instances:
         lines.append(f"  Add ({len(summary.added_instances)}):")
