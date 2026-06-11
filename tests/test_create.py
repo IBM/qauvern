@@ -78,6 +78,9 @@ def test_basic_creation(mock_client: MockIBMQuantumAPIClient) -> None:
         target="us-east",
         resource_group="rg-123",
         plan=Plan.PREMIUM,
+        allocation_seconds=36000,
+        limit_seconds=None,
+        backends=None,
     )
     assert result["name"] == "test-instance"
     assert result["state"] == "active"
@@ -85,16 +88,19 @@ def test_basic_creation(mock_client: MockIBMQuantumAPIClient) -> None:
     assert "us-east" in result["id"]
 
 
-def test_creation_with_allocation(mock_client: MockIBMQuantumAPIClient) -> None:
+def test_creation_with_limit(mock_client: MockIBMQuantumAPIClient) -> None:
     result = mock_client.create_instance(
         name="test-instance",
         target="eu-de",
         resource_group="rg-123",
         plan=Plan.PREMIUM,
         allocation_seconds=96000,
+        limit_seconds=120000,
+        backends=None,
     )
     crn = result["id"]
     assert mock_client.instances[crn].allocation_seconds == 96000
+    assert mock_client.instances[crn].limit_seconds == 120000
 
 
 def test_instance_stored_in_mock(mock_client: MockIBMQuantumAPIClient) -> None:
@@ -103,6 +109,9 @@ def test_instance_stored_in_mock(mock_client: MockIBMQuantumAPIClient) -> None:
         target="us-east",
         resource_group="rg-123",
         plan=Plan.PREMIUM,
+        allocation_seconds=36000,
+        limit_seconds=None,
+        backends=None,
     )
     crn = result["id"]
     assert crn in mock_client.instances
@@ -145,32 +154,13 @@ def test_create_success(runner: CliRunner, create_mock_client: MockIBMQuantumAPI
             "rg-123",
             "--api-key",
             "test-key",
-        ],
-    )
-    assert result.exit_code == 0
-    assert "my-instance" in result.output
-    assert "created successfully" in result.output
-
-
-def test_create_with_allocation(runner: CliRunner, create_mock_client: MockIBMQuantumAPIClient) -> None:
-    result = _invoke(
-        runner,
-        create_mock_client,
-        [
-            "my-instance",
-            "--target",
-            "us-east",
-            "--plan",
-            "internal",
-            "--resource-group",
-            "rg-123",
-            "--api-key",
-            "test-key",
             "--allocation",
             "10h",
         ],
     )
     assert result.exit_code == 0
+    assert "my-instance" in result.output
+    assert "created successfully" in result.output
     assert "10.0h" in result.output
 
 
@@ -188,43 +178,18 @@ def test_create_with_limit(runner: CliRunner, create_mock_client: MockIBMQuantum
             "rg-123",
             "--api-key",
             "test-key",
+            "--allocation",
+            "10h",
             "--limit",
             "50h",
         ],
     )
     assert result.exit_code == 0
-    assert "Limit set successfully" in result.output
-
-
-def test_create_limit_failure_still_succeeds(runner: CliRunner, create_mock_client: MockIBMQuantumAPIClient) -> None:
-    mock = MockIBMQuantumAPIClient()
-
-    def fail_limit(*args, **kwargs):
-        raise Exception("limit API unavailable")
-
-    mock.update_instance_limit = fail_limit  # ty: ignore[invalid-assignment]
-
-    result = _invoke(
-        runner,
-        create_mock_client,
-        [
-            "my-instance",
-            "--target",
-            "us-east",
-            "--plan",
-            "premium",
-            "--resource-group",
-            "rg-123",
-            "--api-key",
-            "test-key",
-            "--limit",
-            "10h",
-        ],
-        override_client=mock,
-    )
-    assert result.exit_code == 0
     assert "created successfully" in result.output
-    assert "limit could not be set" in result.output
+    crn, instance = next(iter(create_mock_client.instances.items()))
+    assert instance.allocation_seconds == 36000
+    assert instance.limit_seconds == 180000
+    assert crn  # CRN was assigned
 
 
 def test_create_with_tags(runner: CliRunner, create_mock_client: MockIBMQuantumAPIClient) -> None:
@@ -241,6 +206,8 @@ def test_create_with_tags(runner: CliRunner, create_mock_client: MockIBMQuantumA
             "rg-123",
             "--api-key",
             "test-key",
+            "--allocation",
+            "10h",
             "--tag",
             "env:prod",
             "--tag",
@@ -249,6 +216,27 @@ def test_create_with_tags(runner: CliRunner, create_mock_client: MockIBMQuantumA
     )
     assert result.exit_code == 0
     assert "created successfully" in result.output
+
+
+def test_create_missing_allocation(runner: CliRunner, create_mock_client: MockIBMQuantumAPIClient) -> None:
+    """--allocation is required — Resource Controller create needs it in `parameters`."""
+    result = _invoke(
+        runner,
+        create_mock_client,
+        [
+            "my-instance",
+            "--target",
+            "us-east",
+            "--plan",
+            "premium",
+            "--resource-group",
+            "rg-123",
+            "--api-key",
+            "test-key",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "allocation" in result.output.lower()
 
 
 def test_create_missing_required_option(runner: CliRunner, create_mock_client: MockIBMQuantumAPIClient) -> None:
@@ -280,6 +268,8 @@ def test_create_invalid_plan_name(runner: CliRunner, create_mock_client: MockIBM
             "rg-123",
             "--api-key",
             "test-key",
+            "--allocation",
+            "10h",
         ],
     )
     assert result.exit_code != 0
@@ -307,6 +297,8 @@ def test_create_api_failure(runner: CliRunner, create_mock_client: MockIBMQuantu
             "rg-123",
             "--api-key",
             "test-key",
+            "--allocation",
+            "10h",
         ],
         override_client=mock,
     )

@@ -5,6 +5,16 @@ All notable changes to qauvern will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-11
+
+### Fixed
+
+- `optimize` no longer unsets the limit when modifying the allocation, fixing https://github.com/IBM/qauvern/issues/153. The fix safely restores the prior values for the `backends` and `instance_limit_seconds` from the live API.
+
+### Changed
+
+- `qauvern create` now requires `--allocation`.
+
 ## [0.8.0] - 2026-06-10
 
 ## Added
@@ -142,6 +152,7 @@ The focus of this release is improving `qauvern configure` and the configuration
 - YAML configuration with `configure` command for auto-discovery
 - Configurable minimum allocation floor
 
+[0.9.0]: https://github.com/ibm/qauvern/releases/tag/v0.9.0
 [0.8.0]: https://github.com/ibm/qauvern/releases/tag/v0.8.0
 [0.7.0]: https://github.com/ibm/qauvern/releases/tag/v0.7.0
 [0.6.0]: https://github.com/ibm/qauvern/releases/tag/v0.6.0

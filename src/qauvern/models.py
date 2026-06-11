@@ -44,6 +44,8 @@ class DiscoveredInstance:
     name: str
     allocation_seconds: int
     limit_seconds: int | None
+    # None means "ANY backend" (the API stored ["ANY"]); a tuple is an explicit allow-list.
+    backends: tuple[str, ...] | None
 
 
 @dataclass(frozen=True)
@@ -94,6 +96,8 @@ class InstanceState:
     limit_seconds: int | None
     consumed_seconds: int  # Usage in 28-day rolling window
     detailed_usage: InstanceDetailedUsage | None
+    # None means "ANY backend"; a tuple is an explicit allow-list.
+    backends: tuple[str, ...] | None = None
 
     @property
     def usage(self) -> InstanceDetailedUsage:

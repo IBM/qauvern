@@ -172,6 +172,7 @@ class IBMQuantumAPIClient:
             limit_seconds=discovered.limit_seconds,
             consumed_seconds=int(data.get("usage_consumed_seconds", 0)),
             detailed_usage=None,
+            backends=discovered.backends,
         )
 
     def get_instance_usage_seconds(
@@ -255,37 +256,32 @@ class IBMQuantumAPIClient:
             result[day] = int(usage_ms / 1000)
         return result
 
-    def update_instance_allocation(self, instance_crn: str, allocation_seconds: int) -> bool:
-        """Update the allocation for an instance.
+    def update_instance_parameters(
+        self,
+        instance_crn: str,
+        *,
+        allocation_seconds: int,
+        limit_seconds: int | None,
+        backends: tuple[str, ...] | None,
+    ) -> bool:
+        """PATCH allocation, limit, and backends together on the Resource Controller.
 
-        Args:
-            instance_crn: The CRN of the service instance
-            allocation_seconds: New allocation in seconds
+        All three fields must be supplied on every call: the Resource Controller replaces
+        the whole `parameters` object wholesale, so omitting a field would wipe it. Callers
+        should pass the current values for fields they don't intend to change.
 
-        Returns:
-            True if successful
+        `backends=None` denormalizes to ["ANY"]; `limit_seconds=None` removes the limit.
+        Allocation and limit are sent as strings to match what the API broker expects.
         """
-        # Allocation updates go through the Resource Controller; the CRN is URL-encoded into the path.
         url = f"{self.resource_controller_url}/v2/resource_instances/{quote(instance_crn, safe='')}"
-        # The API broker expects usage_allocation_seconds as a string, not an integer
-        payload = {"parameters": {"usage_allocation_seconds": str(allocation_seconds)}}
+        payload = {
+            "parameters": {
+                "usage_allocation_seconds": str(allocation_seconds),
+                "instance_limit_seconds": str(limit_seconds) if limit_seconds is not None else None,
+                "backends": list(backends) if backends is not None else ["ANY"],
+            }
+        }
         self._request("PATCH", url, json=payload)
-        return True
-
-    def update_instance_limit(self, instance_crn: str, limit_seconds: int | None) -> bool:
-        """Update the limit for an instance.
-
-        Args:
-            instance_crn: The CRN of the service instance
-            limit_seconds: New limit in seconds (None to remove limit)
-
-        Returns:
-            True if successful
-        """
-        url = f"{self._get_regional_base_url(instance_crn)}/v1/instances/configuration"
-        # API expects instance_limit field, not limit_seconds
-        payload = {"instance_limit": limit_seconds}
-        self._request("PUT", url, crn=instance_crn, json=payload)
         return True
 
     def create_instance(
@@ -294,10 +290,18 @@ class IBMQuantumAPIClient:
         target: str,
         resource_group: str,
         plan: Plan,
-        allocation_seconds: int | None = None,
+        *,
+        allocation_seconds: int,
+        limit_seconds: int | None,
+        backends: tuple[str, ...] | None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Create a new IBM Quantum service instance via Resource Controller API."""
+        """Create a new IBM Quantum service instance via Resource Controller API.
+
+        All three `parameters` fields are sent at creation time so the instance is fully
+        configured in one round-trip — no follow-up PATCH that could partially fail.
+        `backends=None` denormalizes to ["ANY"]; `limit_seconds=None` means no limit.
+        """
         url = f"{self.resource_controller_url}/v2/resource_instances"
         payload: dict[str, Any] = {
             "name": name,
@@ -305,11 +309,12 @@ class IBMQuantumAPIClient:
             "resource_group": resource_group,
             "resource_plan_id": plan_id_for(plan),
             "resource_id": QUANTUM_COMPUTING_RESOURCE_ID,
+            "parameters": {
+                "usage_allocation_seconds": str(allocation_seconds),
+                "instance_limit_seconds": str(limit_seconds) if limit_seconds is not None else None,
+                "backends": list(backends) if backends is not None else ["ANY"],
+            },
         }
-
-        if allocation_seconds is not None:
-            payload["parameters"] = {"usage_allocation_seconds": str(allocation_seconds)}
-
         if tags:
             payload["tags"] = tags
 
@@ -333,11 +338,18 @@ class IBMQuantumAPIClient:
         while True:
             data = self._request_json("GET", url, params=params)
             for resource in data["resources"]:
-                allocation = resource["extensions"]["usage_allocation_seconds"]
-                raw_limit = resource["extensions"]["instance_limit_seconds"]
+                extensions = resource["extensions"]
+                allocation = extensions["usage_allocation_seconds"]
+                raw_limit = extensions["instance_limit_seconds"]
                 limit = int(raw_limit) if raw_limit is not None else None
+                raw_backends = extensions.get("backends")
+                backends = None if not raw_backends or list(raw_backends) == ["ANY"] else tuple(raw_backends)
                 instance = DiscoveredInstance(
-                    crn=resource["id"], name=resource["name"], allocation_seconds=allocation, limit_seconds=limit
+                    crn=resource["id"],
+                    name=resource["name"],
+                    allocation_seconds=allocation,
+                    limit_seconds=limit,
+                    backends=backends,
                 )
                 if allocation == 0:
                     archived.append(instance)

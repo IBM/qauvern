@@ -477,6 +477,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
         )
 
     instance_map = {inst.crn: inst.name for inst in account.instances}
+    instance_by_crn = {inst.crn: inst for inst in account.instances}
 
     changed_crns = set(result.allocation_changes) | set(result.limit_changes)
     changed_instances = sorted(
@@ -498,55 +499,61 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
     if not dry_run and not yes:
         click.confirm("Apply these changes?", abort=True)
 
-    # Apply in safe order: decreases first (free headroom), then limits, then increases
+    # Apply in safe order: decreases first (free headroom), then standalone limit changes,
+    # then increases. Each instance is PATCHed once per phase with all three parameters
+    # (allocation, limit, backends) — the Resource Controller replaces the whole parameters
+    # block wholesale, so we must always re-send the fields we don't intend to change.
     click.echo("\nApplying changes...")
     success_count = 0
     error_count = 0
 
-    def _apply_allocation(crn: str, chg: AllocationChange) -> None:
+    def _patch(crn: str, *, alloc_change: AllocationChange | None, limit_change: LimitChange | None) -> None:
         nonlocal success_count, error_count
+        instance = instance_by_crn[crn]
         instance_name = instance_map.get(crn, crn[:40] + "...")
         if len(instance_name) > 40:
             instance_name = instance_name[:37] + "..."
-        delta = chg.delta
-        change_str = f"+{format_seconds(delta)}" if delta > 0 else f"-{format_seconds(delta)}"
-        try:
-            click.echo(
-                f"  Updating {instance_name}: {format_seconds(chg.current)} → {format_seconds(chg.new)} ({change_str})"
+
+        new_allocation = alloc_change.new if alloc_change is not None else instance.allocation_seconds
+        new_limit = limit_change.new if limit_change is not None else instance.limit_seconds
+
+        parts: list[str] = []
+        if alloc_change is not None:
+            delta = alloc_change.delta
+            change_str = f"+{format_seconds(delta)}" if delta > 0 else f"-{format_seconds(delta)}"
+            parts.append(
+                f"allocation {format_seconds(alloc_change.current)} → {format_seconds(alloc_change.new)} ({change_str})"
             )
-            client.update_instance_allocation(crn, chg.new)
+        if limit_change is not None:
+            if limit_change.current is None:
+                parts.append(f"limit → {format_seconds(limit_change.new)}")
+            else:
+                parts.append(f"limit {format_seconds(limit_change.current)} → {format_seconds(limit_change.new)}")
+
+        try:
+            click.echo(f"  Updating {instance_name}: {', '.join(parts)}")
+            client.update_instance_parameters(
+                crn,
+                allocation_seconds=new_allocation,
+                limit_seconds=new_limit,
+                backends=instance.backends,
+            )
             success_count += 1
             click.echo("    ✓ Success")
         except Exception as e:
             click.echo(f"    ❌ Failed: {e}", err=True)
             error_count += 1
 
-    def _apply_limit(crn: str, chg: LimitChange) -> None:
-        nonlocal success_count, error_count
-        instance_name = instance_map.get(crn, crn[:40] + "...")
-        if len(instance_name) > 40:
-            instance_name = instance_name[:37] + "..."
-        if chg.current is None:
-            transition = f"Setting limit for {instance_name}: {format_seconds(chg.new)}"
-        else:
-            transition = (
-                f"Updating limit for {instance_name}: {format_seconds(chg.current)} → {format_seconds(chg.new)}"
-            )
-        try:
-            click.echo(f"  {transition}")
-            client.update_instance_limit(crn, chg.new)
-            success_count += 1
-            click.echo("    ✓ Success")
-        except Exception as e:
-            click.echo(f"    ❌ Failed: {e}", err=True)
-            error_count += 1
-
-    for crn, chg in result.decreases.items():
-        _apply_allocation(crn, chg)
-    for crn, chg in result.limit_changes.items():
-        _apply_limit(crn, chg)
-    for crn, chg in result.increases.items():
-        _apply_allocation(crn, chg)
+    decrease_crns = set(result.decreases)
+    increase_crns = set(result.increases)
+    for crn, alloc in result.decreases.items():
+        _patch(crn, alloc_change=alloc, limit_change=result.limit_changes.get(crn))
+    for crn, limit in result.limit_changes.items():
+        if crn in decrease_crns or crn in increase_crns:
+            continue  # already patched alongside the allocation change
+        _patch(crn, alloc_change=None, limit_change=limit)
+    for crn, alloc in result.increases.items():
+        _patch(crn, alloc_change=alloc, limit_change=result.limit_changes.get(crn))
 
     click.echo(f"\n✓ Successfully updated {success_count} instances")
     if error_count > 0:
@@ -717,14 +724,14 @@ def update(
 @click.option(
     "--allocation",
     "-a",
-    default=None,
+    required=True,
     help="Initial allocation (e.g., 96000, 10h, 2.5d)",
 )
 @click.option(
     "--limit",
     "-l",
     default=None,
-    help="Instance limit (e.g., 96000, 10h, 2.5d). Set after creation.",
+    help="Instance limit (e.g., 96000, 10h, 2.5d)",
 )
 @click.option(
     "--tag",
@@ -740,7 +747,7 @@ def create(
     resource_group: str,
     plan: Plan,
     api_key: str | None,
-    allocation: str | None,
+    allocation: str,
     limit: str | None,
     tag: tuple,
 ):
@@ -748,11 +755,9 @@ def create(
 
     NAME is the name for the new instance.
     """
-    allocation_seconds = None
-    if allocation is not None:
-        allocation_seconds = parse_seconds(allocation)
-        if allocation_seconds < 0:
-            raise click.BadParameter("Allocation must be non-negative")
+    allocation_seconds = parse_seconds(allocation)
+    if allocation_seconds < 0:
+        raise click.BadParameter("Allocation must be non-negative")
 
     limit_seconds = None
     if limit is not None:
@@ -763,8 +768,9 @@ def create(
     client = _build_client(ctx, api_key)
 
     click.echo(f"Creating instance '{name}' in {target} with plan {plan.value}...", err=True)
-    if allocation_seconds is not None:
-        click.echo(f"  Initial allocation: {format_seconds(allocation_seconds)}", err=True)
+    click.echo(f"  Initial allocation: {format_seconds(allocation_seconds)}", err=True)
+    if limit_seconds is not None:
+        click.echo(f"  Initial limit: {format_seconds(limit_seconds)}", err=True)
 
     tags = list(tag) if tag else None
     result = client.create_instance(
@@ -773,6 +779,9 @@ def create(
         resource_group=resource_group,
         plan=plan,
         allocation_seconds=allocation_seconds,
+        limit_seconds=limit_seconds,
+        # TODO: expose --backends on the CLI so create can restrict backends at creation time.
+        backends=None,
         tags=tags,
     )
 
@@ -786,23 +795,9 @@ def create(
     click.echo(f"  State:  {instance_state}")
     click.echo(f"  Region: {target}")
     click.echo(f"  Plan:   {plan.value}")
-    if allocation_seconds is not None:
-        click.echo(f"  Allocation: {format_seconds(allocation_seconds)}")
-
-    if limit_seconds is not None and instance_crn:
-        click.echo(f"\nSetting instance limit to {format_seconds(limit_seconds)}...")
-        try:
-            client.update_instance_limit(instance_crn, limit_seconds)
-            click.echo(f"  Limit set successfully: {format_seconds(limit_seconds)}")
-        except Exception as limit_error:
-            click.echo(
-                f"  Warning: Instance created but limit could not be set: {limit_error}",
-                err=True,
-            )
-            click.echo(
-                "  You can set the limit later using the Quantum API.",
-                err=True,
-            )
+    click.echo(f"  Allocation: {format_seconds(allocation_seconds)}")
+    if limit_seconds is not None:
+        click.echo(f"  Limit: {format_seconds(limit_seconds)}")
 
     click.echo(f"\nInstance '{instance_name}' is ready.")
 

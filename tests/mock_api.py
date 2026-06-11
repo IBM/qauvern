@@ -72,6 +72,7 @@ class MockIBMQuantumAPIClient:
         limit_seconds: int | None = None,
         account_id: str | None = None,
         archived: bool = False,
+        backends: tuple[str, ...] | None = None,
     ) -> InstanceState:
         """Setup a mock instance for testing."""
         instance = InstanceState(
@@ -81,6 +82,7 @@ class MockIBMQuantumAPIClient:
             limit_seconds=limit_seconds,
             consumed_seconds=consumed_seconds,
             detailed_usage=None,
+            backends=backends,
         )
         self.instances[crn] = instance
         if archived:
@@ -128,20 +130,27 @@ class MockIBMQuantumAPIClient:
             raise ValueError(f"Instance {instance_crn} not found in mock data")
         return self.instances[instance_crn].consumed_seconds
 
-    def update_instance_allocation(self, instance_crn: str, allocation_seconds: int) -> bool:
-        """Update the allocation for a mock instance."""
+    def update_instance_parameters(
+        self,
+        instance_crn: str,
+        *,
+        allocation_seconds: int,
+        limit_seconds: int | None,
+        backends: tuple[str, ...] | None,
+    ) -> bool:
+        """Atomically overwrite allocation, limit, and backends — mirroring the real PATCH.
+
+        The real Resource Controller replaces the whole `parameters` block on every call,
+        so the mock must do the same. A test that omits a field will see it wiped — that's
+        the same failure mode that motivated this method's introduction.
+        """
         if instance_crn not in self.instances:
             raise ValueError(f"Instance {instance_crn} not found")
 
-        self.instances[instance_crn].allocation_seconds = allocation_seconds
-        return True
-
-    def update_instance_limit(self, instance_crn: str, limit_seconds: int | None) -> bool:
-        """Update the limit for a mock instance."""
-        if instance_crn not in self.instances:
-            raise ValueError(f"Instance {instance_crn} not found")
-
-        self.instances[instance_crn].limit_seconds = limit_seconds
+        instance = self.instances[instance_crn]
+        instance.allocation_seconds = allocation_seconds
+        instance.limit_seconds = limit_seconds
+        instance.backends = backends
         return True
 
     def discover_instances(self, account_id: str, plan: Plan | None = None) -> DiscoveredInstances:
@@ -163,6 +172,7 @@ class MockIBMQuantumAPIClient:
                 name=src.name,
                 allocation_seconds=src.allocation_seconds,
                 limit_seconds=src.limit_seconds,
+                backends=src.backends,
             )
             if crn in self._archived_crns:
                 archived.append(instance)
@@ -188,17 +198,21 @@ class MockIBMQuantumAPIClient:
         target: str,
         resource_group: str,
         plan: Plan,
-        allocation_seconds: int | None = None,
+        *,
+        allocation_seconds: int,
+        limit_seconds: int | None,
+        backends: tuple[str, ...] | None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
         crn = f"crn:v1:bluemix:public:quantum-computing:{target}:a/mock-account:{name}::"
         instance = InstanceState(
             crn=crn,
             name=name,
-            allocation_seconds=allocation_seconds or 0,
-            limit_seconds=None,
+            allocation_seconds=allocation_seconds,
+            limit_seconds=limit_seconds,
             consumed_seconds=0,
             detailed_usage=None,
+            backends=backends,
         )
         self.instances[crn] = instance
         return {
