@@ -543,6 +543,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
             click.echo(f"    ❌ Failed: {e}", err=True)
             error_count += 1
 
+    # This order matters. We first decrease allocations to free up headroom.
     ordered_crns = (
         list(result.decreases)
         + [crn for crn in result.limit_changes if crn not in result.allocation_changes]
