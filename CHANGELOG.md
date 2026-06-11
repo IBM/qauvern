@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `qauvern create` now requires `--allocation`.
+- `update` now pulls in `limit_seconds` from the live API for instances that don't yet have one configured. Existing `limit_seconds` values are never overwritten. Use `--no-limits` to opt out.
 
 ## [0.8.0] - 2026-06-10
 
