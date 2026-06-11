@@ -476,7 +476,6 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
             "(reserved against the account cap)"
         )
 
-    instance_map = {inst.crn: inst.name for inst in account.instances}
     instance_by_crn = {inst.crn: inst for inst in account.instances}
 
     changed_crns = set(result.allocation_changes) | set(result.limit_changes)
@@ -510,10 +509,6 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
     def _patch(crn: str, *, alloc_change: AllocationChange | None, limit_change: LimitChange | None) -> None:
         nonlocal success_count, error_count
         instance = instance_by_crn[crn]
-        instance_name = instance_map.get(crn, crn[:40] + "...")
-        if len(instance_name) > 40:
-            instance_name = instance_name[:37] + "..."
-
         new_allocation = alloc_change.new if alloc_change is not None else instance.allocation_seconds
         new_limit = limit_change.new if limit_change is not None else instance.limit_seconds
 
@@ -528,10 +523,14 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
             if limit_change.current is None:
                 parts.append(f"limit → {format_seconds(limit_change.new)}")
             else:
-                parts.append(f"limit {format_seconds(limit_change.current)} → {format_seconds(limit_change.new)}")
+                delta = limit_change.new - limit_change.current
+                change_str = f"+{format_seconds(delta)}" if delta > 0 else f"-{format_seconds(delta)}"
+                parts.append(
+                    f"limit {format_seconds(limit_change.current)} → {format_seconds(limit_change.new)} ({change_str})"
+                )
 
         try:
-            click.echo(f"  Updating {instance_name}: {', '.join(parts)}")
+            click.echo(f"  Updating {instance.name}: {', '.join(parts)}")
             client.update_instance_parameters(
                 crn,
                 allocation_seconds=new_allocation,
@@ -544,16 +543,17 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
             click.echo(f"    ❌ Failed: {e}", err=True)
             error_count += 1
 
-    decrease_crns = set(result.decreases)
-    increase_crns = set(result.increases)
-    for crn, alloc in result.decreases.items():
-        _patch(crn, alloc_change=alloc, limit_change=result.limit_changes.get(crn))
-    for crn, limit in result.limit_changes.items():
-        if crn in decrease_crns or crn in increase_crns:
-            continue  # already patched alongside the allocation change
-        _patch(crn, alloc_change=None, limit_change=limit)
-    for crn, alloc in result.increases.items():
-        _patch(crn, alloc_change=alloc, limit_change=result.limit_changes.get(crn))
+    ordered_crns = (
+        list(result.decreases)
+        + [crn for crn in result.limit_changes if crn not in result.allocation_changes]
+        + list(result.increases)
+    )
+    for crn in ordered_crns:
+        _patch(
+            crn,
+            alloc_change=result.allocation_changes.get(crn),
+            limit_change=result.limit_changes.get(crn),
+        )
 
     click.echo(f"\n✓ Successfully updated {success_count} instances")
     if error_count > 0:
