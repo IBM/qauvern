@@ -268,7 +268,8 @@ Provision a new IBM Quantum service instance:
 qauvern create my-instance \
   --target us-east \
   --resource-group your-resource-group-id \
-  --plan premium
+  --plan premium \
+  --allocation 10h
 ```
 
 Options:
@@ -276,8 +277,8 @@ Options:
 - `--target, -t`: Deployment region (required, e.g., `us-east`, `eu-de`)
 - `--resource-group, -g`: IBM Cloud resource group ID (required)
 - `--plan, -p`: Plan name — `internal`, `premium`, or `paygo` (required)
-- `--allocation, -a`: Initial allocation (e.g., `96000`, `10h`, `2.5d`)
-- `--limit, -l`: Instance limit, set after creation (e.g., `9600`, `10h`)
+- `--allocation, -a`: Initial allocation (required, e.g., `96000`, `10h`, `2.5d`)
+- `--limit, -l`: Instance limit (e.g., `9600`, `10h`)
 - `--tag`: Tags to apply (repeatable)
 
 ### Staging Environment

@@ -42,6 +42,7 @@ def _make_instance(
         name=name,
         allocation_seconds=allocation_seconds,
         limit_seconds=limit_seconds,
+        backends=None,
     )
 
 
