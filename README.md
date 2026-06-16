@@ -147,7 +147,7 @@ After generating the configuration, optionally make these edits:
 
 - Set `limit_seconds` and `net_grants` per instance to control hard caps and temporary bonuses.
 - Change `minimum_allocation_seconds` from its default of 60 seconds.
-- Set `allocation_reserve_percent` from `[0, 100)` to reserve a buffer of allocation.
+- Set `allocation_reserve_percent` from `[0, 100)` to hold back a buffer as a fraction of the total account budget (e.g. `20` caps total allocation at 80% of budget).
 
 Use [`qauvern update`](#update-reconcile-configuration) to keep the file in sync as instances are added, removed, or renamed.
 
@@ -304,7 +304,7 @@ For each managed instance, qauvern:
 Then, account-wide:
 
 3. **Pins every managed instance to its floor** — `max(minimum_allocation_seconds, 28-day consumed)`. Inactive instances stay at the floor.
-4. **Builds a redistribution pool** from unallocated headroom plus everything managed instances hold above their floor. If `allocation_reserve_percent` is set, scales the pool down by that fraction.
+4. **Builds a redistribution pool** from unallocated headroom plus everything managed instances hold above their floor. If `allocation_reserve_percent` is set, withholds a fixed fraction of the **total account budget** so total allocation never exceeds `budget × (1 − allocation_reserve_percent / 100)`.
 5. **Uses the water-fill algorithm to distribute the pool across active instances** proportional to activity score. When an instance hits its effective limit, it drops out and its surplus flows to the rest. If every active instance is capped, leftover capacity stays unallocated rather than being forced onto any instance.
 
 See [Design.md](Design.md) for full algorithm details and the invariants the optimizer enforces.
@@ -316,16 +316,20 @@ See [Design.md](Design.md) for full algorithm details and the invariants the opt
 Unconfigured instances still consume from the account-wide cap, so the optimizer subtracts their allocation before deciding how much to redistribute. Concretely:
 
 ```
-raw_pool = account.allocation_budget
-           − sum(unconfigured allocations)   ← reserved, untouched
-           − sum(floors of configured)       ← max(minimum_allocation_seconds, 28-day usage)
+raw_pool        = account.allocation_budget
+                  − sum(unconfigured allocations)   ← reserved, untouched
+                  − sum(floors of configured)       ← max(minimum_allocation_seconds, 28-day usage)
 
-redistributable = raw_pool × (1 − allocation_reserve_percent / 100)
+reserve_amount  = account.allocation_budget × (allocation_reserve_percent / 100)
+redistributable = max(0, raw_pool − reserve_amount)
+
+# Equivalently, total allocation across all instances is capped at
+#   account.allocation_budget × (1 − allocation_reserve_percent / 100)
 ```
 
 This means you can safely manage a subset of an account's instances with qauvern: anything you leave out of the config file is opaque to the optimizer except as a fixed reservation. To bring an instance under management, add it to the config (or regenerate with `qauvern configure`).
 
-**Caveat:** the configured instances will absorb all the available account allocation, which leaves no available allocation for the unconfigured instances. For example, if you configure 2 of 10 instances, those 2 will claim every spare second on the account and the remaining 8 are left with no buffer to expand into. Use `allocation_reserve_percent` to hold back a fraction of the pool if you need headroom for unconfigured instances.
+**Caveat:** the configured instances will absorb all the available account allocation, which leaves no available allocation for the unconfigured instances. For example, if you configure 2 of 10 instances, those 2 will claim every spare second on the account and the remaining 8 are left with no buffer to expand into. Use `allocation_reserve_percent` to hold back a fraction of the total account budget if you need headroom for unconfigured instances.
 
 ## Examples
 

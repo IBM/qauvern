@@ -55,8 +55,9 @@ def format_reserve_summary(distributable_pool: int, reserve_percent: float) -> s
     """Format account reserve summary line.
 
     `distributable_pool` is the post-reserve seconds available to redistribute
-    (AllocationOptimizer.redistribution_pool()[0]) — i.e. the raw pool already
-    scaled by `1 - reserve_percent/100`.
+    (AllocationOptimizer.redistribution_pool()[0]) — i.e. the raw movable pool
+    minus the budget-based reserve (allocation_budget * reserve_percent/100),
+    clamped at 0.
     """
     return f"Reserve: {reserve_percent:.1f}%   Available for rebalancing: {format_seconds(distributable_pool)}"
 

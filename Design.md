@@ -37,7 +37,7 @@ For each managed instance:
 Then, account-wide:
 
 3. **Pin every managed instance to its floor.** The floor is `max(minimum_allocation_seconds, consumed_seconds_28d)` — we never reduce an instance below what it has already consumed in the rolling window, and we never go below the user-configured minimum. Inactive instances stay at the floor.
-4. **Build the redistribution pool** from unallocated headroom plus everything managed instances hold above their floor. If `allocation_reserve_percent` is set, scale the pool down by that fraction so the reserve stays unallocated.
+4. **Build the redistribution pool** from unallocated headroom plus everything managed instances hold above their floor. If `allocation_reserve_percent` is set, withhold a fixed fraction of the total account budget (`allocation_budget_seconds × reserve_percent / 100`) from the pool so total allocation stays under `budget × (1 − reserve_percent / 100)`.
 5. **Use the water-fill algorithm to distribute the pool across active instances** proportional to activity score:
    - Each round, every active instance is offered `(score / total_score) * remaining_pool`.
    - If an instance would exceed its effective limit, it takes only enough to reach the limit and drops out of the candidate set; the surplus from its proportional share flows to the remaining candidates in the next round.
@@ -49,7 +49,7 @@ Then, account-wide:
 The optimizer validates the resulting plan against these invariants and refuses to apply changes that fail validation:
 
 1. Total projected allocation does not exceed the account budget.
-2. Total projected allocation respects the `allocation_reserve_percent` buffer.
+2. Total projected allocation respects the `allocation_reserve_percent` buffer — i.e. it does not exceed `budget × (1 − reserve_percent / 100)`. When unavoidable floors (28-day usage / `minimum_allocation_seconds`) plus unconfigured-instance allocation already exceed that cap, the reserve cannot be honored and this invariant fails.
 3. Each managed instance's new allocation is `>= consumed_seconds_28d`.
 4. Each managed instance's new allocation is `>= minimum_allocation_seconds`.
 5. Each managed instance's new allocation is `<= effective limit`, unless invariants 3 or 4 force it higher (a limit tightened below the floor is an unavoidable, non-actionable breach and is not flagged here).
@@ -61,7 +61,7 @@ Some clients manage consumption primarily via limits, rather than saturating all
 
 ### `allocation_reserve_percent` (account level)
 
-Holds back a percentage of the account's redistribution pool. The reserved amount stays unallocated and is not distributed to any instance. Defaults to 0 (existing behavior). Must be in `[0, 100)`. Configured at the top level of the YAML.
+Holds back a percentage of the **total account budget** (`allocation_budget_seconds`) as a hard buffer: total allocation across all instances will never exceed `budget × (1 − reserve_percent / 100)`. The reserved amount stays unallocated and is not distributed to any instance. Because the reserve is anchored to the budget rather than the movable pool, the cap is predictable regardless of current allocations or usage. Defaults to 0 (no reserve). Must be in `[0, 100)`. Configured at the top level of the YAML.
 
 ### `limit_seconds` (instance level)
 

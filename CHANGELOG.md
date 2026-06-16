@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Removed `balance_period` from the config file, along with `start_date` and `end_date` in the `instances` config. This feature was only partially implemented, as it only impacted the read-only output of `show` and `analyze` but did not actually impact the allocation optimizer algorithm. The mechanism was removed for now so that it can be potentially be added back with a better design in https://github.com/IBM/qauvern/issues/164.
+- `allocation_reserve_budget` is now based on your total budget, rather than only the available pool. For example, if you have 100s of budget in your plan and set `allocation_reserve_budget` to 20, then `qauvern` will act as if your plan only had 80s of budget, regardless of current usage. `qauvern` will eagerly error in `optimize` and `analyze` if it creates a plan that would exceed the buffer.
 
 ## [0.9.0] - 2026-06-11
 

@@ -13,10 +13,11 @@ plan: "premium"
 # This ensures inactive instances maintain a baseline allocation.
 minimum_allocation_seconds: 60
 
-# Optional: Hold back a percentage of account allocation from rebalancing.
-# The reserved amount stays unallocated (not distributed to any instance).
-# Useful when clients prefer to manage consumption via limits rather than saturating allocations.
-# Must be in range [0, 100). Defaults to 0 (no reserve, existing behavior).
+# Optional: Hold back a percentage of the TOTAL account budget as a hard buffer.
+# Total allocation across all instances will never exceed budget * (1 - percent/100);
+# e.g. 20 caps total allocation at 80% of the account budget. The reserved amount
+# stays unallocated (not distributed to any instance).
+# Must be in range [0, 100). Defaults to 0 (no reserve).
 # allocation_reserve_percent: 20
 
 instances:

@@ -70,12 +70,15 @@ class AllocationOptimizer:
     def redistribution_pool(self) -> tuple[int, int]:
         """Return (distributable_pool, reserve_amount) in seconds.
 
-        raw_pool = unallocated headroom + sum(allocation - floor) over managed instances.
-        `distributable_pool` is what water-fill awards across active instances;
-        `reserve_amount` is what invariant 2 withholds from the account budget.
-        Both `int()` calls truncate toward zero, so the pair sums to raw_pool or
-        raw_pool - 1 — never above raw_pool, which is what keeps the two halves
-        consistent without an explicit reconciliation.
+        `reserve_amount` is a fixed slice of the *account budget* —
+        `allocation_budget_seconds * reserve_percent / 100` — that invariant 2
+        withholds, so total allocation never exceeds `budget * (1 - reserve%/100)`.
+
+        `raw_pool` is the movable headroom: unallocated seconds + sum(allocation -
+        floor) over managed instances. `distributable_pool` is whatever movable
+        headroom survives after withholding the reserve, clamped at 0 (the reserve
+        can swallow the entire pool). Unlike the reserve, it is not a fixed fraction
+        of anything — it is what water-fill is actually allowed to award.
         """
         managed = [inst for inst in self.account.instances if inst.crn in self._configs]
         raw_pool = max(
@@ -83,8 +86,8 @@ class AllocationOptimizer:
             self.account.unallocated_seconds
             + sum(inst.allocation_seconds - self._floor(inst).value for inst in managed),
         )
-        distributable = int(raw_pool * (1 - self.allocation_reserve_percent / 100))
-        reserve_amount = int(raw_pool * self.allocation_reserve_percent / 100)
+        reserve_amount = int(self.account.allocation_budget_seconds * self.allocation_reserve_percent / 100)
+        distributable = max(0, raw_pool - reserve_amount)
         return distributable, reserve_amount
 
     def optimize(self) -> OptimizationResult:
@@ -96,7 +99,9 @@ class AllocationOptimizer:
         3. Pin every managed instance at floor = max(minimum_allocation_seconds,
            consumed_seconds). Inactive instances stay there.
         4. Build the redistribution pool from unallocated headroom plus what
-           managed instances hold above their floor; scale by reserve_percent.
+           managed instances hold above their floor, then withhold the
+           budget-based reserve (allocation_budget * reserve_percent / 100) so
+           total allocation stays under budget * (1 - reserve_percent / 100).
         5. Water-fill the pool across active instances proportional to activity
            score. Instances that hit their effective limit drop out of the round
            and the leftover flows to the rest. Leftover after all active
@@ -268,13 +273,56 @@ class AllocationOptimizer:
             else:
                 errors.append(f"Total instance allocations ({total_allocated}s) exceeds account budget ({budget}s)")
 
-        # Invariant 2: reserve buffer
+        # Invariant 2: reserve buffer. The reserve is a fixed fraction of the account
+        # budget, so effective_budget == budget * (1 - reserve_percent / 100) — a hard
+        # ceiling. When unavoidable floors plus unmanaged allocation already exceed it,
+        # this fires (the reserve cannot be honored), which is the intended signal.
         _, reserve_amount = self.redistribution_pool()
-        effective_budget = self.account.allocation_budget_seconds - reserve_amount
+        effective_budget = budget - reserve_amount
         if reserve_amount > 0 and total_allocated > effective_budget:
-            errors.append(
-                f"Total instance allocations ({total_allocated}s) exceeds budget minus reserve ({effective_budget}s)"
+            over = total_allocated - effective_budget
+            cap_expr = (
+                f"{effective_budget}s ({budget}s account budget − {reserve_amount}s reserve "
+                f"at {self.allocation_reserve_percent:.1f}%)"
             )
+
+            # Distinguish "the reserve is set too aggressively to ever honor" from
+            # "this particular plan overshoots the cap". The reserve cannot be honored
+            # when the instances pinned to their floors — plus untouchable unmanaged
+            # allocation — already overflow the cap; no rebalancing can fix that, only
+            # relaxing the reserve (or the config minimum that feeds the floors).
+            floors = [self._floor(inst) for inst in self.account.instances if inst.crn in self._configs]
+            floor_total = sum(f.value for f in floors)
+            unmanaged = self.account.unmanaged_allocation_seconds
+
+            if floor_total + unmanaged > effective_budget:
+                consumed_bucket = sum(f.value for f in floors if f.source == "consumed_seconds")
+                min_alloc_bucket = floor_total - consumed_bucket
+
+                drivers: list[str] = []
+                if consumed_bucket > 0:
+                    drivers.append(f"28-day usage requires {consumed_bucket}s")
+                if min_alloc_bucket > 0:
+                    drivers.append(f"minimum_allocation_seconds requires {min_alloc_bucket}s")
+                if unmanaged > 0:
+                    drivers.append(f"unmanaged instances hold {unmanaged}s")
+
+                # The reserve percent is the discretionary knob, so it leads the fixes.
+                fixes = ["lower allocation_reserve_percent"]
+                if min_alloc_bucket > 0:
+                    fixes.append("lower minimum_allocation_seconds")
+
+                errors.append(
+                    f"allocation_reserve_percent ({self.allocation_reserve_percent:.1f}%) is set too high "
+                    f"to honor: the reserve caps total allocation at {cap_expr}, but unavoidable floors "
+                    f"already require {floor_total + unmanaged}s ({'; '.join(drivers)}). "
+                    f"To fix: {' and/or '.join(fixes)}."
+                )
+            else:
+                errors.append(
+                    f"Total instance allocations ({total_allocated}s) exceed the reserve cap by {over}s. "
+                    f"The cap is {cap_expr}. To fix: lower allocation_reserve_percent or reduce instance allocations."
+                )
 
         # Invariants 3–6: per managed instance
         for inst in self.account.instances:
