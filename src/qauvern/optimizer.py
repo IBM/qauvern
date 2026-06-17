@@ -205,15 +205,16 @@ class AllocationOptimizer:
         0 when no buffer is configured, so this is just the plain budget cap). The
         message names the reserve in the cap breakdown only when one is set.
 
-        There are two ways to breach the cap, with different fixes:
-
-        - The floors fit under the cap, but allocation parked above them spills
-          over. Running the optimizer rebalances that excess back down (and, if a
-          reserve is set, lowering it gives more room).
-        - The floors themselves — plus untouchable unmanaged allocation — already
-          overflow the cap, so no rebalancing can help. Here we name each driver
-          (28-day usage, the config minimum, unmanaged instances) and list every
-          lever that could close the gap, since more than one often applies.
+        `optimize()` can only breach the cap when the floors themselves — plus
+        untouchable unmanaged allocation — already overflow it: water-fill never
+        awards more than `budget − reserve − floor_total − unmanaged`, so its
+        output is otherwise bounded by the cap. A breach with floors under the cap
+        is therefore unreachable from real output (it requires a corrupt API
+        snapshot or a hand-built result), so we don't special-case it — we just
+        emit one diagnostic that names each driver (28-day usage, the config
+        minimum, unmanaged instances) and offers the qauvern-owned knobs that can
+        close the gap. Consumed usage and unmanaged allocation aren't user-fixable,
+        so when neither knob is in play the message simply states the breach.
         """
         effective_budget = budget - reserve_amount
         over = total_allocated - effective_budget
@@ -230,45 +231,33 @@ class AllocationOptimizer:
         floor_total = sum(f.value for f in floors)
         unmanaged = self.account.unmanaged_allocation_seconds
 
-        prefix = f"Total instance allocations ({total_allocated}s) exceed {cap_expr} by {over}s."
-
-        # Excess parked above the floors: the optimizer can rebalance it back down.
-        # We never advise hand-lowering allocations — qauvern owns them, and consumed
-        # usage can't be clawed back.
-        if floor_total + unmanaged <= effective_budget:
-            fixes = ["run `qauvern optimize` to rebalance"]
-            if reserve_amount > 0:
-                fixes.append("lower allocation_reserve_percent")
-            return f"{prefix} To fix: {' or '.join(fixes)}."
-
-        # The floors alone overflow the cap, so no rebalancing can satisfy it. Split
-        # the floor by source so the message names what's actionable: a
-        # minimum_allocation_seconds shortfall is config-fixable, a consumed_seconds
-        # shortfall is an IBM Quantum reality only support can change.
+        # Split the floor by source so the message names what's driving the breach:
+        # consumed_seconds is an IBM Quantum reality, minimum_allocation_seconds is a
+        # config knob the user can lower.
         consumed_bucket = sum(f.value for f in floors if f.source == "consumed_seconds")
         min_alloc_bucket = floor_total - consumed_bucket
 
         drivers: list[str] = []
-        fixes: list[str] = []
-        # Order fixes easiest-first: the reserve is the most discretionary lever, the
-        # config minimum next, raising the budget (via support) last.
-        if reserve_amount > 0:
-            fixes.append("lower allocation_reserve_percent")
         if consumed_bucket > 0:
             drivers.append(f"28-day usage requires {consumed_bucket}s")
         if min_alloc_bucket > 0:
             drivers.append(f"minimum_allocation_seconds requires {min_alloc_bucket}s")
-            fixes.append("lower minimum_allocation_seconds")
         if unmanaged > 0:
             drivers.append(f"unmanaged instances hold {unmanaged}s")
-        if consumed_bucket > 0:
-            fixes.append("contact IBM Quantum support to discuss raising your account budget")
 
-        return (
-            f"{prefix} This is unavoidable: floors and untouchable allocation already "
-            f"require {floor_total + unmanaged}s ({'; '.join(drivers)}). "
-            f"To fix: {' and/or '.join(fixes)}."
-        )
+        # Only the qauvern-owned knobs are actionable.
+        fixes: list[str] = []
+        if reserve_amount > 0:
+            fixes.append("lower allocation_reserve_percent")
+        if min_alloc_bucket > 0:
+            fixes.append("lower minimum_allocation_seconds")
+
+        message = f"Total instance allocations ({total_allocated}s) exceed {cap_expr} by {over}s."
+        if drivers:
+            message += f" Driven by: {'; '.join(drivers)}."
+        if fixes:
+            message += f" To fix: {' and/or '.join(fixes)}."
+        return message
 
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
         """Check that `result` satisfies all allocation invariants.

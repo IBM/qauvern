@@ -177,10 +177,7 @@ def test_validate_allocations_uses_result_overrides() -> None:
     )
     is_valid, errors = optimizer.validate_allocations(over_cap)
     assert not is_valid
-    assert errors == [
-        "Total instance allocations (6s) exceed the 5s account budget by 1s. "
-        "To fix: run `qauvern optimize` to rebalance."
-    ]
+    assert errors == ["Total instance allocations (6s) exceed the 5s account budget by 1s."]
 
 
 def test_validate_allocations_includes_unmanaged() -> None:
@@ -213,8 +210,7 @@ def test_validate_allocations_includes_unmanaged() -> None:
     is_valid, errors = optimizer.validate_allocations(over)
     assert not is_valid
     assert errors == [
-        "Total instance allocations (11s) exceed the 10s account budget by 1s. "
-        "To fix: run `qauvern optimize` to rebalance."
+        "Total instance allocations (11s) exceed the 10s account budget by 1s. Driven by: unmanaged instances hold 5s."
     ]
 
 
@@ -247,11 +243,12 @@ def test_optimize_in_debt_account_overruns_budget_with_consumed_floor_diagnostic
     assert not is_valid
     msg = next(e for e in errors if "account budget" in e)
     assert "exceed the 100s account budget by 50s" in msg
-    assert "This is unavoidable" in msg
-    assert "28-day usage requires 150s" in msg
+    assert "Driven by: 28-day usage requires 150s" in msg
     assert "minimum_allocation_seconds" not in msg
-    assert "contact IBM Quantum support" in msg
-    assert "lower minimum_allocation_seconds" not in msg
+    # Consumed usage is the sole driver and no knob is in play: no fix is offered
+    # (we never advise contacting support or re-running optimize).
+    assert "support" not in msg
+    assert "To fix:" not in msg
 
 
 def test_optimize_min_alloc_squeeze_overruns_budget_with_config_fix_diagnostic() -> None:
@@ -272,10 +269,9 @@ def test_optimize_min_alloc_squeeze_overruns_budget_with_config_fix_diagnostic()
     assert not is_valid
     msg = next(e for e in errors if "account budget" in e)
     assert "exceed the 100s account budget by 50s" in msg
-    assert "This is unavoidable" in msg
-    assert "minimum_allocation_seconds requires 150s" in msg
+    assert "Driven by: minimum_allocation_seconds requires 150s" in msg
     assert "28-day usage" not in msg
-    assert "lower minimum_allocation_seconds" in msg
+    assert "To fix: lower minimum_allocation_seconds." in msg
     assert "IBM Quantum support" not in msg
 
 
@@ -294,10 +290,9 @@ def test_optimize_floor_tie_attributes_to_consumed_seconds() -> None:
     assert not is_valid
     msg = next(e for e in errors if "account budget" in e)
     assert "exceed the 100s account budget by 20s" in msg
-    assert "This is unavoidable" in msg
-    assert "28-day usage requires 120s" in msg
+    assert "Driven by: 28-day usage requires 120s" in msg
     assert "minimum_allocation_seconds" not in msg
-    assert "lower minimum_allocation_seconds" not in msg
+    assert "To fix:" not in msg
 
 
 def test_optimize_unmanaged_drag_overruns_budget_with_diagnostic() -> None:
@@ -323,10 +318,9 @@ def test_optimize_unmanaged_drag_overruns_budget_with_diagnostic() -> None:
     assert not is_valid
     msg = next(e for e in errors if "account budget" in e)
     assert "exceed the 100s account budget by 5s" in msg
-    assert "This is unavoidable" in msg
     assert "minimum_allocation_seconds requires 60s" in msg
     assert "unmanaged instances hold 45s" in msg
-    assert "lower minimum_allocation_seconds" in msg
+    assert "To fix: lower minimum_allocation_seconds." in msg
 
 
 # ---------------------------------------------------------------------------
@@ -354,11 +348,12 @@ def test_validate_allocations_reserve_violation() -> None:
     is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert not is_valid
     msg = next(e for e in errors if "cap" in e)
-    # Avoidable overshoot by 1s: the message quantifies the miss, names the reserve in
-    # the cap breakdown, and offers both reducing allocations and lowering the reserve.
+    # Overshoot by 1s: the message quantifies the miss, names the reserve in the cap
+    # breakdown, and offers the one knob in play (the reserve). It never advises
+    # re-running optimize — this message only ever follows an optimize run.
     assert "exceed the 800s cap (1000s account budget − 200s reserve at 20.0%) by 1s" in msg
-    assert "This is unavoidable" not in msg
-    assert "run `qauvern optimize` to rebalance or lower allocation_reserve_percent" in msg
+    assert "run `qauvern optimize`" not in msg
+    assert "To fix: lower allocation_reserve_percent." in msg
 
 
 def test_validate_allocations_reserve_fails_when_floors_exceed_cap() -> None:
@@ -386,9 +381,8 @@ def test_validate_allocations_reserve_fails_when_floors_exceed_cap() -> None:
     # The reserve is unachievable, not just overshot: floors alone overflow the cap.
     # The message says it's unavoidable, names the reserve in the cap, and the driver.
     assert "exceed the 50s cap (100s account budget − 50s reserve at 50.0%) by 50s" in msg
-    assert "This is unavoidable" in msg
-    assert "28-day usage requires 100s" in msg
-    assert "lower allocation_reserve_percent" in msg
+    assert "Driven by: 28-day usage requires 100s" in msg
+    assert "To fix: lower allocation_reserve_percent." in msg
 
 
 def test_reserve_too_high_names_minimum_allocation_driver() -> None:
@@ -410,10 +404,9 @@ def test_reserve_too_high_names_minimum_allocation_driver() -> None:
     is_valid, errors = optimizer.validate_allocations(OptimizationResult({}, {}))
     assert not is_valid
     msg = next(e for e in errors if "cap" in e)
-    assert "This is unavoidable" in msg
-    assert "minimum_allocation_seconds requires 80s" in msg
+    assert "Driven by: minimum_allocation_seconds requires 80s" in msg
     # Both discretionary levers are offered, reserve first.
-    assert "lower allocation_reserve_percent and/or lower minimum_allocation_seconds" in msg
+    assert "To fix: lower allocation_reserve_percent and/or lower minimum_allocation_seconds." in msg
 
 
 # ---------------------------------------------------------------------------

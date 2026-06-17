@@ -322,9 +322,6 @@ raw_pool        = account.allocation_budget
 
 reserve_amount  = account.allocation_budget × (allocation_reserve_percent / 100)
 redistributable = max(0, raw_pool − reserve_amount)
-
-# Equivalently, total allocation across all instances is capped at
-#   account.allocation_budget × (1 − allocation_reserve_percent / 100)
 ```
 
 This means you can safely manage a subset of an account's instances with qauvern: anything you leave out of the config file is opaque to the optimizer except as a fixed reservation. To bring an instance under management, add it to the config (or regenerate with `qauvern configure`).
