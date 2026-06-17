@@ -19,18 +19,10 @@ minimum_allocation_seconds: 60
 # Must be in range [0, 100). Defaults to 0 (no reserve, existing behavior).
 # allocation_reserve_percent: 20
 
-# Balance period - the time frame for optimization
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
-
 instances:
   - name: "Quantum Chemistry Research"
     # Service instance CRN
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-1::"
-    # Optional: Override balance period for this instance
-    # start_date: "2026-01-01T00:00:00+00:00"
-    # end_date: "2026-06-30T23:59:59+00:00"
 
     # Optional: Base limit for this instance.
     # When set, the optimizer applies this limit on every run.

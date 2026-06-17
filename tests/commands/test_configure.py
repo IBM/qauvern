@@ -57,25 +57,25 @@ def test_build_configure_yaml_multiple_instances() -> None:
         _make_instance(crn="crn:b", name="B"),
         _make_instance(crn="crn:a", name="A"),
     ]
-    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances, "s", "e"))
+    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances))
     assert [p["name"] for p in parsed["instances"]] == ["A", "B", "Instance 3"]
     assert [p["crn"] for p in parsed["instances"]] == ["crn:a", "crn:b", "crn:c"]
 
 
 def test_build_configure_yaml_includes_limit_seconds_when_set() -> None:
     instances = [_make_instance(limit_seconds=50000)]
-    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances, "s", "e"))
+    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances))
     assert parsed["instances"][0]["limit_seconds"] == 50000
 
 
 def test_build_configure_yaml_omits_limit_seconds_when_none() -> None:
     instances = [_make_instance(limit_seconds=None)]
-    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances, "s", "e"))
+    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances))
     assert "limit_seconds" not in parsed["instances"][0]
 
 
 def test_build_configure_yaml_emits_plan_name() -> None:
-    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.PAYGO, [_make_instance()], "s", "e"))
+    parsed = yaml.safe_load(build_configure_yaml("acct", Plan.PAYGO, [_make_instance()]))
     assert parsed["plan"] == "paygo"
 
 
@@ -85,9 +85,7 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     from datetime import datetime
 
     instances = [_make_instance(crn="crn:test:rt", allocation_seconds=36000)]
-    text = build_configure_yaml(
-        "acct", Plan.INTERNAL, instances, "2026-01-01T00:00:00+00:00", "2026-12-31T23:59:59+00:00"
-    )
+    text = build_configure_yaml("acct", Plan.INTERNAL, instances)
 
     path = tmp_path / "config.yaml"
     path.write_text(text)
@@ -97,8 +95,6 @@ def test_configure_yaml_round_trips(tmp_path: Path) -> None:
     assert cfg.account_id == "acct"
     assert cfg.plan == Plan.INTERNAL
     assert cfg.minimum_allocation_seconds == 60
-    assert cfg.balance_period["start_date"] == datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-    assert cfg.balance_period["end_date"] == datetime(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
     assert len(cfg.instance_configs) == 1
     assert cfg.instance_configs[0].crn == "crn:test:rt"
 

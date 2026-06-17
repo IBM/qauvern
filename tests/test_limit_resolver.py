@@ -35,8 +35,6 @@ def make_config(
     return InstanceConfig(
         name="Test",
         crn="crn:test:1",
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
         target_limit_seconds=limit_seconds,
         net_grants=tuple(net_grants) if net_grants else (),
     )
@@ -50,7 +48,6 @@ def make_instance(daily_usage: dict[date, int] | None = None) -> InstanceState:
         consumed_seconds=0,
         limit_seconds=None,
         detailed_usage=InstanceDetailedUsage(
-            consumed_balance_period=0,
             consumed_14day=0,
             consumed_7day=0,
             consumed_3day=0,

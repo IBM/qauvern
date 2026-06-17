@@ -50,7 +50,7 @@ class ConfigParser:
 
     def _validate_config(self) -> None:
         """Validate the configuration structure."""
-        required_fields = ["account_id", "plan", "minimum_allocation_seconds", "balance_period", "instances"]
+        required_fields = ["account_id", "plan", "minimum_allocation_seconds", "instances"]
 
         for field in required_fields:
             if field not in self.config_data:
@@ -62,10 +62,6 @@ class ConfigParser:
         reserve = self.config_data.get("allocation_reserve_percent", 0.0)
         if not (0.0 <= float(reserve) < 100.0):
             raise ValueError("allocation_reserve_percent must be in range [0, 100)")
-
-        balance_period = self.config_data["balance_period"]
-        if "start_date" not in balance_period or "end_date" not in balance_period:
-            raise ValueError("balance_period must contain start_date and end_date")
 
         # Eagerly parse to surface validation errors at load time.
         self.plan
@@ -88,18 +84,9 @@ class ConfigParser:
         return float(self.config_data.get("allocation_reserve_percent", 0.0))
 
     @cached_property
-    def balance_period(self) -> dict[str, datetime]:
-        period = self.config_data["balance_period"]
-        return {
-            "start_date": parse_utc_datetime(period["start_date"], provenance="balance_period.start_date"),
-            "end_date": parse_utc_datetime(period["end_date"], provenance="balance_period.end_date"),
-        }
-
-    @cached_property
     def instance_configs(self) -> list[InstanceConfig]:
         """Parse and return the list of instance configs."""
         configs: list[InstanceConfig] = []
-        period = self.balance_period
 
         for entry in self.config_data["instances"]:
             for field in ("name", "crn"):
@@ -109,19 +96,6 @@ class ConfigParser:
             inst = entry.get("name", "?")
             if not entry["crn"]:
                 raise ValueError(f"instances[{inst}].crn cannot be empty")
-
-            start_date = (
-                parse_utc_datetime(entry["start_date"], provenance=f"instances[{inst}].start_date")
-                if "start_date" in entry
-                else period["start_date"]
-            )
-            end_date = (
-                parse_utc_datetime(entry["end_date"], provenance=f"instances[{inst}].end_date")
-                if "end_date" in entry
-                else period["end_date"]
-            )
-            if start_date >= end_date:
-                raise ValueError(f"instances[{inst}]: start_date must be before end_date")
 
             net_grants = []
             for i, grant_data in enumerate(entry.get("net_grants", [])):
@@ -146,8 +120,6 @@ class ConfigParser:
             config = InstanceConfig(
                 name=entry["name"],
                 crn=entry["crn"],
-                start_date=start_date,
-                end_date=end_date,
                 target_limit_seconds=target_limit_seconds,
                 net_grants=tuple(net_grants),
             )

@@ -30,7 +30,7 @@ from .commands.update import (
     load_config_doc,
     write_config_doc,
 )
-from .config import ConfigParser, parse_utc_datetime
+from .config import ConfigParser
 from .formatting import (
     format_instance_analysis_table,
     format_instance_summary_table,
@@ -42,7 +42,6 @@ from .models import (
     Account,
     AllocationChange,
     DiscoveredInstance,
-    InstanceConfig,
     InstanceDetailedUsage,
     InstanceState,
     LimitChange,
@@ -54,22 +53,10 @@ from .region import Region
 
 def enrich_instances_with_usage_data(
     account: Account,
-    instance_configs: list[InstanceConfig],
     client: IBMQuantumAPIClient,
 ) -> None:
     for instance in account.instances:
-        config = next((cfg for cfg in instance_configs if cfg.crn == instance.crn), None)
-
         try:
-            # Usage since balance period start (if config found)
-            consumed_balance_period = (
-                client.get_instance_usage_seconds(
-                    instance.crn, config.start_date, datetime.now(tz=timezone.utc), account.account_id
-                )
-                if config and config.start_date
-                else 0
-            )
-
             # Get detailed usage for multiple time periods
             detailed_usage = client.get_detailed_usage(instance.crn, account.account_id)
 
@@ -83,7 +70,6 @@ def enrich_instances_with_usage_data(
                 daily = {}
 
             instance.detailed_usage = InstanceDetailedUsage(
-                consumed_balance_period=consumed_balance_period,
                 consumed_14day=detailed_usage["consumed_14day"],
                 consumed_7day=detailed_usage["consumed_7day"],
                 consumed_3day=detailed_usage["consumed_3day"],
@@ -94,7 +80,6 @@ def enrich_instances_with_usage_data(
         except Exception as e:
             click.echo(f"Warning: Could not fetch usage data for {instance.name}: {e}", err=True)
             instance.detailed_usage = InstanceDetailedUsage(
-                consumed_balance_period=0,
                 consumed_14day=0,
                 consumed_7day=0,
                 consumed_3day=0,
@@ -134,13 +119,6 @@ region_option = click.option(
     callback=_parse_region,
     help="Limit to instances in a specific region (e.g. us-east, eu-de)",
 )
-
-
-def _parse_balance_date(_ctx: click.Context, param: click.Parameter, value: str) -> str:
-    try:
-        return parse_utc_datetime(value, provenance=param.opts[0]).isoformat()
-    except ValueError as e:
-        raise click.BadParameter(str(e)) from e
 
 
 plan_option = click.option(
@@ -383,7 +361,7 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str):
     account = client.get_account(account_id, plan, instance_states)
 
     click.echo("Fetching usage data for different time periods...", err=True)
-    enrich_instances_with_usage_data(account, instance_configs, client)
+    enrich_instances_with_usage_data(account, client)
 
     click.echo("Analyzing allocations...", err=True)
     optimizer = AllocationOptimizer(
@@ -439,7 +417,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
     account = client.get_account(account_id, plan, instance_states)
 
     # Enrich instances with target usage (no detailed usage needed for optimize)
-    enrich_instances_with_usage_data(account, instance_configs, client)
+    enrich_instances_with_usage_data(account, client)
 
     # Get minimum allocation from config
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
@@ -578,18 +556,6 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
     default="config.yaml",
     help="Output YAML configuration file path (default: config.yaml)",
 )
-@click.option(
-    "--balance-start",
-    default="2026-01-01T00:00:00+00:00",
-    callback=_parse_balance_date,
-    help="Balance period start date (ISO format with UTC offset, default: 2026-01-01T00:00:00+00:00)",
-)
-@click.option(
-    "--balance-end",
-    default="2026-12-31T23:59:59+00:00",
-    callback=_parse_balance_date,
-    help="Balance period end date (ISO format with UTC offset, default: 2026-12-31T23:59:59+00:00)",
-)
 @click.pass_context
 @handle_errors
 def configure(
@@ -599,8 +565,6 @@ def configure(
     api_key: str | None,
     region: Region | None,
     output: str,
-    balance_start: str,
-    balance_end: str,
 ):
     """Generate a configuration file from an existing account.
 
@@ -625,7 +589,7 @@ def configure(
     click.echo("\nGenerating configuration file...")
 
     output_path = Path(output)
-    output_path.write_text(build_configure_yaml(account_id, plan, discovered.active, balance_start, balance_end))
+    output_path.write_text(build_configure_yaml(account_id, plan, discovered.active))
 
     click.echo(f"\n✓ Configuration file created: {output_path}")
     click.echo("\nNext steps:")

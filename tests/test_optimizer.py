@@ -42,7 +42,6 @@ def _usage(
     daily_usage: dict[date, int] | None = None,
 ) -> InstanceDetailedUsage:
     return InstanceDetailedUsage(
-        consumed_balance_period=0,
         consumed_14day=consumed_14day,
         consumed_7day=consumed_7day,
         consumed_3day=consumed_3day,
@@ -119,8 +118,6 @@ def _make_config(crn: str, *, name: str | None = None, target_limit_seconds: int
     return InstanceConfig(
         name=name or crn,
         crn=crn,
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
         target_limit_seconds=target_limit_seconds,
     )
 
@@ -674,8 +671,6 @@ def test_cap_uses_resolved_limit_not_stale_iqp_limit() -> None:
     cfg = InstanceConfig(
         name="a",
         crn="crn:a",
-        start_date=datetime(2026, 1, 1),
-        end_date=datetime(2026, 12, 31),
         target_limit_seconds=200,
         net_grants=(grant,),
     )

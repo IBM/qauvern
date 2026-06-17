@@ -88,7 +88,6 @@ def instance1() -> InstanceState:
         consumed_seconds=500,
         limit_seconds=2000,
         detailed_usage=InstanceDetailedUsage(
-            consumed_balance_period=300,
             consumed_14day=400,
             consumed_7day=350,
             consumed_3day=250,
@@ -107,7 +106,6 @@ def instance2() -> InstanceState:
         consumed_seconds=1500,
         limit_seconds=None,
         detailed_usage=InstanceDetailedUsage(
-            consumed_balance_period=1200,
             consumed_14day=1400,
             consumed_7day=1300,
             consumed_3day=800,
@@ -172,7 +170,6 @@ def test_summary_zero_allocation() -> None:
         consumed_seconds=0,
         limit_seconds=None,
         detailed_usage=InstanceDetailedUsage(
-            consumed_balance_period=0,
             consumed_14day=0,
             consumed_7day=0,
             consumed_3day=0,
@@ -193,7 +190,6 @@ def test_analysis_headers(instance1: InstanceState) -> None:
     _, headers = format_instance_analysis_table([instance1])
     assert headers == [
         "Instance",
-        "Period",
         "28d",
         "14d",
         "7d",

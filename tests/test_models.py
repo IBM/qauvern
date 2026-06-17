@@ -35,7 +35,6 @@ def _instance(**kwargs: Any) -> InstanceState:
 
 def _usage(**kwargs: Any) -> InstanceDetailedUsage:
     return InstanceDetailedUsage(
-        consumed_balance_period=kwargs.get("consumed_balance_period", 0),
         consumed_14day=kwargs.get("consumed_14day", 0),
         consumed_7day=kwargs.get("consumed_7day", 0),
         consumed_3day=kwargs.get("consumed_3day", 0),
