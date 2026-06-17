@@ -177,7 +177,10 @@ def test_validate_allocations_uses_result_overrides() -> None:
     )
     is_valid, errors = optimizer.validate_allocations(over_cap)
     assert not is_valid
-    assert errors == ["Total instance allocations (6s) exceeds account budget (5s)"]
+    assert errors == [
+        "Total instance allocations (6s) exceed the 5s account budget by 1s. "
+        "To fix: run `qauvern optimize` to rebalance."
+    ]
 
 
 def test_validate_allocations_includes_unmanaged() -> None:
@@ -209,11 +212,18 @@ def test_validate_allocations_includes_unmanaged() -> None:
     )
     is_valid, errors = optimizer.validate_allocations(over)
     assert not is_valid
-    assert errors == ["Total instance allocations (11s) exceeds account budget (10s)"]
+    assert errors == [
+        "Total instance allocations (11s) exceed the 10s account budget by 1s. "
+        "To fix: run `qauvern optimize` to rebalance."
+    ]
 
 
 # ---------------------------------------------------------------------------
-# Invariant 1: allocation budget
+# Invariant 1: total allocation cap (account budget − reserve)
+#
+# A single check: total projected allocation must fit under the effective budget
+# (account budget minus any reserve). The reserve is 0 when unset, so these cases
+# exercise the plain-budget cap; the reserve-buffer cases follow below.
 #
 # Note that we expect the optimizer _can_ produce plans that violate this
 # invariant.
@@ -235,7 +245,9 @@ def test_optimize_in_debt_account_overruns_budget_with_consumed_floor_diagnostic
 
     is_valid, errors = optimizer.validate_allocations(result)
     assert not is_valid
-    msg = next(e for e in errors if "exceeds account budget" in e)
+    msg = next(e for e in errors if "account budget" in e)
+    assert "exceed the 100s account budget by 50s" in msg
+    assert "This is unavoidable" in msg
     assert "28-day usage requires 150s" in msg
     assert "minimum_allocation_seconds" not in msg
     assert "contact IBM Quantum support" in msg
@@ -258,7 +270,9 @@ def test_optimize_min_alloc_squeeze_overruns_budget_with_config_fix_diagnostic()
     result = optimizer.optimize()
     is_valid, errors = optimizer.validate_allocations(result)
     assert not is_valid
-    msg = next(e for e in errors if "exceeds account budget" in e)
+    msg = next(e for e in errors if "account budget" in e)
+    assert "exceed the 100s account budget by 50s" in msg
+    assert "This is unavoidable" in msg
     assert "minimum_allocation_seconds requires 150s" in msg
     assert "28-day usage" not in msg
     assert "lower minimum_allocation_seconds" in msg
@@ -278,7 +292,9 @@ def test_optimize_floor_tie_attributes_to_consumed_seconds() -> None:
     result = optimizer.optimize()
     is_valid, errors = optimizer.validate_allocations(result)
     assert not is_valid
-    msg = next(e for e in errors if "exceeds account budget" in e)
+    msg = next(e for e in errors if "account budget" in e)
+    assert "exceed the 100s account budget by 20s" in msg
+    assert "This is unavoidable" in msg
     assert "28-day usage requires 120s" in msg
     assert "minimum_allocation_seconds" not in msg
     assert "lower minimum_allocation_seconds" not in msg
@@ -305,14 +321,16 @@ def test_optimize_unmanaged_drag_overruns_budget_with_diagnostic() -> None:
     result = optimizer.optimize()
     is_valid, errors = optimizer.validate_allocations(result)
     assert not is_valid
-    msg = next(e for e in errors if "budget available to them" in e)
-    assert "55s = 100s account budget − 45s held by unmanaged instances" in msg
+    msg = next(e for e in errors if "account budget" in e)
+    assert "exceed the 100s account budget by 5s" in msg
+    assert "This is unavoidable" in msg
     assert "minimum_allocation_seconds requires 60s" in msg
+    assert "unmanaged instances hold 45s" in msg
     assert "lower minimum_allocation_seconds" in msg
 
 
 # ---------------------------------------------------------------------------
-# Invariant 2: reserve buffer
+# Invariant 1 (reserve buffer): the effective-budget cap with a reserve in play
 # ---------------------------------------------------------------------------
 
 
@@ -335,11 +353,12 @@ def test_validate_allocations_reserve_violation() -> None:
     chg = AllocationChange(current=200, new=801, reason="t")
     is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert not is_valid
-    msg = next(e for e in errors if "reserve cap" in e)
-    # Overshoots by 1s; the message quantifies the miss and explains the cap.
-    assert "exceed the reserve cap by 1s" in msg
-    assert "800s (1000s account budget − 200s reserve at 20.0%)" in msg
-    assert "lower allocation_reserve_percent" in msg
+    msg = next(e for e in errors if "cap" in e)
+    # Avoidable overshoot by 1s: the message quantifies the miss, names the reserve in
+    # the cap breakdown, and offers both reducing allocations and lowering the reserve.
+    assert "exceed the 800s cap (1000s account budget − 200s reserve at 20.0%) by 1s" in msg
+    assert "This is unavoidable" not in msg
+    assert "run `qauvern optimize` to rebalance or lower allocation_reserve_percent" in msg
 
 
 def test_validate_allocations_reserve_fails_when_floors_exceed_cap() -> None:
@@ -363,10 +382,11 @@ def test_validate_allocations_reserve_fails_when_floors_exceed_cap() -> None:
     optimizer = AllocationOptimizer(account, [_make_config("crn:a")], allocation_reserve_percent=50.0)
     is_valid, errors = optimizer.validate_allocations(OptimizationResult({}, {}))
     assert not is_valid
-    msg = next(e for e in errors if "set too high" in e)
-    # The reserve is unachievable, not just overshot — the message says so and names the driver.
-    assert "allocation_reserve_percent (50.0%) is set too high to honor" in msg
-    assert "caps total allocation at 50s" in msg
+    msg = next(e for e in errors if "cap" in e)
+    # The reserve is unachievable, not just overshot: floors alone overflow the cap.
+    # The message says it's unavoidable, names the reserve in the cap, and the driver.
+    assert "exceed the 50s cap (100s account budget − 50s reserve at 50.0%) by 50s" in msg
+    assert "This is unavoidable" in msg
     assert "28-day usage requires 100s" in msg
     assert "lower allocation_reserve_percent" in msg
 
@@ -389,13 +409,15 @@ def test_reserve_too_high_names_minimum_allocation_driver() -> None:
     )
     is_valid, errors = optimizer.validate_allocations(OptimizationResult({}, {}))
     assert not is_valid
-    msg = next(e for e in errors if "set too high" in e)
+    msg = next(e for e in errors if "cap" in e)
+    assert "This is unavoidable" in msg
     assert "minimum_allocation_seconds requires 80s" in msg
-    assert "lower minimum_allocation_seconds" in msg
+    # Both discretionary levers are offered, reserve first.
+    assert "lower allocation_reserve_percent and/or lower minimum_allocation_seconds" in msg
 
 
 # ---------------------------------------------------------------------------
-# Invariant 3: new_allocation >= 28-day consumed usage
+# Invariant 2: new_allocation >= 28-day consumed usage
 # ---------------------------------------------------------------------------
 
 
@@ -419,7 +441,7 @@ def test_validate_allocations_usage_floor_violation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invariant 4: new_allocation >= minimum_allocation_seconds
+# Invariant 3: new_allocation >= minimum_allocation_seconds
 # ---------------------------------------------------------------------------
 
 
@@ -443,7 +465,7 @@ def test_validate_allocations_minimum_floor_violation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invariant 5: new_allocation <= effective limit
+# Invariant 4: new_allocation <= effective limit
 # ---------------------------------------------------------------------------
 
 
@@ -503,7 +525,7 @@ def test_validate_allocations_gratuitous_breach_above_floor_still_fires() -> Non
 
 
 # ---------------------------------------------------------------------------
-# Invariant 6: no archiving
+# Invariant 5: no archiving
 # ---------------------------------------------------------------------------
 
 

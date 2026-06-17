@@ -48,12 +48,11 @@ Then, account-wide:
 
 The optimizer validates the resulting plan against these invariants and refuses to apply changes that fail validation:
 
-1. Total projected allocation does not exceed the account budget.
-2. Total projected allocation respects the `allocation_reserve_percent` buffer — i.e. it does not exceed `budget × (1 − reserve_percent / 100)`. When unavoidable floors (28-day usage / `minimum_allocation_seconds`) plus unconfigured-instance allocation already exceed that cap, the reserve cannot be honored and this invariant fails.
-3. Each managed instance's new allocation is `>= consumed_seconds_28d`.
-4. Each managed instance's new allocation is `>= minimum_allocation_seconds`.
-5. Each managed instance's new allocation is `<= effective limit`, unless invariants 3 or 4 force it higher (a limit tightened below the floor is an unavoidable, non-actionable breach and is not flagged here).
-6. No managed instance's new allocation is 0 (archiving is not allowed).
+1. Total projected allocation fits under the **effective budget** = `allocation_budget_seconds − reserve`, where `reserve = allocation_budget_seconds × reserve_percent / 100`.
+2. Each managed instance's new allocation is `>= consumed_seconds_28d`.
+3. Each managed instance's new allocation is `>= minimum_allocation_seconds`.
+4. Each managed instance's new allocation is `<= effective limit`, unless invariants 2 or 3 force it higher (a limit tightened below the floor is an unavoidable, non-actionable breach and is not flagged here).
+5. No managed instance's new allocation is 0 (archiving is not allowed).
 
 ## Limit-centric configuration
 
