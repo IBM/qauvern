@@ -6,20 +6,23 @@ A Python CLI tool for optimizing quantum allocations across instances to maximiz
 
 ## Overview
 
-qauvern helps administrators manage quantum computing allocations efficiently by:
+`qauvern` helps administrators manage quantum computing allocations efficiently by:
 
 - Analyzing current instance usage and allocations
 - Identifying underutilized instances
 - Recommending optimal allocation adjustments
 - Automatically applying optimizations to maximize resource utilization
+- Giving temporary boosts to an instance's limit.
+
+Refer to [How it works](#how-it-works) for more information on the algorithm.
 
 ## Key Concepts
 
 - **Rolling Window**: 28-day backward-looking usage period
-- **Fairness**: Ratio of consumed time to allocated time (lower fairness = higher priority)
-- **Allocation**: Target consumption for an instance during the rolling window
-- **Limit**: Hard cap on instance consumption
-- **Net Grant**: Temporary time bonus above the base limit. Multiple grants stack, and any pre-grant usage that exceeded the base limit decays out of the effective limit as those days exit the 28-day rolling window.
+- **Fairness**: Ratio of consumed time to allocated time. Lower fairness = higher priority
+- **Allocation**: The target consumption for an instance during the rolling window. An instance can exceed its allocation, but its priority will decrease due to the fairness score.
+- **Limit**: An optional hard cap on instance consumption.
+- **Net Grant**: A bonus configured in the `qauvern` config file to temporarily boost an instance' limit. Multiple grants stack. Any pre-grant usage that exceeded the base limit decays out of the effective limit as those days exit the 28-day rolling window.
 
 ## Installation
 
@@ -178,6 +181,7 @@ Options:
 - `--no-add`: Skip adding newly discovered instances
 - `--no-names`: Skip fixing instance name drift
 - `--no-remove`: Skip removing archived/missing instances
+- `--no-limits`: Skip adding `limit_seconds` for instances that have a live limit but none in the config
 
 #### Show Current Allocations
 
@@ -207,7 +211,7 @@ Analyze current allocations and show optimization recommendations, without makin
 qauvern analyze --config config.yaml
 ```
 
-This command identifies underutilized instances, calculates optimal reallocations, and shows what changes would be made. The output includes a **Cur Limit** column (the live API value) and a **New Limit** column (what the optimizer would set). A `(+grant)` annotation indicates an active net grant is boosting the limit; `!` indicates the instance is in debt.
+This command identifies underutilized instances, calculates optimal reallocations, and shows what changes would be made.
 
 > **Scope:** `analyze` only considers instances listed in your config file. Allocation held by unconfigured instances on the same account+plan is left untouched, but it is counted against the account cap so the recommendations never overcommit. The summary block reports it on the `Held by unconfigured instances` line.
 
@@ -245,6 +249,7 @@ qauvern optimize --config config.yaml --dry-run   # preview only
 ```
 
 This command will:
+1. Determine if there are changes to any instance's limit from setting `limit_seconds` and `net_grants` in the config file.
 1. Calculate optimal allocations.
 2. Display proposed changes.
 3. Prompt for confirmation.
@@ -252,7 +257,7 @@ This command will:
 
 Use `--dry-run` to compute and display changes without applying them. Use `--yes` / `-y` to skip the confirmation prompt in automated pipelines.
 
-> **Scope:** Like `analyze`, `optimize` only modifies instances listed in your config file. Unconfigured instances keep their existing allocation and limit; their allocation is reserved against the account cap when computing the new distribution. To bring an instance under management, add it to the config (or regenerate via `qauvern configure`).
+> **Scope:** Like `analyze`, `optimize` only modifies instances listed in your config file. Unconfigured instances keep their existing allocation and limit; their allocation is reserved against the account cap when computing the new distribution. To bring an instance under management, run `qauvern update` or manually add it to the config.
 
 #### Create Instance
 
@@ -293,14 +298,14 @@ The `--staging` flag is a global option and applies to all commands.
 
 For each managed instance, qauvern:
 
-1. **Resolves the effective limit** from `limit_seconds` and any active `net_grants` in the config file. If the config file does not set `limit_seconds` or `net_grants`, use the live limit in IBM Quantum Platform, if any. This is the upper bound on the instance's allocation.
+1. **Resolves the effective limit** from `limit_seconds` and any active `net_grants` in the config file. If the config file does not set `limit_seconds` or `net_grants`, use the live limit in IBM Quantum Platform, if any. `qauvern` will apply this new effective limit and also use it as the upper bound on the instance's allocation.
 2. **Computes an activity score** by exponentially weighting recent usage (24h carries 16× the weight of 28d). Instances with no usage across all buckets get score 0 and are classified inactive.
 
 Then, account-wide:
 
 3. **Pins every managed instance to its floor** — `max(minimum_allocation_seconds, 28-day consumed)`. Inactive instances stay at the floor.
 4. **Builds a redistribution pool** from unallocated headroom plus everything managed instances hold above their floor. If `allocation_reserve_percent` is set, scales the pool down by that fraction.
-5. **Water-fills the pool across active instances** proportional to activity score. When an instance hits its effective limit, it drops out and its surplus flows to the rest. If every active instance is capped, leftover capacity stays unallocated rather than being forced onto any instance.
+5. **Uses the water-fill algorithm to distribute the pool across active instances** proportional to activity score. When an instance hits its effective limit, it drops out and its surplus flows to the rest. If every active instance is capped, leftover capacity stays unallocated rather than being forced onto any instance.
 
 See [Design.md](Design.md) for full algorithm details and the invariants the optimizer enforces.
 
