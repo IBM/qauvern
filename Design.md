@@ -4,11 +4,11 @@
 
 * Rolling window - a backward looking 28 days of usage. The window rolls forward continuously. As clients use minutes in the quantum system, their available minutes for consumption decrease.
 * Account - all quantum access is based on an IBM Cloud account. IBM admins set the account level allocation based on the contracted time the client has purchased.
-* [Instance](https://quantum.cloud.ibm.com/docs/en/guides/instances.md) - A client will create one or more quantum service instances and set an allocation in seconds to configure the time that the instance should consume during the 28 day rolling window.
-* [Limits](https://quantum.cloud.ibm.com/docs/en/guides/allocation-limits.md) - in addition to allocations on instances, admins can optionally set limits on the instance, which provide a hard cap on the amount of time that the instance can consume.
-* [Allocations](https://quantum.cloud.ibm.com/docs/en/guides/allocation-limits.md) - the amount of time that an instance is targetted to consume during the 28 day rolling window. When setting allocations on instances, sum of all the allocations must be less than or equal to the account level allocation.
-* [Fair share scheduler](https://quantum.cloud.ibm.com/docs/en/guides/fair-share-scheduler.md) - the way the IBM Quantum system determines which jobs should go next. This is optimized to meet contractual constraints. When we are ready to run a new job, we pick the instance with the lowest fairness value.
+* [Instance](https://quantum.cloud.ibm.com/docs/en/guides/instances.md) - A client will create one or more quantum service instances. Users get access to certain instances and they target a particular instance when submitting workloads. Each instance gets its own allocation and limits.
+* [Limits](https://quantum.cloud.ibm.com/docs/en/guides/allocation-limits.md) - an optional hard cap on the amount of time that the instance can consume.
+* [Allocations](https://quantum.cloud.ibm.com/docs/en/guides/allocation-limits.md) - the amount of time that an instance is targetted to consume during the 28 day rolling window. An instance can exceed its allocation, but it will drop in priority relative to other instances based on the "fairness" score. 
 * Fairness - a measure of how much of the allocation has been used. It is the ratio of consumed time in the 28 day rolling window, over the allocation in the instance. This ensures that instances that have used the least percentage of their allocation get highest priority. Jobs can still run if fairness is above 1, as long as the instance has not hit a limit.
+* [Fair share scheduler](https://quantum.cloud.ibm.com/docs/en/guides/fair-share-scheduler.md) - the way the IBM Quantum system determines which jobs should go next. When the IBM Quantum Platform is ready to run a new job, it picks the instance with the lowest fairness value.
 
 ## Problem statement
 
@@ -16,11 +16,13 @@ Access to our Quantum Systems is given with an allocation to clients over a 28 d
 
 For clients that have a large number of instances, the easy thing to do is allocate equally across all of those instances. However, it is likely that less than half of those instances get used in any given month. So, this strategy is wasteful. We would much rather allocate more to the instances that are used more often, up to some project limit that the administrator sets for that. This would allow us to run more jobs, and also to run them faster.
 
+Likewise, project administrators want a way to temporarily increase the hard limit for a project during these bursty periods, then for the increase to go away after it expires.
+
 ## Scope: configured vs. unconfigured instances
 
 `qauvern` only operates on the instances listed in the config file. Any other instance on the same account+plan is **unconfigured** and is left exactly as-is — its allocation and limit are never touched. The optimizer still subtracts unconfigured allocation from the account budget when deciding how much to redistribute, so it never overcommits the cap.
 
-The config file is generated once with `configure` and is expected to be checked into version control. Drift between the file and the live API (instances added, archived, renamed; net grants expiring; missing `limit_seconds`) is reconciled with `update`.
+The config file is generated once with `configure` and is expected to be checked into version control. The `update` command helps catch drift between the file and the live API (instances added, archived, renamed; net grants expiring; missing `limit_seconds`).
 
 ## Core load balancing algorithm
 
@@ -36,11 +38,11 @@ Then, account-wide:
 
 3. **Pin every managed instance to its floor.** The floor is `max(minimum_allocation_seconds, consumed_seconds_28d)` — we never reduce an instance below what it has already consumed in the rolling window, and we never go below the user-configured minimum. Inactive instances stay at the floor.
 4. **Build the redistribution pool** from unallocated headroom plus everything managed instances hold above their floor. If `allocation_reserve_percent` is set, scale the pool down by that fraction so the reserve stays unallocated.
-5. **Water-fill the pool across active instances** proportional to activity score:
+5. **Use the water-fill algorithm to distribute the pool across active instances** proportional to activity score:
    - Each round, every active instance is offered `(score / total_score) * remaining_pool`.
    - If an instance would exceed its effective limit, it takes only enough to reach the limit and drops out of the candidate set; the surplus from its proportional share flows to the remaining candidates in the next round.
    - When every active instance is capped by limits, leftover capacity stays unallocated rather than being forced onto any instance.
-6. **Emit changes** wherever the projected allocation or limit differs from the live state.
+6. **Apply changes to IBM Cloud** wherever the projected allocation or limit differs from the live state.
 
 ### Invariants
 
