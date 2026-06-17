@@ -177,7 +177,7 @@ def test_validate_allocations_uses_result_overrides() -> None:
     )
     is_valid, errors = optimizer.validate_allocations(over_cap)
     assert not is_valid
-    assert errors == ["Total instance allocations (6s) exceeds account budget (5s)"]
+    assert errors == ["Total instance allocations (6s) exceed the 5s account budget by 1s."]
 
 
 def test_validate_allocations_includes_unmanaged() -> None:
@@ -209,11 +209,17 @@ def test_validate_allocations_includes_unmanaged() -> None:
     )
     is_valid, errors = optimizer.validate_allocations(over)
     assert not is_valid
-    assert errors == ["Total instance allocations (11s) exceeds account budget (10s)"]
+    assert errors == [
+        "Total instance allocations (11s) exceed the 10s account budget by 1s. Driven by: unmanaged instances hold 5s."
+    ]
 
 
 # ---------------------------------------------------------------------------
-# Invariant 1: allocation budget
+# Invariant 1: total allocation cap (account budget − reserve)
+#
+# A single check: total projected allocation must fit under the effective budget
+# (account budget minus any reserve). The reserve is 0 when unset, so these cases
+# exercise the plain-budget cap; the reserve-buffer cases follow below.
 #
 # Note that we expect the optimizer _can_ produce plans that violate this
 # invariant.
@@ -235,11 +241,14 @@ def test_optimize_in_debt_account_overruns_budget_with_consumed_floor_diagnostic
 
     is_valid, errors = optimizer.validate_allocations(result)
     assert not is_valid
-    msg = next(e for e in errors if "exceeds account budget" in e)
-    assert "28-day usage requires 150s" in msg
+    msg = next(e for e in errors if "account budget" in e)
+    assert "exceed the 100s account budget by 50s" in msg
+    assert "Driven by: 28-day usage requires 150s" in msg
     assert "minimum_allocation_seconds" not in msg
-    assert "contact IBM Quantum support" in msg
-    assert "lower minimum_allocation_seconds" not in msg
+    # Consumed usage is the sole driver and no knob is in play: no fix is offered
+    # (we never advise contacting support or re-running optimize).
+    assert "support" not in msg
+    assert "To fix:" not in msg
 
 
 def test_optimize_min_alloc_squeeze_overruns_budget_with_config_fix_diagnostic() -> None:
@@ -258,10 +267,11 @@ def test_optimize_min_alloc_squeeze_overruns_budget_with_config_fix_diagnostic()
     result = optimizer.optimize()
     is_valid, errors = optimizer.validate_allocations(result)
     assert not is_valid
-    msg = next(e for e in errors if "exceeds account budget" in e)
-    assert "minimum_allocation_seconds requires 150s" in msg
+    msg = next(e for e in errors if "account budget" in e)
+    assert "exceed the 100s account budget by 50s" in msg
+    assert "Driven by: minimum_allocation_seconds requires 150s" in msg
     assert "28-day usage" not in msg
-    assert "lower minimum_allocation_seconds" in msg
+    assert "To fix: lower minimum_allocation_seconds." in msg
     assert "IBM Quantum support" not in msg
 
 
@@ -278,10 +288,11 @@ def test_optimize_floor_tie_attributes_to_consumed_seconds() -> None:
     result = optimizer.optimize()
     is_valid, errors = optimizer.validate_allocations(result)
     assert not is_valid
-    msg = next(e for e in errors if "exceeds account budget" in e)
-    assert "28-day usage requires 120s" in msg
+    msg = next(e for e in errors if "account budget" in e)
+    assert "exceed the 100s account budget by 20s" in msg
+    assert "Driven by: 28-day usage requires 120s" in msg
     assert "minimum_allocation_seconds" not in msg
-    assert "lower minimum_allocation_seconds" not in msg
+    assert "To fix:" not in msg
 
 
 def test_optimize_unmanaged_drag_overruns_budget_with_diagnostic() -> None:
@@ -305,45 +316,53 @@ def test_optimize_unmanaged_drag_overruns_budget_with_diagnostic() -> None:
     result = optimizer.optimize()
     is_valid, errors = optimizer.validate_allocations(result)
     assert not is_valid
-    msg = next(e for e in errors if "budget available to them" in e)
-    assert "55s = 100s account budget − 45s held by unmanaged instances" in msg
+    msg = next(e for e in errors if "account budget" in e)
+    assert "exceed the 100s account budget by 5s" in msg
     assert "minimum_allocation_seconds requires 60s" in msg
-    assert "lower minimum_allocation_seconds" in msg
+    assert "unmanaged instances hold 45s" in msg
+    assert "To fix: lower minimum_allocation_seconds." in msg
 
 
 # ---------------------------------------------------------------------------
-# Invariant 2: reserve buffer
+# Invariant 1 (reserve buffer): the effective-budget cap with a reserve in play
 # ---------------------------------------------------------------------------
 
 
 def test_validate_allocations_reserve_passes() -> None:
-    """Projected total within the reserve-adjusted budget passes."""
-    # unallocated = 800, above-floor = 200 - max(60, 100) = 100 → available = 900
-    # reserve_amount = int(900 * 0.20) = 180; effective_budget = 820
-    # projected total = 820 ≤ 820 → valid
+    """Projected total within the budget-based reserve cap passes."""
+    # budget = 1000, reserve = 20% → reserve_amount = int(1000 * 0.20) = 200
+    # effective_budget = 1000 - 200 = 800; projected total = 800 ≤ 800 → valid
     inst = _make_instance("crn:a", 200, consumed=100)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], allocation_reserve_percent=20.0)
-    chg = AllocationChange(current=200, new=820, reason="t")
+    chg = AllocationChange(current=200, new=800, reason="t")
     is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert is_valid, errors
 
 
 def test_validate_allocations_reserve_violation() -> None:
-    """Projected total that consumes the reserve buffer is rejected."""
-    # same fixture; new=821 > effective_budget=820, but 821 ≤ 1000 so only reserve fires
+    """Projected total that crosses the budget-based reserve cap is rejected."""
+    # same fixture; new=801 > effective_budget=800, but 801 ≤ 1000 so only reserve fires
     inst = _make_instance("crn:a", 200, consumed=100)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], allocation_reserve_percent=20.0)
-    chg = AllocationChange(current=200, new=821, reason="t")
+    chg = AllocationChange(current=200, new=801, reason="t")
     is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert not is_valid
-    assert any("reserve" in e for e in errors)
+    msg = next(e for e in errors if "cap" in e)
+    # Overshoot by 1s: the message quantifies the miss, names the reserve in the cap
+    # breakdown, and offers the one knob in play (the reserve). It never advises
+    # re-running optimize — this message only ever follows an optimize run.
+    assert "exceed the 800s cap (1000s account budget − 200s reserve at 20.0%) by 1s" in msg
+    assert "run `qauvern optimize`" not in msg
+    assert "To fix: lower allocation_reserve_percent." in msg
 
 
-def test_validate_allocations_reserve_silent_when_no_pool() -> None:
-    """When managed instances have no headroom above their floors, invariant 2 stays silent.
+def test_validate_allocations_reserve_fails_when_floors_exceed_cap() -> None:
+    """When unavoidable floors exceed the budget-based reserve cap, invariant 2 fails.
 
-    raw_pool clamps to 0 → reserve_amount = 0 → invariant 2 short-circuits even with
-    a non-zero reserve_percent, leaving any breach to invariant 1.
+    The reserve is a fixed fraction of the account budget, so it does not go silent
+    just because the movable pool is empty. budget=100, reserve=50% → cap=50, but the
+    instance is parked at its consumed floor of 100 > 50, so the reserve cannot be
+    honored and invariant 2 fires.
     """
     # Only managed instance is parked at its consumed floor; unallocated=0 (account is full).
     inst = _make_instance("crn:a", 100, consumed=100)
@@ -357,11 +376,41 @@ def test_validate_allocations_reserve_silent_when_no_pool() -> None:
     )
     optimizer = AllocationOptimizer(account, [_make_config("crn:a")], allocation_reserve_percent=50.0)
     is_valid, errors = optimizer.validate_allocations(OptimizationResult({}, {}))
-    assert is_valid, errors
+    assert not is_valid
+    msg = next(e for e in errors if "cap" in e)
+    # The reserve is unachievable, not just overshot: floors alone overflow the cap.
+    # The message says it's unavoidable, names the reserve in the cap, and the driver.
+    assert "exceed the 50s cap (100s account budget − 50s reserve at 50.0%) by 50s" in msg
+    assert "Driven by: 28-day usage requires 100s" in msg
+    assert "To fix: lower allocation_reserve_percent." in msg
+
+
+def test_reserve_too_high_names_minimum_allocation_driver() -> None:
+    """When the config minimum (not 28-day usage) is what overflows the cap, the
+    message names minimum_allocation_seconds and offers lowering it as a fix."""
+    # No usage, so the floor is driven entirely by minimum_allocation_seconds=80.
+    inst = _make_instance("crn:a", 80, consumed=0)
+    account = Account(
+        account_id="test",
+        plan_id="test-plan",
+        allocation_budget_seconds=100,
+        unallocated_seconds=20,
+        limit_seconds=None,
+        instances=(inst,),
+    )
+    optimizer = AllocationOptimizer(
+        account, [_make_config("crn:a")], minimum_allocation_seconds=80, allocation_reserve_percent=50.0
+    )
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({}, {}))
+    assert not is_valid
+    msg = next(e for e in errors if "cap" in e)
+    assert "Driven by: minimum_allocation_seconds requires 80s" in msg
+    # Both discretionary levers are offered, reserve first.
+    assert "To fix: lower allocation_reserve_percent and/or lower minimum_allocation_seconds." in msg
 
 
 # ---------------------------------------------------------------------------
-# Invariant 3: new_allocation >= 28-day consumed usage
+# Invariant 2: new_allocation >= 28-day consumed usage
 # ---------------------------------------------------------------------------
 
 
@@ -385,7 +434,7 @@ def test_validate_allocations_usage_floor_violation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invariant 4: new_allocation >= minimum_allocation_seconds
+# Invariant 3: new_allocation >= minimum_allocation_seconds
 # ---------------------------------------------------------------------------
 
 
@@ -409,7 +458,7 @@ def test_validate_allocations_minimum_floor_violation() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Invariant 5: new_allocation <= effective limit
+# Invariant 4: new_allocation <= effective limit
 # ---------------------------------------------------------------------------
 
 
@@ -469,7 +518,7 @@ def test_validate_allocations_gratuitous_breach_above_floor_still_fires() -> Non
 
 
 # ---------------------------------------------------------------------------
-# Invariant 6: no archiving
+# Invariant 5: no archiving
 # ---------------------------------------------------------------------------
 
 
@@ -759,6 +808,21 @@ def test_zero_consumed_active_grows_to_share() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_reserve_is_hard_fraction_of_budget() -> None:
+    """The headline contract: a 20% reserve on a 100s budget caps total allocation at 80s."""
+    inst = _active_instance("crn:a", allocation=10, consumed=0, consumed_24h=10)
+    cfg = _make_config("crn:a")
+    account = _make_account(100, inst)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60, allocation_reserve_percent=20.0)
+
+    result = optimizer.optimize()
+    total = sum(_projected(result, account).values()) + account.unmanaged_allocation_seconds
+    assert total <= 80
+
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+
+
 def test_reserve_reduces_allocation_and_validator_agrees() -> None:
     """Reserve pulls headroom out of the pool; result still passes validation."""
     inst = _active_instance("crn:a", allocation=200, consumed=100, consumed_24h=10)
@@ -780,14 +844,15 @@ def test_reserve_reduces_allocation_and_validator_agrees() -> None:
 def test_reserve_with_capped_active_keeps_leftover_reserved() -> None:
     """When water-fill caps an active instance, the leftover stays reserved (not redistributed).
 
-    The pool is scaled down by reserve_percent before water-fill runs, so a
+    The budget-based reserve is withheld from the pool before water-fill runs, so a
     capped instance's surplus never re-enters the budget — total projected
     allocation must respect the reserve cap.
     """
     # budget=1_000_000, single active instance with limit=300, consumed=100, alloc=200.
-    # raw_pool = 999_800 + (200 - 100) = 999_900. With 30% reserve, distributable ~= 699_930.
+    # raw_pool = 999_800 + (200 - 100) = 999_900. reserve_amount = int(1_000_000 * 0.30)
+    # = 300_000 → distributable = 699_900.
     # Water-fill caps the instance at limit=300 (room=200 from floor=100).
-    # Total = 300 + 0 unmanaged = 300, well below budget − reserve (~700_030). Validates.
+    # Total = 300 + 0 unmanaged = 300, well below budget − reserve (700_000). Validates.
     inst = _active_instance("crn:a", allocation=200, consumed=100, limit=300, consumed_24h=10)
     cfg = _make_config("crn:a")
     account = _make_account(1_000_000, inst)
@@ -809,8 +874,10 @@ def test_reserve_preserves_headroom_for_unmanaged_instances() -> None:
     headroom that stays unallocated.
     """
     # budget=10_000, one managed (alloc=100, very active) and one unmanaged (alloc=100).
-    # unallocated = 9800. Without reserve, managed claws all of it → projected=9900.
-    # With 50% reserve, raw_pool=9800, distributable=4900 → projected=5000.
+    # unallocated = 9800. raw_pool = 9800 + (100 - floor 60) = 9840.
+    # Without reserve, managed claws all of it → projected = 60 + 9840 = 9900.
+    # With 50% reserve, reserve_amount = int(10_000 * 0.5) = 5000 →
+    # distributable = 9840 - 5000 = 4840 → projected = 60 + 4840 = 4900.
     managed = _active_instance("crn:m", allocation=100, consumed_24h=10)
     unmanaged = _active_instance("crn:u", allocation=100, consumed_24h=5)
     account = _make_account(10_000, managed, unmanaged)

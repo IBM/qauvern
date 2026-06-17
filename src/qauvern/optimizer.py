@@ -70,12 +70,15 @@ class AllocationOptimizer:
     def redistribution_pool(self) -> tuple[int, int]:
         """Return (distributable_pool, reserve_amount) in seconds.
 
-        raw_pool = unallocated headroom + sum(allocation - floor) over managed instances.
-        `distributable_pool` is what water-fill awards across active instances;
-        `reserve_amount` is what invariant 2 withholds from the account budget.
-        Both `int()` calls truncate toward zero, so the pair sums to raw_pool or
-        raw_pool - 1 — never above raw_pool, which is what keeps the two halves
-        consistent without an explicit reconciliation.
+        `reserve_amount` is a fixed slice of the *account budget* —
+        `allocation_budget_seconds * reserve_percent / 100` — held back so total
+        allocation never exceeds `budget * (1 - reserve%/100)`.
+
+        `raw_pool` is the movable headroom: unallocated seconds + sum(allocation -
+        floor) over managed instances. `distributable_pool` is whatever movable
+        headroom survives after withholding the reserve, clamped at 0 (the reserve
+        can swallow the entire pool). Unlike the reserve, it is not a fixed fraction
+        of anything — it is what water-fill is actually allowed to award.
         """
         managed = [inst for inst in self.account.instances if inst.crn in self._configs]
         raw_pool = max(
@@ -83,8 +86,8 @@ class AllocationOptimizer:
             self.account.unallocated_seconds
             + sum(inst.allocation_seconds - self._floor(inst).value for inst in managed),
         )
-        distributable = int(raw_pool * (1 - self.allocation_reserve_percent / 100))
-        reserve_amount = int(raw_pool * self.allocation_reserve_percent / 100)
+        reserve_amount = int(self.account.allocation_budget_seconds * self.allocation_reserve_percent / 100)
+        distributable = max(0, raw_pool - reserve_amount)
         return distributable, reserve_amount
 
     def optimize(self) -> OptimizationResult:
@@ -96,7 +99,9 @@ class AllocationOptimizer:
         3. Pin every managed instance at floor = max(minimum_allocation_seconds,
            consumed_seconds). Inactive instances stay there.
         4. Build the redistribution pool from unallocated headroom plus what
-           managed instances hold above their floor; scale by reserve_percent.
+           managed instances hold above their floor, then withhold the
+           budget-based reserve (allocation_budget * reserve_percent / 100) so
+           total allocation stays under budget * (1 - reserve_percent / 100).
         5. Water-fill the pool across active instances proportional to activity
            score. Instances that hit their effective limit drop out of the round
            and the leftover flows to the rest. Leftover after all active
@@ -193,23 +198,83 @@ class AllocationOptimizer:
         suffix = " — capped at limit" if capped else ""
         return f"Active (score {inst.activity_score:.1f}, fairness {inst.fairness:.2f}){suffix}"
 
+    def _budget_breach_error(self, total_allocated: int, budget: int, reserve_amount: int) -> str:
+        """Build the message for a projection that exceeds the effective budget.
+
+        The cap is the effective budget = account budget − reserve (the reserve is
+        0 when no buffer is configured, so this is just the plain budget cap). The
+        message names the reserve in the cap breakdown only when one is set.
+
+        `optimize()` can only breach the cap when the floors themselves — plus
+        untouchable unmanaged allocation — already overflow it: water-fill never
+        awards more than `budget − reserve − floor_total − unmanaged`, so its
+        output is otherwise bounded by the cap. A breach with floors under the cap
+        is therefore unreachable from real output (it requires a corrupt API
+        snapshot or a hand-built result), so we don't special-case it — we just
+        emit one diagnostic that names each driver (28-day usage, the config
+        minimum, unmanaged instances) and offers the qauvern-owned knobs that can
+        close the gap. Consumed usage and unmanaged allocation aren't user-fixable,
+        so when neither knob is in play the message simply states the breach.
+        """
+        effective_budget = budget - reserve_amount
+        over = total_allocated - effective_budget
+
+        if reserve_amount > 0:
+            cap_expr = (
+                f"the {effective_budget}s cap ({budget}s account budget "
+                f"− {reserve_amount}s reserve at {self.allocation_reserve_percent}%)"
+            )
+        else:
+            cap_expr = f"the {budget}s account budget"
+
+        floors = [self._floor(inst) for inst in self.account.instances if inst.crn in self._configs]
+        floor_total = sum(f.value for f in floors)
+        unmanaged = self.account.unmanaged_allocation_seconds
+
+        # Split the floor by source so the message names what's driving the breach:
+        # consumed_seconds is an IBM Quantum reality, minimum_allocation_seconds is a
+        # config knob the user can lower.
+        consumed_bucket = sum(f.value for f in floors if f.source == "consumed_seconds")
+        min_alloc_bucket = floor_total - consumed_bucket
+
+        drivers: list[str] = []
+        if consumed_bucket > 0:
+            drivers.append(f"28-day usage requires {consumed_bucket}s")
+        if min_alloc_bucket > 0:
+            drivers.append(f"minimum_allocation_seconds requires {min_alloc_bucket}s")
+        if unmanaged > 0:
+            drivers.append(f"unmanaged instances hold {unmanaged}s")
+
+        # Only the qauvern-owned knobs are actionable.
+        fixes: list[str] = []
+        if reserve_amount > 0:
+            fixes.append("lower allocation_reserve_percent")
+        if min_alloc_bucket > 0:
+            fixes.append("lower minimum_allocation_seconds")
+
+        message = f"Total instance allocations ({total_allocated}s) exceed {cap_expr} by {over}s."
+        if drivers:
+            message += f" Driven by: {'; '.join(drivers)}."
+        if fixes:
+            message += f" To fix: {' and/or '.join(fixes)}."
+        return message
+
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
         """Check that `result` satisfies all allocation invariants.
 
         Checks (in order):
-        1. Total projected allocation does not exceed the account budget.
-        2. Total projected allocation respects the allocation_reserve_percent buffer.
-        3. Each managed instance's new_allocation >= its 28-day consumed usage.
-        4. Each managed instance's new_allocation >= minimum_allocation_seconds.
-        5. Each managed instance's new_allocation <= its effective limit (if set),
-           unless invariants 3 or 4 force it higher: the floor max(consumed_seconds,
+        1. Total projected allocation fits under the effective budget =  account budget − reserve.
+        2. Each managed instance's new_allocation >= its 28-day consumed usage.
+        3. Each managed instance's new_allocation >= minimum_allocation_seconds.
+        4. Each managed instance's new_allocation <= its effective limit (if set),
+           unless invariants 2 or 3 force it higher: the floor max(consumed_seconds,
            minimum_allocation_seconds) takes precedence, since a tightened limit
            below that floor is an unavoidable, non-actionable breach.
-        6. No managed instance's new_allocation is 0 (archiving is not allowed).
+        5. No managed instance's new_allocation is 0 (archiving is not allowed).
 
         Unmanaged instances (those not in self.account.instances) contribute their
         current allocation to the total-cap check via Account.unmanaged_allocation_seconds.
-        Per-instance invariants (3–6) only apply to instances present in
+        Per-instance invariants (2–5) only apply to instances present in
         self.account.instances that also have a config.
 
         Returns:
@@ -217,7 +282,12 @@ class AllocationOptimizer:
         """
         errors = []
 
-        # Invariant 1: total allocation cap
+        # Invariant 1: total projected allocation must fit under the effective
+        # budget = account budget − reserve (the reserve is 0 when unset).
+        _, reserve_amount = self.redistribution_pool()
+        budget = self.account.allocation_budget_seconds
+        effective_budget = budget - reserve_amount
+
         total_allocated = (
             sum(
                 result.allocation_changes[inst.crn].new
@@ -227,78 +297,32 @@ class AllocationOptimizer:
             )
             + self.account.unmanaged_allocation_seconds
         )
-        budget = self.account.allocation_budget_seconds
-        if total_allocated > budget:
-            # The floors win over the cap — they're the minimums we refuse to violate.
-            # When the floors plus unmanaged allocation exceed budget, the breach is
-            # unavoidable. Split the managed floor by source so the message names
-            # what's actionable: a minimum_allocation_seconds shortfall is
-            # config-fixable, while a consumed_seconds shortfall is an IBM Quantum
-            # reality where only support can raise the budget.
-            floors = [self._floor(inst) for inst in self.account.instances if inst.crn in self._configs]
-            floor_total = sum(f.value for f in floors)
-            unmanaged = self.account.unmanaged_allocation_seconds
-            if floor_total + unmanaged > budget:
-                consumed_bucket = sum(f.value for f in floors if f.source == "consumed_seconds")
-                min_alloc_bucket = floor_total - consumed_bucket
+        if total_allocated > effective_budget:
+            errors.append(self._budget_breach_error(total_allocated, budget, reserve_amount))
 
-                if unmanaged > 0:
-                    managed_budget = budget - unmanaged
-                    header = (
-                        f"Managed instance allocations ({total_allocated - unmanaged}s) exceed the "
-                        f"budget available to them ({managed_budget}s = {budget}s account budget "
-                        f"− {unmanaged}s held by unmanaged instances)"
-                    )
-                else:
-                    header = f"Total instance allocations ({total_allocated}s) exceeds account budget ({budget}s)"
-
-                parts: list[str] = []
-                if consumed_bucket > 0:
-                    parts.append(f"28-day usage requires {consumed_bucket}s")
-                if min_alloc_bucket > 0:
-                    parts.append(f"minimum_allocation_seconds requires {min_alloc_bucket}s")
-
-                fixes: list[str] = []
-                if min_alloc_bucket > 0:
-                    fixes.append("lower minimum_allocation_seconds in your config")
-                if consumed_bucket > 0:
-                    fixes.append("contact IBM Quantum support to discuss raising your account budget")
-
-                errors.append(f"{header}. {'; '.join(parts)}. To fix: {' and/or '.join(fixes)}.")
-            else:
-                errors.append(f"Total instance allocations ({total_allocated}s) exceeds account budget ({budget}s)")
-
-        # Invariant 2: reserve buffer
-        _, reserve_amount = self.redistribution_pool()
-        effective_budget = self.account.allocation_budget_seconds - reserve_amount
-        if reserve_amount > 0 and total_allocated > effective_budget:
-            errors.append(
-                f"Total instance allocations ({total_allocated}s) exceeds budget minus reserve ({effective_budget}s)"
-            )
-
-        # Invariants 3–6: per managed instance
+        # Invariants 2–5: per managed instance
         for inst in self.account.instances:
             if inst.crn not in self._configs:
                 continue
             alloc_chg = result.allocation_changes.get(inst.crn)
             new_alloc = alloc_chg.new if alloc_chg is not None else inst.allocation_seconds
 
-            # Invariant 3: >= 28-day usage
+            # Invariant 2: >= 28-day usage
             if new_alloc < inst.consumed_seconds:
                 errors.append(
                     f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below "
                     f"28-day usage ({inst.consumed_seconds}s)"
                 )
 
-            # Invariant 4: >= minimum_allocation_seconds
+            # Invariant 3: >= minimum_allocation_seconds
             if new_alloc < self.minimum_allocation_seconds:
                 errors.append(
                     f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below "
                     f"minimum ({self.minimum_allocation_seconds}s)"
                 )
 
-            # Invariant 5: <= effective limit (limit_changes take precedence).
-            # Invariants 3 and 4 win: only fire when the breach exceeds the
+            # Invariant 4: <= effective limit (limit_changes take precedence).
+            # Invariants 2 and 3 win: only fire when the breach exceeds the
             # floor they would force, so a limit tightened below that floor
             # doesn't surface as a separate, unactionable error.
             limit_chg = result.limit_changes.get(inst.crn)
@@ -309,7 +333,7 @@ class AllocationOptimizer:
                     f"Instance {inst.crn}: new_allocation ({new_alloc}s) exceeds effective limit ({effective_limit}s)"
                 )
 
-            # Invariant 6: no archiving
+            # Invariant 5: no archiving
             if new_alloc == 0:
                 errors.append(f"Instance {inst.crn}: new_allocation is 0 (archiving not allowed)")
 
