@@ -5,7 +5,7 @@ All notable changes to qauvern will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.10.0] - 2026-06-xx
+## [0.10.0] - 2026-06-17
 
 ### Changed
 
@@ -160,6 +160,7 @@ The focus of this release is improving `qauvern configure` and the configuration
 - YAML configuration with `configure` command for auto-discovery
 - Configurable minimum allocation floor
 
+[0.10.0]: https://github.com/ibm/qauvern/releases/tag/v0.10.0
 [0.9.0]: https://github.com/ibm/qauvern/releases/tag/v0.9.0
 [0.8.0]: https://github.com/ibm/qauvern/releases/tag/v0.8.0
 [0.7.0]: https://github.com/ibm/qauvern/releases/tag/v0.7.0
