@@ -8,10 +8,6 @@ plan: "premium"  # one of: internal, premium, paygo
 # Minimum allocation to maintain for each instance.
 minimum_allocation_seconds: 60
 
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
-
 instances:
   - name: "Research Project A"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/123:inst-a1::"

@@ -13,8 +13,6 @@
 import csv
 import io
 import json
-from datetime import datetime, timezone
-
 from qauvern.commands.analyze import (
     CSV_COLUMNS,
     AnalyzeReport,
@@ -57,7 +55,6 @@ def _make_instance(
         limit_seconds=limit,
         consumed_seconds=consumed,
         detailed_usage=InstanceDetailedUsage(
-            consumed_balance_period=0,
             consumed_14day=0,
             consumed_7day=0,
             consumed_3day=0,
@@ -88,8 +85,6 @@ def _make_config(crn: str, *, name: str = "Instance") -> InstanceConfig:
     return InstanceConfig(
         name=name,
         crn=crn,
-        start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        end_date=datetime(2026, 12, 31, tzinfo=timezone.utc),
     )
 
 

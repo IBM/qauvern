@@ -5,6 +5,12 @@ All notable changes to qauvern will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-06-xx
+
+### Changed
+
+- Removed `balance_period` from the config file, along with `start_date` and `end_date` in the `instances` config. This feature was only partially implemented, as it only impacted the read-only output of `show` and `analyze` but did not actually impact the allocation optimizer algorithm. The mechanism was removed for now so that it can be potentially be added back with a better design in https://github.com/IBM/qauvern/issues/164.
+
 ## [0.9.0] - 2026-06-11
 
 ### Fixed

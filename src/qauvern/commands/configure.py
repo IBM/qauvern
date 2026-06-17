@@ -23,17 +23,11 @@ def build_configure_yaml(
     account_id: str,
     plan: Plan,
     instances: Sequence[DiscoveredInstance],
-    balance_start: str,
-    balance_end: str,
 ) -> str:
     config = {
         "account_id": account_id,
         "plan": plan.value,
         "minimum_allocation_seconds": 60,
-        "balance_period": {
-            "start_date": balance_start,
-            "end_date": balance_end,
-        },
         "instances": [
             {
                 "name": inst.name or f"Instance {i}",

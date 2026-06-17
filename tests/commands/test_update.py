@@ -71,9 +71,6 @@ account_id: acct-1
 plan: internal
 minimum_allocation_seconds: 60
 allocation_reserve_percent: 5.0
-balance_period:
-  start_date: '2026-01-01T00:00:00+00:00'
-  end_date: '2026-12-31T23:59:59+00:00'
 """
 
 
@@ -280,8 +277,6 @@ instances:
     crn: '{US_CRN_A}'
     # per-instance comment
     limit_seconds: 50000
-    start_date: '2026-03-01T00:00:00+00:00'
-    end_date: '2026-09-01T00:00:00+00:00'
 """
     )
     doc = _load_yaml(text)
@@ -295,8 +290,6 @@ instances:
     assert "# per-instance comment" in output
     assert "allocation_reserve_percent: 5.0" in output
     assert "limit_seconds: 50000" in output
-    assert "2026-03-01" in output
-    assert "2026-09-01" in output
 
 
 def test_add_missing_limits_pulls_in_live_limit_when_config_has_none() -> None:

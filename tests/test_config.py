@@ -56,10 +56,9 @@ def test_missing_required_field_raises() -> None:
         "account_id": "acc-1",
         "plan": "internal",
         "minimum_allocation_seconds": 60,
-        "balance_period": {"start_date": "2026-01-01T00:00:00+00:00", "end_date": "2026-12-31T23:59:59+00:00"},
         "instances": [],
     }
-    for field in ["account_id", "plan", "minimum_allocation_seconds", "balance_period", "instances"]:
+    for field in ["account_id", "plan", "minimum_allocation_seconds", "instances"]:
         config = {k: v for k, v in base.items() if k != field}
         path = _write_config(_to_yaml(config))
         try:
@@ -75,9 +74,6 @@ def test_instances_key_not_a_list_raises() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances: "not-a-list"
 """)
     try:
@@ -85,45 +81,6 @@ instances: "not-a-list"
             ConfigParser(path)
     finally:
         os.unlink(path)
-
-
-def test_naive_date_string_raises() -> None:
-    """Test that a date string without timezone offset raises ValueError."""
-    path = _write_config("""
-account_id: "acc-1"
-plan: "internal"
-minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
-instances: []
-""")
-    try:
-        with pytest.raises(ValueError, match="balance_period.start_date"):
-            ConfigParser(path)
-    finally:
-        os.unlink(path)
-
-
-def test_balance_period_missing_dates_raises() -> None:
-    """Test that balance_period missing start_date or end_date raises ValueError."""
-    for missing in ["start_date", "end_date"]:
-        dates = {"start_date": "2026-01-01T00:00:00+00:00", "end_date": "2026-12-31T23:59:59+00:00"}
-        del dates[missing]
-        period_yaml = "\n".join(f'  {k}: "{v}"' for k, v in dates.items())
-        path = _write_config(f"""
-account_id: "acc-1"
-plan: "internal"
-minimum_allocation_seconds: 60
-balance_period:
-{period_yaml}
-instances: []
-""")
-        try:
-            with pytest.raises(ValueError, match="balance_period"):
-                ConfigParser(path)
-        finally:
-            os.unlink(path)
 
 
 def test_instance_missing_required_field_raises() -> None:
@@ -136,9 +93,6 @@ def test_instance_missing_required_field_raises() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   -
 {entry_yaml}
@@ -161,9 +115,6 @@ def test_invalid_plan_raises() -> None:
 account_id: "acc-1"
 plan: "flex"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -181,9 +132,6 @@ def test_minimum_allocation_seconds_parsed() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 300
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -201,9 +149,6 @@ def test_allocation_reserve_percent_defaults_to_zero() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -222,9 +167,6 @@ account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
 allocation_reserve_percent: 20
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -243,9 +185,6 @@ account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
 allocation_reserve_percent: 100
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -262,61 +201,12 @@ instances:
 # -------------------------------------------------------------------
 
 
-def test_instance_inherits_balance_period_dates() -> None:
-    """Test that instance configs without explicit dates inherit from balance_period."""
-    path = _write_config("""
-account_id: "acc-1"
-plan: "internal"
-minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
-instances:
-  - name: "Project A"
-    crn: "crn:test:1"
-""")
-    try:
-        parser = ConfigParser(path)
-        cfg = parser.instance_configs[0]
-        assert cfg.start_date == dt(2026, 1, 1, tzinfo=timezone.utc)
-        assert cfg.end_date == dt(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
-    finally:
-        os.unlink(path)
-
-
-def test_instance_date_overrides_balance_period() -> None:
-    """Test that entry-level start/end dates override the balance period."""
-    path = _write_config("""
-account_id: "acc-1"
-plan: "internal"
-minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
-instances:
-  - name: "Project A"
-    crn: "crn:test:1"
-    start_date: "2026-03-01T00:00:00+00:00"
-    end_date: "2026-09-30T23:59:59+00:00"
-""")
-    try:
-        parser = ConfigParser(path)
-        cfg = parser.instance_configs[0]
-        assert cfg.start_date == dt(2026, 3, 1, tzinfo=timezone.utc)
-        assert cfg.end_date == dt(2026, 9, 30, 23, 59, 59, tzinfo=timezone.utc)
-    finally:
-        os.unlink(path)
-
-
 def test_limit_seconds_parsed() -> None:
     """Test that limit_seconds YAML key parses to limit_seconds."""
     path = _write_config("""
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -340,9 +230,6 @@ def test_no_net_grants_defaults_to_empty_tuple() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -360,9 +247,6 @@ def test_net_grant_parsed() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -385,9 +269,6 @@ def test_multiple_net_grants_parsed() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -412,9 +293,6 @@ def test_net_grant_zero_seconds_raises() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -440,9 +318,6 @@ def test_net_grant_end_date_not_after_start_raises() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -461,37 +336,12 @@ instances:
         os.unlink(path)
 
 
-def test_instance_start_date_not_before_end_raises() -> None:
-    """Test that instance start_date >= end_date raises ValueError naming the instance."""
-    path = _write_config("""
-account_id: "acc-1"
-plan: "internal"
-minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
-instances:
-  - name: "Project A"
-    crn: "crn:test:1"
-    start_date: "2026-12-31T00:00:00+00:00"
-    end_date: "2026-01-01T00:00:00+00:00"
-""")
-    try:
-        with pytest.raises(ValueError, match=r"instances\[Project A\]: start_date must be before end_date"):
-            ConfigParser(path)
-    finally:
-        os.unlink(path)
-
-
 def test_instance_empty_crn_raises() -> None:
     """Test that an empty crn raises ValueError naming the instance."""
     path = _write_config("""
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: ""
@@ -509,9 +359,6 @@ def test_net_grants_require_limit_seconds() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -534,9 +381,6 @@ def test_net_grant_end_date_parsed() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -559,9 +403,6 @@ def test_net_grant_no_end_date_defaults_28_days() -> None:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -587,9 +428,6 @@ def _two_instance_config() -> str:
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances:
   - name: "Project A"
     crn: "crn:test:1"
@@ -645,9 +483,6 @@ def test_validate_instances_against_api_passes_with_empty_config_instances() -> 
 account_id: "acc-1"
 plan: "internal"
 minimum_allocation_seconds: 60
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
 instances: []
 """)
     try:

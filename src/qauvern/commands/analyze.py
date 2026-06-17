@@ -32,7 +32,6 @@ CSV_COLUMNS: tuple[str, ...] = (
     "current_limit",
     "new_limit",
     "limit_delta",
-    "consumed_balance_period",
     "consumed_28d",
     "consumed_14d",
     "consumed_7d",
@@ -90,7 +89,6 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         for error in report.validation_errors:
             lines.append(f"❌ {error}")
 
-    total_balance_consumed = sum(inst.usage.consumed_balance_period for inst in account.instances)
     limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
 
     lines += [
@@ -101,7 +99,6 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         f"Plan: {report.plan.value}",
         f"Allocation budget: {format_seconds(account.allocation_budget_seconds)}",
         f"Unallocated: {format_seconds(account.unallocated_seconds)}",
-        f"Consumed (Balance Period, configured): {format_seconds(total_balance_consumed)}",
         f"Consumed (28-day, configured): {format_seconds(account.consumed_seconds)}",
     ]
 
@@ -181,7 +178,6 @@ def format_analyze_json(report: AnalyzeReport) -> str:
                 "current_limit_seconds": inst.limit_seconds,
                 "new_limit_seconds": new_limit,
                 "limit_delta_seconds": limit_delta,
-                "consumed_balance_period_seconds": inst.usage.consumed_balance_period,
                 "consumed_28day_seconds": inst.consumed_seconds,
                 "consumed_14day_seconds": inst.usage.consumed_14day,
                 "consumed_7day_seconds": inst.usage.consumed_7day,
@@ -250,7 +246,6 @@ def format_analyze_csv(report: AnalyzeReport) -> str:
                 "current_limit": inst.limit_seconds if inst.limit_seconds is not None else "",
                 "new_limit": new_limit if new_limit is not None else "",
                 "limit_delta": limit_delta,
-                "consumed_balance_period": inst.usage.consumed_balance_period,
                 "consumed_28d": inst.consumed_seconds,
                 "consumed_14d": inst.usage.consumed_14day,
                 "consumed_7d": inst.usage.consumed_7day,

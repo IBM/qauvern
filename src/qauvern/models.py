@@ -32,8 +32,6 @@ class InstanceConfig:
 
     name: str
     crn: str
-    start_date: datetime
-    end_date: datetime
     target_limit_seconds: int | None = None
     net_grants: tuple[NetGrant, ...] = ()
 
@@ -83,7 +81,6 @@ class InstanceDetailedUsage:
     consumed_3day: int
     consumed_24h: int
     daily_usage: dict[date, int]
-    consumed_balance_period: int  # Usage since balance period start
 
 
 @dataclass

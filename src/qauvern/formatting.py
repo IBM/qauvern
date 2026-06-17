@@ -146,7 +146,7 @@ def format_instance_analysis_table(
     """Build the per-instance analysis/changes table."""
     headers = ["Instance"]
     if include_usage:
-        headers += ["Period", "28d", "14d", "7d", "3d", "24h"]
+        headers += ["28d", "14d", "7d", "3d", "24h"]
     headers += ["Allocation", "Limit", "Allocation reason"]
     alloc_map = alloc_map or {}
     limit_map = limit_map or {}
@@ -167,7 +167,6 @@ def format_instance_analysis_table(
         row = [_truncate(inst.name, 35)]
         if include_usage:
             row += [
-                format_seconds(inst.usage.consumed_balance_period),
                 format_seconds(inst.consumed_seconds),
                 format_seconds(inst.usage.consumed_14day),
                 format_seconds(inst.usage.consumed_7day),

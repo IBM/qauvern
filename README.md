@@ -76,10 +76,6 @@ minimum_allocation_seconds: 60
 # Hold back a percentage of account allocation from rebalancing (optional, default: 0)
 # allocation_reserve_percent: 20
 
-balance_period:
-  start_date: "2026-01-01T00:00:00+00:00"
-  end_date: "2026-12-31T23:59:59+00:00"
-
 instances:
   - name: "Quantum Chemistry Research"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-1::"
@@ -143,8 +139,6 @@ Options:
 - `--api-key, -k`: IBM Cloud API key (or use `IBMCLOUD_API_KEY` env var)
 - `--region`: Limit to instances in a specific region (e.g., `us-east`, `eu-de`). Because all other commands only operate on instances in your config file, you can use this to restrict `qauvern` to a single region.
 - `--output, -o`: Output file path (default: `config.yaml`)
-- `--balance-start`: Balance period start date (ISO format, default: `2026-01-01T00:00:00+00:00`)
-- `--balance-end`: Balance period end date (ISO format, default: `2026-12-31T23:59:59+00:00`)
 
 After generating the configuration, optionally make these edits:
 
