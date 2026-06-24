@@ -46,7 +46,7 @@ dev = [
     "pytest-cov>=4.0.0",
     "pytest-mock>=3.10.0",
     "ruff>=0.4.0",
-    "ty==0.0.49",
+    "ty==0.0.52",
 ]
 
 [tool.ruff]
