@@ -63,7 +63,7 @@ def test_backends_denormalized(client: IBMQuantumAPIClient) -> None:
         ]
     )
     with patch.object(client.session, "request", return_value=page):
-        result = client.discover_instances("acct-1", Plan.PREMIUM)
+        result = client.discover_instances(Plan.PREMIUM)
     by_crn = {i.crn: i for i in result.active}
     assert by_crn["crn:any"].backends is None
     assert by_crn["crn:explicit"].backends == ("ibm_torino", "ibm_brisbane")
@@ -85,7 +85,7 @@ def test_single_page_no_next_url(client: IBMQuantumAPIClient) -> None:
         ]
     )
     with patch.object(client.session, "request", return_value=page) as mock_get:
-        result = client.discover_instances("acct-1", Plan.PREMIUM)
+        result = client.discover_instances(Plan.PREMIUM)
     assert len(result.active) == 2
     assert result.active[0].crn == "crn:1"
     assert result.active[1].crn == "crn:2"
@@ -101,7 +101,7 @@ def test_two_pages(client: IBMQuantumAPIClient) -> None:
     )
     page2 = _make_response([_resource("crn:2", "inst-2")])
     with patch.object(client.session, "request", side_effect=[page1, page2]) as mock_get:
-        result = client.discover_instances("acct-1", Plan.PREMIUM)
+        result = client.discover_instances(Plan.PREMIUM)
     assert len(result.active) == 2
     assert [i.crn for i in result.active] == ["crn:1", "crn:2"]
     assert mock_get.call_count == 2
@@ -121,7 +121,7 @@ def test_three_pages(client: IBMQuantumAPIClient) -> None:
     )
     page3 = _make_response([_resource("crn:3", "inst-3")])
     with patch.object(client.session, "request", side_effect=[page1, page2, page3]) as mock_get:
-        result = client.discover_instances("acct-1", Plan.PREMIUM)
+        result = client.discover_instances(Plan.PREMIUM)
     assert len(result.active) == 3
     assert mock_get.call_count == 3
 
@@ -138,36 +138,33 @@ def test_http_error_on_second_page_raises(client: IBMQuantumAPIClient) -> None:
     error_resp.json.return_value = {"message": "internal error"}
     with patch.object(client.session, "request", side_effect=[page1, error_resp]):
         with pytest.raises(requests.HTTPError):
-            client.discover_instances("acct-1", Plan.PREMIUM)
+            client.discover_instances(Plan.PREMIUM)
 
 
-def test_account_id_and_plan_filter_across_pages(client: IBMQuantumAPIClient) -> None:
-    """Account ID and resource_plan_id are passed as server-side filter params."""
+def test_plan_filter_across_pages(client: IBMQuantumAPIClient) -> None:
+    """resource_plan_id is passed as a server-side filter param on every page."""
     page1 = _make_response(
         [
-            _resource("crn:1", "mine", account_id="acct-1"),
-            _resource("crn:2", "also-mine", account_id="acct-1"),
+            _resource("crn:1", "mine"),
+            _resource("crn:2", "also-mine"),
         ],
-        next_url="https://resource-controller.cloud.ibm.com/v2/resource_instances?start=tok-y&account_id=acct-1",
+        next_url="https://resource-controller.cloud.ibm.com/v2/resource_instances?start=tok-y",
     )
     page2 = _make_response(
         [
-            _resource("crn:3", "third-mine", account_id="acct-1"),
+            _resource("crn:3", "third-mine"),
         ]
     )
     with patch.object(client.session, "request", side_effect=[page1, page2]) as mock_get:
-        result = client.discover_instances("acct-1", Plan.PREMIUM)
+        result = client.discover_instances(Plan.PREMIUM)
     assert len(result.active) == 3
     assert {i.crn for i in result.active} == {"crn:1", "crn:2", "crn:3"}
     from qauvern.plan import plan_id_for
 
     premium_id = plan_id_for(Plan.PREMIUM)
-    # Verify account_id and resource_plan_id were passed in params on first call
-    assert mock_get.call_args_list[0].kwargs["params"]["account_id"] == "acct-1"
     assert mock_get.call_args_list[0].kwargs["params"]["resource_plan_id"] == premium_id
-    # Verify account_id and resource_plan_id were passed in params on second call
-    assert mock_get.call_args_list[1].kwargs["params"]["account_id"] == "acct-1"
     assert mock_get.call_args_list[1].kwargs["params"]["resource_plan_id"] == premium_id
+    assert "account_id" not in mock_get.call_args_list[0].kwargs["params"]
 
 
 def test_archived_instance_split(client: IBMQuantumAPIClient) -> None:
@@ -179,7 +176,7 @@ def test_archived_instance_split(client: IBMQuantumAPIClient) -> None:
         ]
     )
     with patch.object(client.session, "request", return_value=page):
-        result = client.discover_instances("acct-1", Plan.PREMIUM)
+        result = client.discover_instances(Plan.PREMIUM)
     assert len(result.active) == 1
     assert result.active[0].crn == "crn:active"
     assert len(result.archived) == 1

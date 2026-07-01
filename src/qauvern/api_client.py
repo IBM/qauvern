@@ -320,8 +320,8 @@ class IBMQuantumAPIClient:
 
         return self._request_json("POST", url, json=payload)
 
-    def discover_instances(self, account_id: str, plan: Plan) -> DiscoveredInstances:
-        """Find all instances for the account_id and plan, split into live and archived.
+    def discover_instances(self, plan: Plan) -> DiscoveredInstances:
+        """Find all instances for the authenticated account and plan, split into live and archived.
 
         Usually, commands should instead read the instances from ConfigParser.instance_configs,
         rather than using this live value.
@@ -329,7 +329,6 @@ class IBMQuantumAPIClient:
         url = f"{self.resource_controller_url}/v2/resource_instances"
         params: dict[str, Any] = {
             "resource_id": QUANTUM_COMPUTING_RESOURCE_ID,
-            "account_id": account_id,
             "resource_plan_id": plan_id_for(plan),
         }
 

@@ -148,7 +148,7 @@ class CommandSession:
 def _open_session(ctx: click.Context, config: str, api_key: str | None) -> CommandSession:
     config_parser = ConfigParser(config)
     client = _build_client(ctx, api_key)
-    discovered = client.discover_instances(config_parser.account_id, config_parser.plan)
+    discovered = client.discover_instances(config_parser.plan)
     name_drifts = config_parser.validate_instances_against_api(discovered)
     if name_drifts:
         bullets = "\n".join(f"  - {d}" for d in name_drifts)
@@ -575,7 +575,7 @@ def configure(
     client = _build_client(ctx, api_key)
 
     click.echo("Fetching instances...", err=True)
-    discovered = client.discover_instances(account_id, plan).filter_by_region(region)
+    discovered = client.discover_instances(plan).filter_by_region(region)
 
     if discovered.archived:
         click.echo(f"Skipping {len(discovered.archived)} archived instance(s)", err=True)
@@ -650,7 +650,7 @@ def update(
     client = _build_client(ctx, api_key)
 
     click.echo("Fetching instances...", err=True)
-    discovered = client.discover_instances(config_parser.account_id, config_parser.plan).filter_by_region(region)
+    discovered = client.discover_instances(config_parser.plan).filter_by_region(region)
 
     actions = UpdateActions(
         expire_net_grants=not no_net_grants,

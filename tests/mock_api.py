@@ -153,20 +153,15 @@ class MockIBMQuantumAPIClient:
         instance.backends = backends
         return True
 
-    def discover_instances(self, account_id: str, plan: Plan | None = None) -> DiscoveredInstances:
-        """List mock instances for an account, split into live and archived.
+    def discover_instances(self, plan: Plan | None = None) -> DiscoveredInstances:
+        """List all mock instances, split into live and archived.
 
         `plan` is accepted to match the real client signature; the mock does
         not filter by plan since each test scenario sets up instances directly.
         """
-        if account_id not in self._account_params:
-            raise ValueError(f"Account {account_id} not found")
         live = []
         archived = []
-        for crn in self._account_instances.get(account_id, []):
-            if crn not in self.instances:
-                continue
-            src = self.instances[crn]
+        for crn, src in self.instances.items():
             instance = DiscoveredInstance(
                 crn=crn,
                 name=src.name,
