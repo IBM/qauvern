@@ -80,7 +80,6 @@ def test_basic_creation(mock_client: MockIBMQuantumAPIClient) -> None:
         plan=Plan.PREMIUM,
         allocation_seconds=36000,
         limit_seconds=None,
-        backends=None,
     )
     assert result["name"] == "test-instance"
     assert result["state"] == "active"
@@ -96,7 +95,6 @@ def test_creation_with_limit(mock_client: MockIBMQuantumAPIClient) -> None:
         plan=Plan.PREMIUM,
         allocation_seconds=96000,
         limit_seconds=120000,
-        backends=None,
     )
     crn = result["id"]
     assert mock_client.instances[crn].allocation_seconds == 96000
@@ -111,7 +109,6 @@ def test_instance_stored_in_mock(mock_client: MockIBMQuantumAPIClient) -> None:
         plan=Plan.PREMIUM,
         allocation_seconds=36000,
         limit_seconds=None,
-        backends=None,
     )
     crn = result["id"]
     assert crn in mock_client.instances

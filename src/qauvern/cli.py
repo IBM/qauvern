@@ -477,8 +477,8 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
         click.confirm("Apply these changes?", abort=True)
 
     # Apply in safe order: decreases first (free headroom), then standalone limit changes,
-    # then increases. Each instance is PATCHed once per phase with all three parameters
-    # (allocation, limit, backends) — the Resource Controller replaces the whole parameters
+    # then increases. Each instance is PATCHed once per phase with both parameters
+    # (allocation, limit) — the Resource Controller replaces the whole parameters
     # block wholesale, so we must always re-send the fields we don't intend to change.
     click.echo("\nApplying changes...")
     success_count = 0
@@ -513,7 +513,6 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
                 crn,
                 allocation_seconds=new_allocation,
                 limit_seconds=new_limit,
-                backends=instance.backends,
             )
             success_count += 1
             click.echo("    ✓ Success")
@@ -754,8 +753,6 @@ def create(
         plan=plan,
         allocation_seconds=allocation_seconds,
         limit_seconds=limit_seconds,
-        # TODO: expose --backends on the CLI so create can restrict backends at creation time.
-        backends=None,
         tags=tags,
     )
 
