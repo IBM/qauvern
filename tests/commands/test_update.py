@@ -62,7 +62,7 @@ def _discovered(active=(), archived=()) -> DiscoveredInstances:
 
 
 def _disc(crn: str, name: str = "Live", limit: int | None = None) -> DiscoveredInstance:
-    return DiscoveredInstance(crn=crn, name=name, allocation_seconds=36000, limit_seconds=limit, backends=None)
+    return DiscoveredInstance(crn=crn, name=name, allocation_seconds=36000, limit_seconds=limit)
 
 
 BASE_HEADER = """\

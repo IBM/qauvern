@@ -136,21 +136,14 @@ class MockIBMQuantumAPIClient:
         *,
         allocation_seconds: int,
         limit_seconds: int | None,
-        backends: tuple[str, ...] | None,
     ) -> bool:
-        """Atomically overwrite allocation, limit, and backends — mirroring the real PATCH.
-
-        The real Resource Controller replaces the whole `parameters` block on every call,
-        so the mock must do the same. A test that omits a field will see it wiped — that's
-        the same failure mode that motivated this method's introduction.
-        """
+        """Atomically overwrite allocation and limit — mirroring the real PATCH."""
         if instance_crn not in self.instances:
             raise ValueError(f"Instance {instance_crn} not found")
 
         instance = self.instances[instance_crn]
         instance.allocation_seconds = allocation_seconds
         instance.limit_seconds = limit_seconds
-        instance.backends = backends
         return True
 
     def discover_instances(self, plan: Plan | None = None) -> DiscoveredInstances:
@@ -167,7 +160,6 @@ class MockIBMQuantumAPIClient:
                 name=src.name,
                 allocation_seconds=src.allocation_seconds,
                 limit_seconds=src.limit_seconds,
-                backends=src.backends,
             )
             if crn in self._archived_crns:
                 archived.append(instance)
@@ -196,7 +188,6 @@ class MockIBMQuantumAPIClient:
         *,
         allocation_seconds: int,
         limit_seconds: int | None,
-        backends: tuple[str, ...] | None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
         crn = f"crn:v1:bluemix:public:quantum-computing:{target}:a/mock-account:{name}::"
@@ -207,7 +198,6 @@ class MockIBMQuantumAPIClient:
             limit_seconds=limit_seconds,
             consumed_seconds=0,
             detailed_usage=None,
-            backends=backends,
         )
         self.instances[crn] = instance
         return {

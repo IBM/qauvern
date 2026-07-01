@@ -37,37 +37,17 @@ def _resource(
     account_id: str = "acct-1",
     *,
     allocation: int | None = None,
-    backends: list[str] | None = None,
 ) -> dict:
     extensions: dict = {
         "usage_allocation_seconds": allocation if allocation is not None else 1,
         "instance_limit_seconds": None,
     }
-    if backends is not None:
-        extensions["backends"] = backends
     return {
         "id": crn,
         "name": name,
         "account_id": account_id,
         "extensions": extensions,
     }
-
-
-def test_backends_denormalized(client: IBMQuantumAPIClient) -> None:
-    """`extensions.backends == ["ANY"]` (or absent) maps to None; otherwise a tuple."""
-    page = _make_response(
-        [
-            _resource("crn:any", "any-backend", backends=["ANY"]),
-            _resource("crn:explicit", "explicit-list", backends=["ibm_torino", "ibm_brisbane"]),
-            _resource("crn:absent", "no-backends-key"),
-        ]
-    )
-    with patch.object(client.session, "request", return_value=page):
-        result = client.discover_instances(Plan.PREMIUM)
-    by_crn = {i.crn: i for i in result.active}
-    assert by_crn["crn:any"].backends is None
-    assert by_crn["crn:explicit"].backends == ("ibm_torino", "ibm_brisbane")
-    assert by_crn["crn:absent"].backends is None
 
 
 @pytest.fixture

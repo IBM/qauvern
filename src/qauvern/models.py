@@ -42,8 +42,6 @@ class DiscoveredInstance:
     name: str
     allocation_seconds: int
     limit_seconds: int | None
-    # None means "ANY backend" (the API stored ["ANY"]); a tuple is an explicit allow-list.
-    backends: tuple[str, ...] | None
 
 
 @dataclass(frozen=True)
