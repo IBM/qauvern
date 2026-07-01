@@ -52,12 +52,12 @@ def _make_instance(
 
 def test_build_configure_yaml_multiple_instances() -> None:
     instances = [
-        _make_instance(crn="crn:c", name=""),
+        _make_instance(crn="crn:c", name="C"),
         _make_instance(crn="crn:b", name="B"),
         _make_instance(crn="crn:a", name="A"),
     ]
     parsed = yaml.safe_load(build_configure_yaml("acct", Plan.INTERNAL, instances))
-    assert [p["name"] for p in parsed["instances"]] == ["A", "B", "Instance 3"]
+    assert [p["name"] for p in parsed["instances"]] == ["A", "B", "C"]
     assert [p["crn"] for p in parsed["instances"]] == ["crn:a", "crn:b", "crn:c"]
 
 
