@@ -299,7 +299,6 @@ class IBMQuantumAPIClient:
             "target": target,
             "resource_group": resource_group,
             "resource_plan_id": plan_id_for(plan),
-            "resource_id": QUANTUM_COMPUTING_RESOURCE_ID,
             "parameters": {
                 "usage_allocation_seconds": str(allocation_seconds),
                 "instance_limit_seconds": str(limit_seconds) if limit_seconds is not None else None,
