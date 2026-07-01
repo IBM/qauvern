@@ -18,6 +18,7 @@ from click.testing import CliRunner, Result
 
 from qauvern.cli import main, parse_seconds
 from qauvern.plan import Plan
+from qauvern.region import Region
 from tests.mock_api import MockIBMQuantumAPIClient
 
 
@@ -75,7 +76,7 @@ def mock_client() -> MockIBMQuantumAPIClient:
 def test_basic_creation(mock_client: MockIBMQuantumAPIClient) -> None:
     result = mock_client.create_instance(
         name="test-instance",
-        target="us-east",
+        target=Region.US_EAST,
         resource_group="rg-123",
         plan=Plan.PREMIUM,
         allocation_seconds=36000,
@@ -90,7 +91,7 @@ def test_basic_creation(mock_client: MockIBMQuantumAPIClient) -> None:
 def test_creation_with_limit(mock_client: MockIBMQuantumAPIClient) -> None:
     result = mock_client.create_instance(
         name="test-instance",
-        target="eu-de",
+        target=Region.EU_DE,
         resource_group="rg-123",
         plan=Plan.PREMIUM,
         allocation_seconds=96000,
@@ -104,7 +105,7 @@ def test_creation_with_limit(mock_client: MockIBMQuantumAPIClient) -> None:
 def test_instance_stored_in_mock(mock_client: MockIBMQuantumAPIClient) -> None:
     result = mock_client.create_instance(
         name="stored-instance",
-        target="us-east",
+        target=Region.US_EAST,
         resource_group="rg-123",
         plan=Plan.PREMIUM,
         allocation_seconds=36000,

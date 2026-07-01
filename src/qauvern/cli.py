@@ -684,7 +684,9 @@ def update(
     "--target",
     "-t",
     required=True,
-    help="Deployment region (e.g., us-east, eu-de)",
+    type=click.Choice([r.value for r in Region], case_sensitive=False),
+    callback=_parse_region,
+    help="Deployment region: " + ", ".join(r.value for r in Region),
 )
 @click.option(
     "--resource-group",
@@ -716,7 +718,7 @@ def update(
 def create(
     ctx,
     name: str,
-    target: str,
+    target: Region,
     resource_group: str,
     plan: Plan,
     api_key: str | None,

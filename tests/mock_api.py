@@ -17,6 +17,7 @@ from typing import Any
 
 from qauvern.models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState
 from qauvern.plan import Plan, plan_id_for
+from qauvern.region import Region
 
 
 class MockIBMQuantumAPIClient:
@@ -182,7 +183,7 @@ class MockIBMQuantumAPIClient:
     def create_instance(
         self,
         name: str,
-        target: str,
+        target: Region,
         resource_group: str,
         plan: Plan,
         *,
@@ -190,7 +191,7 @@ class MockIBMQuantumAPIClient:
         limit_seconds: int | None,
         tags: list[str] | None = None,
     ) -> dict[str, Any]:
-        crn = f"crn:v1:bluemix:public:quantum-computing:{target}:a/mock-account:{name}::"
+        crn = f"crn:v1:bluemix:public:quantum-computing:{target.value}:a/mock-account:{name}::"
         instance = InstanceState(
             crn=crn,
             name=name,
