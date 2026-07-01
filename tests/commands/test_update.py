@@ -219,7 +219,7 @@ instances:
             active=(
                 _disc(US_CRN_A, "Existing"),
                 _disc(US_CRN_B, "B-named", limit=70000),
-                _disc(US_CRN_C, "", limit=None),
+                _disc(US_CRN_C, "C-named", limit=None),
             )
         ),
         now=datetime(2026, 5, 1, tzinfo=timezone.utc),
@@ -228,8 +228,6 @@ instances:
     assert crns == [US_CRN_A, US_CRN_B, US_CRN_C]
     assert doc["instances"][1]["limit_seconds"] == 70000
     assert "limit_seconds" not in doc["instances"][2]
-    # Unnamed gets a fallback name based on its index in the final list.
-    assert doc["instances"][2]["name"] == "Instance 3"
     assert {a.crn for a in summary.added_instances} == {US_CRN_B, US_CRN_C}
 
 

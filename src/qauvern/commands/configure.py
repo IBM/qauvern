@@ -30,11 +30,11 @@ def build_configure_yaml(
         "minimum_allocation_seconds": 60,
         "instances": [
             {
-                "name": inst.name or f"Instance {i}",
+                "name": inst.name,
                 "crn": inst.crn,
                 **({"limit_seconds": inst.limit_seconds} if inst.limit_seconds is not None else {}),
             }
-            for i, inst in enumerate(sorted(instances, key=lambda x: (x.name == "", x.name)), 1)
+            for inst in sorted(instances, key=lambda x: x.name)
         ],
     }
 

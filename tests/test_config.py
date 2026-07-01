@@ -336,6 +336,23 @@ instances:
         os.unlink(path)
 
 
+def test_instance_empty_name_raises() -> None:
+    """Test that an empty name raises ValueError."""
+    path = _write_config("""
+account_id: "acc-1"
+plan: "internal"
+minimum_allocation_seconds: 60
+instances:
+  - name: ""
+    crn: "crn:test:1"
+""")
+    try:
+        with pytest.raises(ValueError, match="name cannot be empty"):
+            ConfigParser(path)
+    finally:
+        os.unlink(path)
+
+
 def test_instance_empty_crn_raises() -> None:
     """Test that an empty crn raises ValueError naming the instance."""
     path = _write_config("""

@@ -93,7 +93,9 @@ class ConfigParser:
                 if field not in entry:
                     raise ValueError(f"Instance config missing required field: {field}")
 
-            inst = entry.get("name", "?")
+            inst = entry["name"]
+            if not inst:
+                raise ValueError("instances[].name cannot be empty")
             if not entry["crn"]:
                 raise ValueError(f"instances[{inst}].crn cannot be empty")
 
