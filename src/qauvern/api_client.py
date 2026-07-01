@@ -284,7 +284,7 @@ class IBMQuantumAPIClient:
     def create_instance(
         self,
         name: str,
-        target: str,
+        target: Region,
         resource_group: str,
         plan: Plan,
         *,
