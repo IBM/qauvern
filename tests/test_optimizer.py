@@ -11,22 +11,21 @@
 """Tests for optimization algorithm."""
 
 import dataclasses
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 import pytest
 
 from qauvern.models import (
     Account,
     AllocationChange,
-    InstanceState,
     InstanceConfig,
     InstanceDetailedUsage,
+    InstanceState,
     LimitChange,
     NetGrant,
     OptimizationResult,
 )
 from qauvern.optimizer import AllocationOptimizer
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -713,9 +712,9 @@ def test_cap_uses_resolved_limit_not_stale_iqp_limit() -> None:
         detailed_usage=_usage(consumed_24h=10),
     )
     grant = NetGrant(
-        start_date=datetime(2026, 4, 15),
+        start_date=datetime(2026, 4, 15, tzinfo=timezone.utc),
         net_grant_seconds=300,
-        end_date=datetime(2026, 5, 13),
+        end_date=datetime(2026, 5, 13, tzinfo=timezone.utc),
     )
     cfg = InstanceConfig(
         name="a",

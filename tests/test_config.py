@@ -12,7 +12,8 @@
 
 import os
 import tempfile
-from datetime import datetime as dt, timezone
+from datetime import datetime as dt
+from datetime import timezone
 
 import pytest
 import yaml
@@ -20,7 +21,6 @@ import yaml
 from qauvern.config import ConfigParser
 from qauvern.models import InstanceNameDrift
 from tests.mock_api import MockIBMQuantumAPIClient
-
 
 # -------------------------------------------------------------------
 # Helpers

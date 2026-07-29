@@ -13,6 +13,7 @@
 import csv
 import io
 import json
+
 from qauvern.commands.analyze import (
     CSV_COLUMNS,
     AnalyzeReport,

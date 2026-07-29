@@ -10,13 +10,13 @@
 
 """Tests for the `qauvern configure` command and its pure helpers."""
 
+from datetime import timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 import yaml
 from click.testing import CliRunner, Result
-from datetime import timezone
 
 from qauvern.cli import main
 from qauvern.commands.configure import build_configure_yaml
@@ -24,7 +24,6 @@ from qauvern.config import ConfigParser
 from qauvern.models import DiscoveredInstance
 from qauvern.plan import Plan
 from tests.mock_api import MockIBMQuantumAPIClient
-
 
 # ---------------------------------------------------------------------------
 # Helpers

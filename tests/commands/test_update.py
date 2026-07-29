@@ -34,7 +34,6 @@ from qauvern.config import ConfigParser
 from qauvern.models import DiscoveredInstance, DiscoveredInstances
 from tests.mock_api import MockIBMQuantumAPIClient
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

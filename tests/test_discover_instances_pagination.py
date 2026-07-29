@@ -116,9 +116,11 @@ def test_http_error_on_second_page_raises(client: IBMQuantumAPIClient) -> None:
     error_resp.ok = False
     error_resp.status_code = 500
     error_resp.json.return_value = {"message": "internal error"}
-    with patch.object(client.session, "request", side_effect=[page1, error_resp]):
-        with pytest.raises(requests.HTTPError):
-            client.discover_instances(Plan.PREMIUM)
+    with (
+        patch.object(client.session, "request", side_effect=[page1, error_resp]),
+        pytest.raises(requests.HTTPError),
+    ):
+        client.discover_instances(Plan.PREMIUM)
 
 
 def test_plan_filter_across_pages(client: IBMQuantumAPIClient) -> None:

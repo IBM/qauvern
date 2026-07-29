@@ -10,8 +10,8 @@
 
 """Pure helpers for the `qauvern configure` command."""
 
-from collections.abc import Sequence
 import io
+from collections.abc import Sequence
 
 import yaml
 
