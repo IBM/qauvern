@@ -12,7 +12,8 @@
 
 import os
 import tempfile
-from datetime import datetime as dt, timezone
+from datetime import datetime as dt
+from datetime import timezone
 
 import pytest
 import yaml
@@ -20,7 +21,6 @@ import yaml
 from qauvern.config import ConfigParser
 from qauvern.models import InstanceNameDrift
 from tests.mock_api import MockIBMQuantumAPIClient
-
 
 # -------------------------------------------------------------------
 # Helpers
@@ -69,7 +69,7 @@ def test_missing_required_field_raises() -> None:
 
 
 def test_instances_key_not_a_list_raises() -> None:
-    """Test that the 'instances' YAML key being a non-list raises ValueError."""
+    """Test that the 'instances' YAML key being a non-list raises TypeError."""
     path = _write_config("""
 account_id: "acc-1"
 plan: "internal"
@@ -77,7 +77,7 @@ minimum_allocation_seconds: 60
 instances: "not-a-list"
 """)
     try:
-        with pytest.raises(ValueError, match="instances"):
+        with pytest.raises(TypeError, match="instances"):
             ConfigParser(path)
     finally:
         os.unlink(path)

@@ -10,9 +10,9 @@
 
 """Data models for qauvern."""
 
-from functools import cached_property
 from dataclasses import dataclass
 from datetime import date, datetime
+from functools import cached_property
 
 from .region import Region, extract_region_from_crn
 

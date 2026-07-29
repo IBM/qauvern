@@ -11,6 +11,7 @@
 """Tests for formatting helpers and table builders."""
 
 import pytest
+
 from qauvern.formatting import (
     format_fairness,
     format_instance_analysis_table,
@@ -25,7 +26,6 @@ from qauvern.models import (
     LimitChange,
     OptimizationResult,
 )
-
 
 # -------------------------------------------------------------------
 # format_seconds

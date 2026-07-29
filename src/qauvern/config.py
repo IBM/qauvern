@@ -13,6 +13,7 @@
 from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from pathlib import Path
+
 import yaml
 
 from .models import DiscoveredInstances, InstanceConfig, InstanceNameDrift, NetGrant
@@ -57,15 +58,15 @@ class ConfigParser:
                 raise ValueError(f"Missing required field in config: {field}")
 
         if not isinstance(self.config_data["instances"], list):
-            raise ValueError("'instances' must be a list")
+            raise TypeError("'instances' must be a list")
 
         reserve = self.config_data.get("allocation_reserve_percent", 0.0)
         if not (0.0 <= float(reserve) < 100.0):
             raise ValueError("allocation_reserve_percent must be in range [0, 100)")
 
         # Eagerly parse to surface validation errors at load time.
-        self.plan
-        self.instance_configs
+        _ = self.plan
+        _ = self.instance_configs
 
     @property
     def account_id(self) -> str:

@@ -14,8 +14,7 @@ from typing import Any
 
 import pytest
 
-from qauvern.models import Account, InstanceState, InstanceDetailedUsage
-
+from qauvern.models import Account, InstanceDetailedUsage, InstanceState
 
 # -------------------------------------------------------------------
 # Helpers
@@ -53,7 +52,7 @@ def test_instance_detailed_usage() -> None:
         name="", crn="", allocation_seconds=100, detailed_usage=None, consumed_seconds=0, limit_seconds=None
     )
     with pytest.raises(AssertionError):
-        instance.usage.consumed_14day
+        _ = instance.usage.consumed_14day
 
     instance.detailed_usage = _usage(consumed_14day=14)
     assert instance.usage.consumed_14day == 14

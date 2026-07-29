@@ -12,7 +12,7 @@
 
 from datetime import date, timedelta
 
-from .models import InstanceState, InstanceConfig
+from .models import InstanceConfig, InstanceState
 
 
 def resolve_limit(instance_config: InstanceConfig, instance_state: InstanceState, today: date) -> int | None:

@@ -172,12 +172,15 @@ def compute_update(
     discovered: DiscoveredInstances,
     *,
     now: datetime,
-    actions: UpdateActions = UpdateActions(),
+    actions: UpdateActions | None = None,
 ) -> UpdateSummary:
     """Reconcile a config document against the discovered API state in place.
 
     `doc` is mutated; the returned summary describes what changed.
     """
+    if actions is None:
+        actions = UpdateActions()
+
     doc_instances = doc.get("instances")
     if doc_instances is None:
         raise ValueError("Config is missing required 'instances' field")
