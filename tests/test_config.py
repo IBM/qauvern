@@ -29,7 +29,7 @@ from tests.mock_api import MockIBMQuantumAPIClient
 
 def _write_config(content: str) -> str:
     """Write config content to a temp file and return path."""
-    f = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)  # ruff: ignore[SIM115]
     f.write(content)
     f.close()
     return f.name
