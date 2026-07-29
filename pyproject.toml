@@ -54,3 +54,7 @@ line-length = 120
 
 [tool.ruff.lint]
 extend-select = ["UP"]
+ignore = [
+    "BLE001",             # Do not catch blind exception
+    "TRY002",             # Create your own exception
+]
