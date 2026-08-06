@@ -51,6 +51,7 @@ class AnalyzeReport:
     result: OptimizationResult
     instance_configs: tuple[InstanceConfig, ...]
     validation_errors: tuple[str, ...]
+    usage_floor_warnings: tuple[str, ...]
     allocation_reserve_percent: float
     redistribution_pool_seconds: int
 
@@ -64,6 +65,7 @@ class AnalyzeReport:
         optimizer: AllocationOptimizer,
     ) -> "AnalyzeReport":
         _, errors = optimizer.validate_allocations(result)
+        warnings = optimizer.usage_floor_warnings(result)
         pool_seconds = 0
         if optimizer.allocation_reserve_percent > 0:
             pool_seconds, _ = optimizer.redistribution_pool()
@@ -73,6 +75,7 @@ class AnalyzeReport:
             result=result,
             instance_configs=tuple(instance_configs),
             validation_errors=tuple(errors),
+            usage_floor_warnings=tuple(warnings),
             allocation_reserve_percent=optimizer.allocation_reserve_percent,
             redistribution_pool_seconds=pool_seconds,
         )
@@ -88,6 +91,11 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         lines += ["", "=" * 80, "VALIDATION ERRORS", "=" * 80]
         for error in report.validation_errors:
             lines.append(f"❌ {error}")
+
+    if report.usage_floor_warnings:
+        lines += ["", "=" * 80, "WARNINGS", "=" * 80]
+        for warning in report.usage_floor_warnings:
+            lines.append(f"⚠ {warning}")
 
     limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
 
@@ -203,6 +211,7 @@ def format_analyze_json(report: AnalyzeReport) -> str:
             "distributable_pool_seconds": report.redistribution_pool_seconds,
         },
         "validation_errors": list(report.validation_errors),
+        "usage_floor_warnings": list(report.usage_floor_warnings),
         "instances": instances,
     }
     return json.dumps(payload, indent=2)

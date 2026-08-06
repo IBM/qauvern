@@ -79,6 +79,11 @@ minimum_allocation_seconds: 60
 # Hold back a percentage of account allocation from rebalancing (optional, default: 0)
 # allocation_reserve_percent: 20
 
+# Require every instance's allocation to stay >= its 28-day usage (optional, default: true).
+# Only disable this if your account's plan allows an instance's usage to exceed its
+# allocation; qauvern will warn instead of blocking when this happens.
+# enforce_usage_floor: false
+
 instances:
   - name: "Quantum Chemistry Research"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-1::"
@@ -148,6 +153,7 @@ After generating the configuration, optionally make these edits:
 - Set `limit_seconds` and `net_grants` per instance to control hard caps and temporary bonuses.
 - Change `minimum_allocation_seconds` from its default of 60 seconds.
 - Set `allocation_reserve_percent` from `[0, 100)` to hold back a buffer as a fraction of the total account budget (e.g. `20` caps total allocation at 80% of budget).
+- Set `enforce_usage_floor: false` if your account's plan allows an instance to consume more than its allocation (qauvern otherwise refuses to let allocation drop below 28-day usage).
 
 Use [`qauvern update`](#update-reconcile-configuration) to keep the file in sync as instances are added, removed, or renamed.
 

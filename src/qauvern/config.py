@@ -84,6 +84,10 @@ class ConfigParser:
     def allocation_reserve_percent(self) -> float:
         return float(self.config_data.get("allocation_reserve_percent", 0.0))
 
+    @property
+    def enforce_usage_floor(self) -> bool:
+        return bool(self.config_data.get("enforce_usage_floor", True))
+
     @cached_property
     def instance_configs(self) -> list[InstanceConfig]:
         """Parse and return the list of instance configs."""

@@ -49,7 +49,7 @@ Then, account-wide:
 The optimizer validates the resulting plan against these invariants and refuses to apply changes that fail validation:
 
 1. Total projected allocation fits under the **effective budget** = `allocation_budget_seconds − reserve`, where `reserve = allocation_budget_seconds × reserve_percent / 100`.
-2. Each managed instance's new allocation is `>= consumed_seconds_28d`.
+2. Each managed instance's new allocation is `>= consumed_seconds_28d`, unless `enforce_usage_floor` is `false` (see below), in which case a warning is emitted instead.
 3. Each managed instance's new allocation is `>= minimum_allocation_seconds`.
 4. Each managed instance's new allocation is `<= effective limit`, unless invariants 2 or 3 force it higher (a limit tightened below the floor is an unavoidable, non-actionable breach and is not flagged here).
 5. No managed instance's new allocation is 0 (archiving is not allowed).
@@ -61,6 +61,10 @@ Some clients manage consumption primarily via limits, rather than saturating all
 ### `allocation_reserve_percent` (account level)
 
 Holds back a percentage of the **total account budget** (`allocation_budget_seconds`) as a hard buffer: total allocation across all instances will never exceed `budget × (1 − reserve_percent / 100)`. The reserved amount stays unallocated and is not distributed to any instance. Because the reserve is anchored to the budget rather than the movable pool, the cap is predictable regardless of current allocations or usage. Defaults to 0 (no reserve). Must be in `[0, 100)`. Configured at the top level of the YAML.
+
+### `enforce_usage_floor` (account level)
+
+Controls whether an instance's allocation is always pinned at or above its 28-day consumed usage (invariant 2 above). Defaults to `true`, which is a queue-priority exploit protection (see `optimizer.Floor` docstring). Some accounts legitimately need this off — set `enforce_usage_floor: false` and `_floor()` falls back to `minimum_allocation_seconds` only; `optimize`/`analyze` print a warning instead of a validation error when an instance's allocation lands below its usage.
 
 ### `limit_seconds` (instance level)
 

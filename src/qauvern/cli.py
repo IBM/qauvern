@@ -253,6 +253,7 @@ def show(ctx, config: str, api_key: str | None):
             config_parser.instance_configs,
             config_parser.minimum_allocation_seconds,
             allocation_reserve_percent=config_parser.allocation_reserve_percent,
+            enforce_usage_floor=config_parser.enforce_usage_floor,
         ).redistribution_pool()
         click.echo(format_reserve_summary(pool, config_parser.allocation_reserve_percent))
     limit_display = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
@@ -369,6 +370,7 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str):
         instance_configs,
         config_parser.minimum_allocation_seconds,
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
+        enforce_usage_floor=config_parser.enforce_usage_floor,
     )
     result = optimizer.optimize()
 
@@ -377,6 +379,8 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str):
     if fmt == "csv":
         for error in report.validation_errors:
             click.echo(f"Warning: {error}", err=True)
+        for warning in report.usage_floor_warnings:
+            click.echo(f"Warning: {warning}", err=True)
         click.echo(format_analyze_csv(report), nl=False)
     elif fmt == "json":
         click.echo(format_analyze_json(report))
@@ -429,6 +433,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
         instance_configs,
         minimum_allocation_seconds,
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
+        enforce_usage_floor=config_parser.enforce_usage_floor,
     )
     result = optimizer.optimize()
 
@@ -438,6 +443,9 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
         for err in errors:
             click.echo(f"❌ {err}", err=True)
         raise click.ClickException("Validation failed; refusing to apply changes.")
+
+    for warning in optimizer.usage_floor_warnings(result):
+        click.echo(f"Warning: {warning}", err=True)
 
     if not result.allocation_changes and not result.limit_changes:
         click.echo("✓ No optimization needed. Allocations are already optimal.")

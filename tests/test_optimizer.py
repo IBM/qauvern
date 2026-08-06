@@ -432,6 +432,51 @@ def test_validate_allocations_usage_floor_violation() -> None:
     assert any("28-day usage" in e for e in errors)
 
 
+def test_validate_allocations_usage_floor_skipped_when_disabled() -> None:
+    """With enforce_usage_floor=False, new_allocation below consumed_seconds is not an error."""
+    inst = _make_instance("crn:a", 200, consumed=150)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], enforce_usage_floor=False)
+    chg = AllocationChange(current=200, new=100, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
+    assert is_valid, errors
+
+
+def test_floor_ignores_consumed_seconds_when_disabled() -> None:
+    """With enforce_usage_floor=False, _floor() never returns the consumed_seconds source."""
+    inst = _make_instance("crn:a", 200, consumed=150)
+    optimizer = AllocationOptimizer(
+        _make_account(1000, inst), [_make_config("crn:a")], minimum_allocation_seconds=60, enforce_usage_floor=False
+    )
+    floor = optimizer._floor(inst)
+    assert floor.source == "minimum_allocation_seconds"
+    assert floor.value == 60
+
+
+def test_usage_floor_warnings_empty_when_enforced() -> None:
+    """usage_floor_warnings is always empty when enforce_usage_floor=True (errors instead)."""
+    inst = _make_instance("crn:a", 200, consumed=150)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
+    chg = AllocationChange(current=200, new=100, reason="t")
+    assert optimizer.usage_floor_warnings(OptimizationResult({"crn:a": chg}, {})) == []
+
+
+def test_usage_floor_warnings_reported_when_disabled() -> None:
+    """usage_floor_warnings surfaces instances below usage when enforce_usage_floor=False."""
+    inst = _make_instance("crn:a", 200, consumed=150)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], enforce_usage_floor=False)
+    chg = AllocationChange(current=200, new=100, reason="t")
+    warnings = optimizer.usage_floor_warnings(OptimizationResult({"crn:a": chg}, {}))
+    assert len(warnings) == 1
+    assert "28-day usage" in warnings[0]
+
+
+def test_usage_floor_warnings_none_when_no_breach() -> None:
+    """usage_floor_warnings is empty when disabled but no instance falls below usage."""
+    inst = _make_instance("crn:a", 200, consumed=100)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], enforce_usage_floor=False)
+    assert optimizer.usage_floor_warnings(OptimizationResult({}, {})) == []
+
+
 # ---------------------------------------------------------------------------
 # Invariant 3: new_allocation >= minimum_allocation_seconds
 # ---------------------------------------------------------------------------
