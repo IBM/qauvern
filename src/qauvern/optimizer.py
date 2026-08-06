@@ -25,7 +25,12 @@ class Floor:
     """The minimum allocation we'll pin an instance to, and why.
 
     `consumed_seconds` is the IBM Quantum hard floor — the API technically
-    does not enforce it, but it can result in surprising behavior.
+    does not enforce it, but pinning to it closes a queue-priority exploit:
+    dropping an instance's allocation below its usage frees allocation that
+    didn't actually exist as spare capacity, which can then be handed to
+    another instance to jump it to the front of the fair-share queue.
+    `enforce_usage_floor=False` (see AllocationOptimizer) disables this floor
+    for accounts where it's not enforceable — see `optimizer.enforce_usage_floor`.
     `minimum_allocation_seconds` is a qauvern-level config knob that the
     user can lower. Ties go to `consumed_seconds` so the user sees the
     unfixable source first.
@@ -44,6 +49,7 @@ class AllocationOptimizer:
         instance_configs: list[InstanceConfig],
         minimum_allocation_seconds: int = 60,
         allocation_reserve_percent: float = 0.0,
+        enforce_usage_floor: bool = True,
         today: date | None = None,
     ):
         """Initialize the optimizer.
@@ -53,17 +59,21 @@ class AllocationOptimizer:
             instance_configs: List of instance configs with allocation constraints
             minimum_allocation_seconds: Minimum allocation to maintain for each instance (default: 60 seconds)
             allocation_reserve_percent: Fraction of available seconds to hold back from redistribution
+            enforce_usage_floor: Whether allocation must stay >= 28-day consumed usage (default: True).
+                Disabling this is only safe for accounts whose plan allows an instance's usage to
+                exceed its allocation (e.g. via a limit set above allocation).
             today: Date to use for limit override resolution (defaults to today in UTC)
         """
         self.account = account
         self.instance_configs = instance_configs
         self.minimum_allocation_seconds = minimum_allocation_seconds
         self.allocation_reserve_percent = allocation_reserve_percent
+        self.enforce_usage_floor = enforce_usage_floor
         self.today = today or datetime.now(timezone.utc).date()
         self._configs = {config.crn: config for config in instance_configs}
 
     def _floor(self, instance: InstanceState) -> Floor:
-        if instance.consumed_seconds >= self.minimum_allocation_seconds:
+        if self.enforce_usage_floor and instance.consumed_seconds >= self.minimum_allocation_seconds:
             return Floor(instance.consumed_seconds, "consumed_seconds")
         return Floor(self.minimum_allocation_seconds, "minimum_allocation_seconds")
 
@@ -259,12 +269,35 @@ class AllocationOptimizer:
             message += f" To fix: {' and/or '.join(fixes)}."
         return message
 
+    def usage_floor_warnings(self, result: OptimizationResult) -> list[str]:
+        """Warn about instances whose new_allocation falls below 28-day usage.
+
+        Only meaningful when `enforce_usage_floor` is False — with it True, this
+        situation is a validate_allocations() error instead, not a warning. Callers
+        should print these to stderr; they aren't a reason to block applying changes.
+        """
+        if self.enforce_usage_floor:
+            return []
+        warnings = []
+        for inst in self.account.instances:
+            if inst.crn not in self._configs:
+                continue
+            alloc_chg = result.allocation_changes.get(inst.crn)
+            new_alloc = alloc_chg.new if alloc_chg is not None else inst.allocation_seconds
+            if new_alloc < inst.consumed_seconds:
+                warnings.append(
+                    f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below "
+                    f"28-day usage ({inst.consumed_seconds}s) — enforce_usage_floor is disabled"
+                )
+        return warnings
+
     def validate_allocations(self, result: OptimizationResult) -> tuple[bool, list[str]]:
         """Check that `result` satisfies all allocation invariants.
 
         Checks (in order):
         1. Total projected allocation fits under the effective budget =  account budget − reserve.
-        2. Each managed instance's new_allocation >= its 28-day consumed usage.
+        2. Each managed instance's new_allocation >= its 28-day consumed usage (skipped
+           when `enforce_usage_floor` is False — see `usage_floor_warnings` instead).
         3. Each managed instance's new_allocation >= minimum_allocation_seconds.
         4. Each managed instance's new_allocation <= its effective limit (if set),
            unless invariants 2 or 3 force it higher: the floor max(consumed_seconds,
@@ -308,7 +341,7 @@ class AllocationOptimizer:
             new_alloc = alloc_chg.new if alloc_chg is not None else inst.allocation_seconds
 
             # Invariant 2: >= 28-day usage
-            if new_alloc < inst.consumed_seconds:
+            if self.enforce_usage_floor and new_alloc < inst.consumed_seconds:
                 errors.append(
                     f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below "
                     f"28-day usage ({inst.consumed_seconds}s)"
@@ -327,7 +360,7 @@ class AllocationOptimizer:
             # doesn't surface as a separate, unactionable error.
             limit_chg = result.limit_changes.get(inst.crn)
             effective_limit = limit_chg.new if limit_chg is not None else inst.limit_seconds
-            floor = max(self.minimum_allocation_seconds, inst.consumed_seconds)
+            floor = max(self.minimum_allocation_seconds, inst.consumed_seconds if self.enforce_usage_floor else 0)
             if effective_limit is not None and new_alloc > effective_limit and new_alloc > floor:
                 errors.append(
                     f"Instance {inst.crn}: new_allocation ({new_alloc}s) exceeds effective limit ({effective_limit}s)"

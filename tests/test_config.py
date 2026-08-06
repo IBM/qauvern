@@ -178,6 +178,41 @@ instances:
         os.unlink(path)
 
 
+def test_enforce_usage_floor_defaults_to_true() -> None:
+    """Test that enforce_usage_floor defaults to True when absent."""
+    path = _write_config("""
+account_id: "acc-1"
+plan: "internal"
+minimum_allocation_seconds: 60
+instances:
+  - name: "Project A"
+    crn: "crn:test:1"
+""")
+    try:
+        parser = ConfigParser(path)
+        assert parser.enforce_usage_floor is True
+    finally:
+        os.unlink(path)
+
+
+def test_enforce_usage_floor_parsed_false() -> None:
+    """Test that enforce_usage_floor is parsed from config."""
+    path = _write_config("""
+account_id: "acc-1"
+plan: "internal"
+minimum_allocation_seconds: 60
+enforce_usage_floor: false
+instances:
+  - name: "Project A"
+    crn: "crn:test:1"
+""")
+    try:
+        parser = ConfigParser(path)
+        assert parser.enforce_usage_floor is False
+    finally:
+        os.unlink(path)
+
+
 def test_reserve_percent_out_of_range_raises() -> None:
     """Test that allocation_reserve_percent >= 100 raises ValueError."""
     path = _write_config("""

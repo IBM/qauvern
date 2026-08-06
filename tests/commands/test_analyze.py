@@ -128,6 +128,22 @@ def test_from_optimizer_no_validation_errors_when_valid() -> None:
     assert report.validation_errors == ()
 
 
+def test_from_optimizer_usage_floor_warning_when_disabled() -> None:
+    inst = _make_instance(CRN_A, allocation=200, consumed=150)
+    account = _make_account((inst,), budget=1000)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], enforce_usage_floor=False)
+    result = OptimizationResult(
+        allocation_changes={CRN_A: AllocationChange(current=200, new=100, reason="t")},
+        limit_changes={},
+    )
+
+    report = _report(account, result, [cfg], optimizer)
+    assert report.validation_errors == ()
+    assert report.usage_floor_warnings
+    assert "28-day usage" in report.usage_floor_warnings[0]
+
+
 def test_from_optimizer_pool_zero_when_reserve_zero() -> None:
     account, result, cfgs, optimizer = _no_changes_setup()
     report = _report(account, result, cfgs, optimizer)
@@ -463,7 +479,14 @@ def test_csv_validation_errors_not_in_body() -> None:
 def test_json_top_level_keys_present() -> None:
     account, result, cfgs, optimizer = _no_changes_setup()
     payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
-    assert set(payload.keys()) == {"plan", "account", "reserve", "validation_errors", "instances"}
+    assert set(payload.keys()) == {
+        "plan",
+        "account",
+        "reserve",
+        "validation_errors",
+        "usage_floor_warnings",
+        "instances",
+    }
 
 
 def test_json_round_trips() -> None:
