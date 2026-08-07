@@ -59,7 +59,7 @@ class AllocationOptimizer:
             instance_configs: List of instance configs with allocation constraints
             minimum_allocation_seconds: Minimum allocation to maintain for each instance (default: 60 seconds)
             allocation_reserve_percent: Fraction of available seconds to hold back from redistribution
-            enforce_usage_floor: Whether allocation must stay >= 28-day consumed usage (default: True).
+            enforce_usage_floor: Whether an instance's allocation must stay >= its consumed 28-day usage (default: True).
                 Disabling this is only safe for accounts whose plan allows an instance's usage to
                 exceed its allocation (e.g. via a limit set above allocation).
             today: Date to use for limit override resolution (defaults to today in UTC)
