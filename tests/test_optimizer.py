@@ -432,20 +432,25 @@ def test_validate_allocations_usage_floor_violation() -> None:
     assert any("28-day usage" in e for e in errors)
 
 
-def test_validate_allocations_usage_floor_skipped_when_disabled() -> None:
-    """With enforce_usage_floor=False, new_allocation below consumed_seconds is not an error."""
+def test_validate_allocations_usage_floor_skipped_when_relaxed() -> None:
+    """With the usage floor relaxed, new_allocation below consumed_seconds is not an error."""
     inst = _make_instance("crn:a", 200, consumed=150)
-    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], enforce_usage_floor=False)
+    optimizer = AllocationOptimizer(
+        _make_account(1000, inst), [_make_config("crn:a")], usage_floor_relax_above_percent=0.0
+    )
     chg = AllocationChange(current=200, new=100, reason="t")
     is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
     assert is_valid, errors
 
 
-def test_floor_ignores_consumed_seconds_when_disabled() -> None:
-    """With enforce_usage_floor=False, _floor() never returns the consumed_seconds source."""
+def test_floor_ignores_consumed_seconds_when_relaxed() -> None:
+    """With the usage floor relaxed, _floor() never returns the consumed_seconds source."""
     inst = _make_instance("crn:a", 200, consumed=150)
     optimizer = AllocationOptimizer(
-        _make_account(1000, inst), [_make_config("crn:a")], minimum_allocation_seconds=60, enforce_usage_floor=False
+        _make_account(1000, inst),
+        [_make_config("crn:a")],
+        minimum_allocation_seconds=60,
+        usage_floor_relax_above_percent=0.0,
     )
     floor = optimizer._floor(inst)
     assert floor.source == "minimum_allocation_seconds"
@@ -453,17 +458,19 @@ def test_floor_ignores_consumed_seconds_when_disabled() -> None:
 
 
 def test_usage_floor_warnings_empty_when_enforced() -> None:
-    """usage_floor_warnings is always empty when enforce_usage_floor=True (errors instead)."""
+    """usage_floor_warnings is always empty when the usage floor is enforced (errors instead)."""
     inst = _make_instance("crn:a", 200, consumed=150)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
     chg = AllocationChange(current=200, new=100, reason="t")
     assert optimizer.usage_floor_warnings(OptimizationResult({"crn:a": chg}, {})) == []
 
 
-def test_usage_floor_warnings_reported_when_disabled() -> None:
-    """usage_floor_warnings surfaces instances below usage when enforce_usage_floor=False."""
+def test_usage_floor_warnings_reported_when_relaxed() -> None:
+    """usage_floor_warnings surfaces instances below usage when the usage floor is relaxed."""
     inst = _make_instance("crn:a", 200, consumed=150)
-    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], enforce_usage_floor=False)
+    optimizer = AllocationOptimizer(
+        _make_account(1000, inst), [_make_config("crn:a")], usage_floor_relax_above_percent=0.0
+    )
     chg = AllocationChange(current=200, new=100, reason="t")
     warnings = optimizer.usage_floor_warnings(OptimizationResult({"crn:a": chg}, {}))
     assert len(warnings) == 1
@@ -471,10 +478,50 @@ def test_usage_floor_warnings_reported_when_disabled() -> None:
 
 
 def test_usage_floor_warnings_none_when_no_breach() -> None:
-    """usage_floor_warnings is empty when disabled but no instance falls below usage."""
+    """usage_floor_warnings is empty when relaxed but no instance falls below usage."""
     inst = _make_instance("crn:a", 200, consumed=100)
-    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")], enforce_usage_floor=False)
+    optimizer = AllocationOptimizer(
+        _make_account(1000, inst), [_make_config("crn:a")], usage_floor_relax_above_percent=0.0
+    )
     assert optimizer.usage_floor_warnings(OptimizationResult({}, {})) == []
+
+
+def test_usage_floor_still_enforced_at_exact_threshold() -> None:
+    """The floor stays enforced when consumed/budget lands exactly on the configured percent (>)."""
+    inst = _make_instance("crn:a", 200, consumed=150)
+    # consumed_seconds across account = 150; budget = 1000 -> 15% usage.
+    optimizer = AllocationOptimizer(
+        _make_account(1000, inst),
+        [_make_config("crn:a")],
+        minimum_allocation_seconds=60,
+        usage_floor_relax_above_percent=15.0,
+    )
+    floor = optimizer._floor(inst)
+    assert floor.source == "consumed_seconds"
+    assert floor.value == 150
+
+
+def test_usage_floor_relaxed_just_above_threshold() -> None:
+    """The floor relaxes once consumed/budget exceeds the configured percent."""
+    inst = _make_instance("crn:a", 200, consumed=150)
+    optimizer = AllocationOptimizer(
+        _make_account(1000, inst),
+        [_make_config("crn:a")],
+        minimum_allocation_seconds=60,
+        usage_floor_relax_above_percent=14.9,
+    )
+    floor = optimizer._floor(inst)
+    assert floor.source == "minimum_allocation_seconds"
+    assert floor.value == 60
+
+
+def test_usage_floor_relaxed_when_budget_is_zero() -> None:
+    """A zero allocation_budget_seconds relaxes the floor instead of raising ZeroDivisionError."""
+    inst = _make_instance("crn:a", 0, consumed=0)
+    optimizer = AllocationOptimizer(_make_account(0, inst), [_make_config("crn:a")], minimum_allocation_seconds=60)
+    floor = optimizer._floor(inst)
+    assert floor.source == "minimum_allocation_seconds"
+    assert floor.value == 60
 
 
 # ---------------------------------------------------------------------------

@@ -128,11 +128,11 @@ def test_from_optimizer_no_validation_errors_when_valid() -> None:
     assert report.validation_errors == ()
 
 
-def test_from_optimizer_usage_floor_warning_when_disabled() -> None:
+def test_from_optimizer_usage_floor_warning_when_relaxed() -> None:
     inst = _make_instance(CRN_A, allocation=200, consumed=150)
     account = _make_account((inst,), budget=1000)
     cfg = _make_config(CRN_A)
-    optimizer = AllocationOptimizer(account, [cfg], enforce_usage_floor=False)
+    optimizer = AllocationOptimizer(account, [cfg], usage_floor_relax_above_percent=0.0)
     result = OptimizationResult(
         allocation_changes={CRN_A: AllocationChange(current=200, new=100, reason="t")},
         limit_changes={},
