@@ -253,7 +253,7 @@ def show(ctx, config: str, api_key: str | None):
             config_parser.instance_configs,
             config_parser.minimum_allocation_seconds,
             allocation_reserve_percent=config_parser.allocation_reserve_percent,
-            enforce_usage_floor=config_parser.enforce_usage_floor,
+            usage_floor_relax_above_percent=config_parser.usage_floor_relax_above_percent,
         ).redistribution_pool()
         click.echo(format_reserve_summary(pool, config_parser.allocation_reserve_percent))
     limit_display = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
@@ -370,7 +370,7 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str):
         instance_configs,
         config_parser.minimum_allocation_seconds,
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
-        enforce_usage_floor=config_parser.enforce_usage_floor,
+        usage_floor_relax_above_percent=config_parser.usage_floor_relax_above_percent,
     )
     result = optimizer.optimize()
 
@@ -433,7 +433,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
         instance_configs,
         minimum_allocation_seconds,
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
-        enforce_usage_floor=config_parser.enforce_usage_floor,
+        usage_floor_relax_above_percent=config_parser.usage_floor_relax_above_percent,
     )
     result = optimizer.optimize()
 

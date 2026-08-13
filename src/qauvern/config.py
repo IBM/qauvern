@@ -64,6 +64,10 @@ class ConfigParser:
         if not (0.0 <= float(reserve) < 100.0):
             raise ValueError("allocation_reserve_percent must be in range [0, 100)")
 
+        relax_percent = self.config_data.get("usage_floor_relax_above_percent", 100.0)
+        if not (0.0 <= float(relax_percent) <= 100.0):
+            raise ValueError("usage_floor_relax_above_percent must be in range [0, 100]")
+
         # Eagerly parse to surface validation errors at load time.
         _ = self.plan
         _ = self.instance_configs
@@ -85,8 +89,8 @@ class ConfigParser:
         return float(self.config_data.get("allocation_reserve_percent", 0.0))
 
     @property
-    def enforce_usage_floor(self) -> bool:
-        return bool(self.config_data.get("enforce_usage_floor", True))
+    def usage_floor_relax_above_percent(self) -> float:
+        return float(self.config_data.get("usage_floor_relax_above_percent", 100.0))
 
     @cached_property
     def instance_configs(self) -> list[InstanceConfig]:
