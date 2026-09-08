@@ -329,29 +329,29 @@ What a grant does *not* do is disappear from the effective limit the moment it e
 
 > **An instance is never worse off after a grant expires than if the grant had never existed.**
 
-With `limit_seconds: 100` and a grant of `1000` fully spent on the grant's last day:
+With `limit_seconds: 10` and a grant of `100` fully spent on the grant's last day:
 
 | Usage during the grant | Effective limit at expiry | Available |
 | --- | --- | --- |
-| 1000 (the grant, exactly) | 100 + 1000 | 100 — the whole base limit |
-| 1050 (50 past the grant) | 100 + 1000 | 50 |
-| 1100 (grant + base) | 100 + 1000 | 0 — spent, but not in debt |
+| 100 (the grant, exactly) | 10 + 100 | 10 — the whole base limit |
+| 105 (5 past the grant) | 10 + 100 | 5 |
+| 110 (grant + base) | 10 + 100 | 0 — spent, but not in debt |
 
-The credit then decays as the funded days age out. For `limit_seconds: 100`, a grant of `1000` covering March 1–11 (`end_date: 2026-03-11`), with 700s used March 5 and 500s used March 8:
+The credit then decays as the funded days age out. For `limit_seconds: 10`, a grant of `100` covering March 1–11 (`end_date: 2026-03-11`), with 70s used March 5 and 50s used March 8:
 
 | Date | Grant status | Effective limit | Usage in window | Available |
 | --- | --- | --- | --- | --- |
-| Mar 10 | active | 1100 | 1200 | −100 |
-| Mar 11 | expired, still crediting | 1100 | 1200 | −100 |
-| Apr 2 | expired, still crediting | 1100 | 1200 | −100 |
-| Apr 3 | Mar 5 rolled out | 400 | 500 | −100 |
-| Apr 6 | Mar 8 rolled out | 100 | 0 | 100 |
-| Apr 8 | fully rolled off | 100 | 0 | 100 |
+| Mar 10 | active | 110 | 120 | −10 |
+| Mar 11 | expired, still crediting | 110 | 120 | −10 |
+| Apr 2 | expired, still crediting | 110 | 120 | −10 |
+| Apr 3 | Mar 5 rolled out | 40 | 50 | −10 |
+| Apr 6 | Mar 8 rolled out | 10 | 0 | 10 |
+| Apr 8 | fully rolled off | 10 | 0 | 10 |
 
 Availability only ever climbs as time passes — it never dips because a grant ended. Two things follow that are worth expecting:
 
 - **The limit in IBM Quantum stays above `limit_seconds` for up to 28 days after `end_date`.** It will not snap back on `end_date`, and while it is elevated it also raises the cap the water-fill step will allocate up to.
-- **Unspent grant time does not carry over.** Only usage a grant actually funded is credited, so a grant of 1000 with 200 used still loses the other 800 at `end_date`.
+- **Unspent grant time does not carry over.** Only usage a grant actually funded is credited, so a grant of 100 with 20 used still loses the other 80 at `end_date`.
 
 Because only grants that can still credit take part in resolution, `qauvern update` removing a fully rolled-off grant can never change any other grant's contribution. That is why `update` keeps expired-but-still-crediting grants in the file (reporting them under `Notes:` with a removable-on date) and only deletes them once `end_date` is more than 28 days old.
 
