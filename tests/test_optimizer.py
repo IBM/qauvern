@@ -864,6 +864,40 @@ def test_no_config_limit_means_no_ceiling_and_no_limit_change() -> None:
 
 
 # ---------------------------------------------------------------------------
+# limit_breakdowns laziness
+# ---------------------------------------------------------------------------
+
+
+def test_limit_breakdowns_not_computed_until_accessed() -> None:
+    """Construction and redistribution_pool() must not touch instance usage."""
+    grant = NetGrant(
+        start_date=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        net_grant_seconds=100,
+        end_date=datetime(2026, 4, 29, tzinfo=timezone.utc),
+    )
+    inst = _make_instance("crn:a", 1000, detailed_usage=None)
+    cfg = InstanceConfig(name="a", crn="crn:a", target_limit_seconds=500, net_grants=(grant,))
+
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [cfg], today=date(2026, 4, 1))
+    optimizer.redistribution_pool()  # must not raise
+
+
+def test_limit_breakdowns_raises_when_usage_unpopulated_but_needed() -> None:
+    """Once accessed, resolving a breakdown for an active grant needs daily_usage."""
+    grant = NetGrant(
+        start_date=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        net_grant_seconds=100,
+        end_date=datetime(2026, 4, 29, tzinfo=timezone.utc),
+    )
+    inst = _make_instance("crn:a", 1000, detailed_usage=None)
+    cfg = InstanceConfig(name="a", crn="crn:a", target_limit_seconds=500, net_grants=(grant,))
+
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [cfg], today=date(2026, 4, 1))
+    with pytest.raises(AssertionError, match="detailed_usage accessed before it was populated"):
+        _ = optimizer.limit_breakdowns
+
+
+# ---------------------------------------------------------------------------
 # Floor edge cases
 # ---------------------------------------------------------------------------
 
