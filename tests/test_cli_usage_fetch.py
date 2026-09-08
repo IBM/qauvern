@@ -61,7 +61,7 @@ def test_usage_fetch_failure_aborts_run(runner: CliRunner, tmp_path: Path, comma
     config_path.write_text(CONFIG_TEXT)
 
     client = _mock_client_with_instances()
-    with patch.object(client, "get_detailed_usage", side_effect=RuntimeError("boom"), create=True):
+    with patch.object(client, "get_detailed_usage", side_effect=RuntimeError("boom")):
         result = _invoke(runner, client, command, config_path)
 
     assert result.exit_code != 0
@@ -80,7 +80,7 @@ def test_daily_usage_fetch_failure_aborts_run(runner: CliRunner, tmp_path: Path,
     client = _mock_client_with_instances()
     detailed = {"consumed_14day": 0, "consumed_7day": 0, "consumed_3day": 0, "consumed_24h": 0}
     with (
-        patch.object(client, "get_detailed_usage", return_value=detailed, create=True),
+        patch.object(client, "get_detailed_usage", return_value=detailed),
         patch.object(client, "get_daily_usage", side_effect=RuntimeError("daily boom")),
     ):
         result = _invoke(runner, client, command, config_path)
