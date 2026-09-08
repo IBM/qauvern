@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Any
 
-from qauvern.models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState
+from qauvern.models import Account, DiscoveredInstance, DiscoveredInstances, InstanceDetailedUsage, InstanceState
 from qauvern.plan import Plan, plan_id_for
 from qauvern.region import Region
 
@@ -74,18 +74,36 @@ class MockIBMQuantumAPIClient:
         account_id: str | None = None,
         archived: bool = False,
         backends: tuple[str, ...] | None = None,
+        consumed_14day: int = 0,
+        consumed_7day: int = 0,
+        consumed_3day: int = 0,
+        consumed_24h: int = 0,
+        daily_usage: dict[date, int] | None = None,
     ) -> InstanceState:
-        """Setup a mock instance for testing."""
+        """Setup a mock instance for testing.
+
+        The `consumed_*`/`daily_usage` args populate `detailed_usage` directly, so tests that
+        need `resolve_limit` or `instance.usage` (e.g. net-grant rolloff) can build a fully
+        populated instance without going through the CLI's usage-enrichment flow.
+        """
         instance = InstanceState(
             crn=crn,
             name=name,
             allocation_seconds=allocation_seconds,
             limit_seconds=limit_seconds,
             consumed_seconds=consumed_seconds,
-            detailed_usage=None,
+            detailed_usage=InstanceDetailedUsage(
+                consumed_14day=consumed_14day,
+                consumed_7day=consumed_7day,
+                consumed_3day=consumed_3day,
+                consumed_24h=consumed_24h,
+                daily_usage=daily_usage or {},
+            ),
             backends=backends,
         )
         self.instances[crn] = instance
+        if daily_usage:
+            self.setup_daily_usage(crn, daily_usage)
         if archived:
             self._archived_crns.add(crn)
         if account_id:
@@ -110,6 +128,20 @@ class MockIBMQuantumAPIClient:
         """Return per-day usage for the half-open interval [start_date, end_date)."""
         all_days = self.daily_usage_data.get(instance_crn, {})
         return {d: s for d, s in all_days.items() if start_date <= d < end_date}
+
+    def get_detailed_usage(self, instance_crn: str, account_id: str) -> dict:
+        """Return the consumed_14day/7day/3day/24h windows set up via `setup_instance`."""
+        if instance_crn not in self.instances:
+            raise ValueError(f"Instance {instance_crn} not found in mock data")
+        usage = self.instances[instance_crn].detailed_usage
+        if usage is None:
+            return {"consumed_14day": 0, "consumed_7day": 0, "consumed_3day": 0, "consumed_24h": 0}
+        return {
+            "consumed_14day": usage.consumed_14day,
+            "consumed_7day": usage.consumed_7day,
+            "consumed_3day": usage.consumed_3day,
+            "consumed_24h": usage.consumed_24h,
+        }
 
     def get_instance(self, discovered: DiscoveredInstance) -> InstanceState:
         """Get mock instance configuration."""
