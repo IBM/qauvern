@@ -12,9 +12,10 @@
 
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from functools import cached_property
 from typing import Literal
 
-from .limit_resolver import resolve_limit
+from .limit_resolver import LimitBreakdown, resolve_limit
 from .models import Account, AllocationChange, InstanceConfig, InstanceState, LimitChange, OptimizationResult
 
 FloorSource = Literal["consumed_seconds", "minimum_allocation_seconds"]
@@ -84,6 +85,18 @@ class AllocationOptimizer:
         self.today = today or datetime.now(timezone.utc).date()
         self._configs = {config.crn: config for config in instance_configs}
 
+    @cached_property
+    def limit_breakdowns(self) -> dict[str, LimitBreakdown | None]:
+        """Effective config-side limit breakdown per managed instance, resolved lazily.
+
+        Attribution reads `instance_state.usage`, which raises when the instance
+        wasn't enriched with usage data (e.g. `cli.show`'s `detailed_usage=None`
+        path) — computed lazily so callers that never touch this property are
+        unaffected.
+        """
+        managed = [inst for inst in self.account.instances if inst.crn in self._configs]
+        return {inst.crn: resolve_limit(self._configs[inst.crn], inst, self.today) for inst in managed}
+
     def _floor(self, instance: InstanceState) -> Floor:
         if not self._usage_floor_relaxed and instance.consumed_seconds >= self.minimum_allocation_seconds:
             return Floor(instance.consumed_seconds, "consumed_seconds")
@@ -133,11 +146,10 @@ class AllocationOptimizer:
         """
         managed = [inst for inst in self.account.instances if inst.crn in self._configs]
 
-        resolved_limits: dict[str, int | None] = {
-            inst.crn: resolve_limit(self._configs[inst.crn], inst, self.today) for inst in managed
-        }
         effective_limits: dict[str, int | None] = {
-            inst.crn: resolved_limits[inst.crn] if resolved_limits[inst.crn] is not None else inst.limit_seconds
+            inst.crn: limit_breakdown.total
+            if (limit_breakdown := self.limit_breakdowns[inst.crn]) is not None
+            else inst.limit_seconds
             for inst in managed
         }
 
@@ -164,9 +176,10 @@ class AllocationOptimizer:
                 )
 
         limit_changes = {
-            inst.crn: LimitChange(current=inst.limit_seconds, new=new_limit)
+            inst.crn: LimitChange(current=inst.limit_seconds, new=limit_breakdown.total)
             for inst in managed
-            if (new_limit := resolved_limits[inst.crn]) is not None and new_limit != inst.limit_seconds
+            if (limit_breakdown := self.limit_breakdowns[inst.crn]) is not None
+            and limit_breakdown.total != inst.limit_seconds
         }
 
         return OptimizationResult(allocation_changes, limit_changes)
