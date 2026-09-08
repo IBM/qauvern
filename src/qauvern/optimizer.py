@@ -178,7 +178,8 @@ class AllocationOptimizer:
         limit_changes = {
             inst.crn: LimitChange(current=inst.limit_seconds, new=limit_breakdown.total)
             for inst in managed
-            if (limit_breakdown := self.limit_breakdowns[inst.crn]) is not None and limit_breakdown.total != inst.limit_seconds
+            if (limit_breakdown := self.limit_breakdowns[inst.crn]) is not None
+            and limit_breakdown.total != inst.limit_seconds
         }
 
         return OptimizationResult(allocation_changes, limit_changes)
