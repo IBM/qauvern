@@ -22,7 +22,7 @@ Refer to [How it works](#how-it-works) for more information on the algorithm.
 - **Fairness**: Ratio of consumed time to allocated time. Lower fairness = higher priority
 - **Allocation**: The target consumption for an instance during the rolling window. An instance can exceed its allocation, but its priority will decrease due to the fairness score.
 - **Limit**: An optional hard cap on instance consumption.
-- **Net Grant**: A bonus configured in the `qauvern` config file to temporarily boost an instance' limit. Multiple grants stack. Any pre-grant usage that exceeded the base limit decays out of the effective limit as those days exit the 28-day rolling window.
+- **Net Grant**: A bonus configured in the `qauvern` config file to temporarily boost an instance's limit. Multiple grants stack. A grant keeps crediting the limit after it expires, until the usage it funded rolls out of the 28-day window — see [How net grants expire](#how-net-grants-expire).
 
 ## Installation
 
@@ -91,7 +91,12 @@ instances:
     # Optional: Hard limit applied on every optimize run
     # limit_seconds: 216000
 
-    # Optional: Temporary time bonus above limit_seconds.
+    # Optional: Temporary time bonus above limit_seconds. REQUIRES limit_seconds
+    # to be set on this instance — a config with net_grants and no limit_seconds
+    # fails to load.
+    # A grant applies while start_date <= today < end_date (half-open: it is live
+    # on start_date and finished on end_date). Both dates must be tz-aware ISO
+    # timestamps, e.g. "2026-05-01T00:00:00+00:00".
     # end_date is optional; defaults to start_date + 28 days if omitted.
     # net_grants:
     #   - start_date: "2026-05-01T00:00:00+00:00"
@@ -170,7 +175,7 @@ The `update` command asks for confirmation before making edits.
 
 Whereas `configure` generates a fresh file from scratch, `update` is for ongoing maintenance of an existing config. It performs four reconciliation steps by default:
 
-- **Expire net_grants**: drops `net_grants` entries whose `end_date` has passed
+- **Expire net_grants**: drops `net_grants` entries that have fully rolled out of the 28-day window (`end_date` more than 28 days ago). Grants that have ended but are still crediting the limit are **kept**, and reported under `Notes:` with the date they become removable — dropping them at `end_date` would destroy the carryover they fund.
 - **Remove instances**: removes entries for archived or missing instances
 - **Fix names**: updates instance names that have drifted from the live API
 - **Add instances**: appends newly discovered instances
@@ -225,7 +230,7 @@ This command identifies underutilized instances, calculates optimal reallocation
 
 Use `--format` to choose how results are rendered:
 
-- `table` (default) — human-readable summary block plus an instance table.
+- `table` (default) — human-readable summary block plus an instance table, followed by a `LIMIT BREAKDOWN` section for any instance whose limit is currently shaped by a net grant.
 - `csv` — one row per configured instance, suitable for spreadsheets or quick pipelines. Account-level info is omitted because CSV is a flat row-based format.
 - `json` — a structured payload for scripts. Includes account-level info, the reserve, validation errors, and per-instance rows with pre-computed allocation and limit deltas.
 
@@ -242,6 +247,7 @@ Common notes for both machine formats:
 
 - All durations are raw integer seconds.
 - The "new" allocation/limit value is always emitted, even if it is the same as the current value. Use the delta fields to quickly determine if there was a change, such as `limit_delta_seconds` with `json`. 
+- The effective limit is broken into its terms — base, active grant, expired carryover, and pre-boost overage — as `limit_breakdown` in `json` (`null` when the config sets no limit for the instance) and as the trailing `limit_base`, `limit_active_grant`, `limit_expired_carryover`, `limit_overage` columns in `csv` (blank when the config sets no limit). New CSV columns are always appended to the end, so existing column positions stay stable.
 
 Inspect the JSON schema with `jq keys` and `jq '.instances[0] | keys'` against a real run.
 
@@ -256,10 +262,10 @@ qauvern optimize --config config.yaml --dry-run   # preview only
 
 This command will:
 1. Determine if there are changes to any instance's limit from setting `limit_seconds` and `net_grants` in the config file.
-1. Calculate optimal allocations.
-2. Display proposed changes.
-3. Prompt for confirmation.
-4. Apply allocation and limit updates via API.
+2. Calculate optimal allocations.
+3. Display proposed changes.
+4. Prompt for confirmation.
+5. Apply allocation and limit updates via API.
 
 Use `--dry-run` to compute and display changes without applying them. Use `--yes` / `-y` to skip the confirmation prompt in automated pipelines.
 
@@ -304,7 +310,7 @@ The `--staging` flag is a global option and applies to all commands.
 
 For each managed instance, qauvern:
 
-1. **Resolves the effective limit** from `limit_seconds` and any active `net_grants` in the config file. If the config file does not set `limit_seconds` or `net_grants`, use the live limit in IBM Quantum Platform, if any. `qauvern` will apply this new effective limit and also use it as the upper bound on the instance's allocation.
+1. **Resolves the effective limit** from `limit_seconds` and any `net_grants` in the config file — active grants plus recently expired ones that are still crediting (see [How net grants expire](#how-net-grants-expire)). If the config file does not set `limit_seconds` or `net_grants`, use the live limit in IBM Quantum Platform, if any. `qauvern` will apply this new effective limit and also use it as the upper bound on the instance's allocation.
 2. **Computes an activity score** by exponentially weighting recent usage (24h carries 16× the weight of 28d). Instances with no usage across all buckets get score 0 and are classified inactive.
 
 Then, account-wide:
@@ -314,6 +320,42 @@ Then, account-wide:
 5. **Uses the water-fill algorithm to distribute the pool across active instances** proportional to activity score. When an instance hits its effective limit, it drops out and its surplus flows to the rest. If every active instance is capped, leftover capacity stays unallocated rather than being forced onto any instance.
 
 See [Design.md](Design.md) for full algorithm details and the invariants the optimizer enforces.
+
+### How Net Grants Expire
+
+A grant applies while `start_date <= today < end_date` — live on `start_date`, finished on `end_date`. Both dates must be tz-aware ISO timestamps (`"2026-05-01T00:00:00+00:00"`), and setting `net_grants` on an instance **requires** setting `limit_seconds` on it too; a config with grants and no base limit fails to load.
+
+What a grant does *not* do is disappear from the effective limit the moment it ends. IBM Quantum measures usage over a 28-day rolling window, so the minutes a grant paid for stay counted against the instance for up to 28 days after the grant is over. If the boost's contribution vanished at `end_date`, an instance that spent its grant on the grant's last day would wake up with its entire base limit already consumed and be unable to run anything for weeks. qauvern instead keeps crediting the limit for the usage a grant funded until that usage itself rolls out of the window, which gives one guarantee:
+
+> **An instance is never worse off after a grant expires than if the grant had never existed.**
+
+With `limit_seconds: 100` and a grant of `1000` fully spent on the grant's last day:
+
+| Usage during the grant | Effective limit at expiry | Available |
+| --- | --- | --- |
+| 1000 (the grant, exactly) | 100 + 1000 | 100 — the whole base limit |
+| 1050 (50 past the grant) | 100 + 1000 | 50 |
+| 1100 (grant + base) | 100 + 1000 | 0 — spent, but not in debt |
+
+The credit then decays as the funded days age out. For `limit_seconds: 100`, a grant of `1000` covering March 1–11 (`end_date: 2026-03-11`), with 700s used March 5 and 500s used March 8:
+
+| Date | Grant status | Effective limit | Usage in window | Available |
+| --- | --- | --- | --- | --- |
+| Mar 10 | active | 1100 | 1200 | −100 |
+| Mar 11 | expired, still crediting | 1100 | 1200 | −100 |
+| Apr 2 | expired, still crediting | 1100 | 1200 | −100 |
+| Apr 3 | Mar 5 rolled out | 400 | 500 | −100 |
+| Apr 6 | Mar 8 rolled out | 100 | 0 | 100 |
+| Apr 8 | fully rolled off | 100 | 0 | 100 |
+
+Availability only ever climbs as time passes — it never dips because a grant ended. Two things follow that are worth expecting:
+
+- **The limit in IBM Quantum stays above `limit_seconds` for up to 28 days after `end_date`.** It will not snap back on `end_date`, and while it is elevated it also raises the cap the water-fill step will allocate up to.
+- **Unspent grant time does not carry over.** Only usage a grant actually funded is credited, so a grant of 1000 with 200 used still loses the other 800 at `end_date`.
+
+Because only grants that can still credit take part in resolution, `qauvern update` removing a fully rolled-off grant can never change any other grant's contribution. That is why `update` keeps expired-but-still-crediting grants in the file (reporting them under `Notes:` with a removable-on date) and only deletes them once `end_date` is more than 28 days old.
+
+`qauvern analyze` prints a `LIMIT BREAKDOWN` section for every instance whose limit is currently shaped by a grant, splitting it into base, active grant, expired carryover, and pre-boost overage. The same terms are available as `limit_breakdown` in `--format json` and as the `limit_base`, `limit_active_grant`, `limit_expired_carryover`, and `limit_overage` columns in `--format csv`.
 
 ### Configured vs. Unconfigured Instances
 
@@ -354,7 +396,7 @@ qauvern analyze --config config.yaml
 qauvern optimize --config config.yaml
 ```
 
-After the initial setup, run `qauvern update --config config.yaml` periodically to keep the config in sync with the live API (new instances, renames, archived instances, expired net_grants).
+After the initial setup, run `qauvern update --config config.yaml` periodically to keep the config in sync with the live API (new instances, renames, archived instances, fully rolled-off net_grants).
 
 ### Automations
 

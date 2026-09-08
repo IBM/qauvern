@@ -13,6 +13,7 @@
 import csv
 import io
 import json
+from datetime import date, datetime, timezone
 
 from qauvern.commands.analyze import (
     CSV_COLUMNS,
@@ -28,6 +29,7 @@ from qauvern.models import (
     InstanceDetailedUsage,
     InstanceState,
     LimitChange,
+    NetGrant,
     OptimizationResult,
 )
 from qauvern.optimizer import AllocationOptimizer
@@ -48,6 +50,7 @@ def _make_instance(
     consumed: int = 0,
     limit: int | None = None,
     consumed_24h: int = 0,
+    daily_usage: dict[date, int] | None = None,
 ) -> InstanceState:
     return InstanceState(
         crn=crn,
@@ -60,7 +63,7 @@ def _make_instance(
             consumed_7day=0,
             consumed_3day=0,
             consumed_24h=consumed_24h,
-            daily_usage={},
+            daily_usage=daily_usage or {},
         ),
     )
 
@@ -95,6 +98,33 @@ def _no_changes_setup():
     account = _make_account((inst,), budget=60)
     cfg = _make_config(CRN_A)
     optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = optimizer.optimize()
+    return account, result, [cfg], optimizer
+
+
+def _carryover_setup():
+    """base 100 + a grant of 1000 burned on its last day, analyzed on that day.
+
+    The grant has expired but still credits, so the effective limit is 1100 and
+    every breakdown term is distinguishable.
+    """
+    inst = _make_instance(
+        CRN_A,
+        allocation=1_000,
+        name="Boosted",
+        consumed=1_000,
+        limit=100,
+        consumed_24h=1_000,
+        daily_usage={date(2026, 3, 28): 1_000},
+    )
+    account = _make_account((inst,), budget=5_000)
+    grant = NetGrant(
+        start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        net_grant_seconds=1_000,
+        end_date=datetime(2026, 3, 29, tzinfo=timezone.utc),
+    )
+    cfg = InstanceConfig(name="Boosted", crn=CRN_A, target_limit_seconds=100, net_grants=(grant,))
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60, today=date(2026, 3, 29))
     result = optimizer.optimize()
     return account, result, [cfg], optimizer
 
@@ -648,3 +678,69 @@ def test_json_one_entry_per_instance() -> None:
 
     payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
     assert [i["name"] for i in payload["instances"]] == ["A", "B"]
+
+
+# ---------------------------------------------------------------------------
+# Limit breakdown surfacing
+# ---------------------------------------------------------------------------
+
+
+def test_report_carries_the_optimizer_breakdowns() -> None:
+    account, result, cfgs, optimizer = _carryover_setup()
+    report = _report(account, result, cfgs, optimizer)
+    breakdown = report.limit_breakdowns[CRN_A]
+    assert breakdown is not None
+    assert breakdown.expired_carryover_seconds == 1_000
+    assert breakdown.total == 1_100
+
+
+def test_table_limit_breakdown_section_shown_when_a_grant_applies() -> None:
+    account, result, cfgs, optimizer = _carryover_setup()
+    output = format_analyze_table(_report(account, result, cfgs, optimizer))
+    assert "LIMIT BREAKDOWN" in output
+    assert "Expired carryover" in output
+
+
+def test_table_limit_breakdown_section_omitted_without_grants() -> None:
+    """No grant means the effective limit is just `limit_seconds` — already in the main table."""
+    account, result, cfgs, optimizer = _no_changes_setup()
+    output = format_analyze_table(_report(account, result, cfgs, optimizer))
+    assert "LIMIT BREAKDOWN" not in output
+
+
+def test_json_limit_breakdown_per_instance() -> None:
+    account, result, cfgs, optimizer = _carryover_setup()
+    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
+    assert payload["instances"][0]["limit_breakdown"] == {
+        "base_seconds": 100,
+        "active_grant_seconds": 0,
+        "expired_carryover_seconds": 1_000,
+        "pre_boost_overage_seconds": 0,
+        "boost_start_date": None,
+        "total_seconds": 1_100,
+    }
+
+
+def test_json_limit_breakdown_null_without_config_limit() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
+    assert payload["instances"][0]["limit_breakdown"] is None
+
+
+def test_csv_limit_breakdown_columns_are_appended_last() -> None:
+    """Column order is a consumer contract: the new columns go on the end."""
+    assert CSV_COLUMNS[-4:] == ("limit_base", "limit_active_grant", "limit_expired_carryover", "limit_overage")
+
+    account, result, cfgs, optimizer = _carryover_setup()
+    _, rows = _parse_csv(format_analyze_csv(_report(account, result, cfgs, optimizer)))
+    assert rows[0]["limit_base"] == "100"
+    assert rows[0]["limit_active_grant"] == "0"
+    assert rows[0]["limit_expired_carryover"] == "1000"
+    assert rows[0]["limit_overage"] == "0"
+
+
+def test_csv_limit_breakdown_columns_blank_without_config_limit() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    _, rows = _parse_csv(format_analyze_csv(_report(account, result, cfgs, optimizer)))
+    assert rows[0]["limit_base"] == ""
+    assert rows[0]["limit_overage"] == ""

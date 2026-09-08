@@ -10,21 +10,82 @@
 
 """Resolves the effective limit for an instance given net grants and rolloff."""
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
-from .models import InstanceConfig, InstanceState
-from .rolling_window import window_start
+from .models import InstanceConfig, InstanceState, NetGrant
+from .rolling_window import grant_still_credits, window_start
+
+
+@dataclass(frozen=True)
+class UsageAttribution:
+    """Per-day usage split between the grants that funded it and the base limit.
+
+    `grant_credited_seconds` is keyed **positionally** against the `grants`
+    argument of `attribute_usage`, not by `NetGrant` value: `NetGrant` is a
+    frozen (hashable) dataclass and the config does not dedupe, so two
+    identical grants must still get two independent budgets.
+    """
+
+    grant_credited_seconds: tuple[int, ...]
+    base_seconds_in_window: Mapping[date, int]
+
+    def base_before(self, day: date) -> int:
+        """Sum in-window base usage on days strictly before `day`."""
+        return sum(seconds for d, seconds in self.base_seconds_in_window.items() if d < day)
+
+
+def attribute_usage(grants: Sequence[NetGrant], daily_usage: Mapping[date, int], *, today: date) -> UsageAttribution:
+    """Charge each day's usage to the grants that were active on it, then to the base limit.
+
+    A day's usage is consumed greedily against the budget of every grant active
+    on that day, soonest-expiring first, so that a grant about to roll off is
+    the one that gets credit for what it plausibly funded. Whatever no grant
+    could pay for is the day's *base* usage.
+
+    Two properties matter for the caller:
+
+    - Budgets are consumed over each grant's **full active period**, but only
+      the share landing inside today's rolling window is *credited*. A grant can
+      therefore never credit back more than `net_grant_seconds`, and usage that
+      has already rolled out of the window still counts as spent budget.
+    - Days after `today` are ignored, and days outside the window contribute to
+      neither `grant_credited_seconds` nor `base_seconds_in_window`.
+
+    Pure: no I/O and no clock — `today` is always supplied by the caller.
+    """
+    earliest_in_window = window_start(today)
+    remaining = [grant.net_grant_seconds for grant in grants]
+    credited = [0] * len(grants)
+    base_in_window: dict[date, int] = {}
+
+    for day in sorted(daily_usage):
+        if day > today:
+            continue
+        in_window = earliest_in_window <= day <= today
+        unpaid = daily_usage[day]
+        covering = sorted(
+            (i for i, grant in enumerate(grants) if grant.start_date.date() <= day < grant.end_date.date()),
+            key=lambda i: (grants[i].end_date, grants[i].start_date, i),
+        )
+        for i in covering:
+            if unpaid <= 0:
+                break
+            paid = min(unpaid, remaining[i])
+            remaining[i] -= paid
+            unpaid -= paid
+            if in_window:
+                credited[i] += paid
+        if in_window:
+            base_in_window[day] = unpaid
+
+    return UsageAttribution(grant_credited_seconds=tuple(credited), base_seconds_in_window=base_in_window)
 
 
 @dataclass(frozen=True)
 class LimitBreakdown:
-    """The effective config-side limit for an instance, broken into its terms.
-
-    `expired_carryover_seconds` is always 0 until the rolling net-grant expiry
-    feature lands; it exists now so callers have a stable field set to code
-    against.
-    """
+    """The effective config-side limit for an instance, broken into its terms."""
 
     base_seconds: int
     active_grant_seconds: int
@@ -57,55 +118,68 @@ class LimitBreakdown:
 def resolve_limit(instance_config: InstanceConfig, instance_state: InstanceState, today: date) -> LimitBreakdown | None:
     """Return the effective config-side limit breakdown for the given instance today.
 
-    Returns None when the config sets neither target_limit_seconds nor any active
-    grants — callers should treat that as "no config-side override" and fall back
-    to whatever IQP currently has.
+    Returns None when the config sets neither target_limit_seconds nor any grant
+    still crediting today — callers should treat that as "no config-side
+    override" and fall back to whatever IQP currently has.
 
-    `breakdown.total` formula when there is at least one active grant:
-        base + grant_total + max(0, rolloff - base)
+    `breakdown.total` formula:
+        base + active_grant_budget + expired_grant_carryover + max(0, unshielded_pre_boost_usage - base)
 
-    where:
-        grant_total = sum of net_grant_seconds across grants active today
+    where, over the grants that can still credit today (`grant_still_credits`):
+        active_grant_budget = sum of net_grant_seconds across grants active today
+        expired_grant_carryover = in-window usage attributed to grants that have
+                                  since expired, so the usage they funded does
+                                  not become debt the moment they end
         boost_start = earliest start_date among active grants
-        rolloff     = sum of daily_usage on days strictly before boost_start that
-                      are still inside the current 28-day rolling window
-                      [today - 28, today]
+        unshielded_pre_boost_usage = in-window usage on days strictly before
+                                     boost_start that no grant paid for
 
-    The max(0, rolloff - base) term lets pre-grant usage that exceeded the base
-    limit decay out of the effective limit as those days exit the rolling window.
-    Pre-grant days that stayed at or below the base limit contribute nothing.
+    The carryover term is what makes an instance never worse off after a grant
+    expires than if the grant had never existed: the usage the grant funded
+    stays in IQP's 28-day window, so its credit stays in the limit until that
+    usage rolls out too.
+
+    The max(0, ... - base) overage term lets pre-grant usage that exceeded the
+    base limit decay out of the effective limit as those days exit the window.
+    It is deliberately gated on having an *active* grant: anchoring it on the
+    earliest still-crediting grant instead would *remove* forgiveness whenever
+    an older expired grant precedes the active one. Pre-grant debt therefore
+    snaps back at expiry, which still satisfies "never worse off than if the
+    grant never existed" — the counterfactual is equally negative.
+
+    Only grants that can still credit are attributed, never every configured
+    grant. That is what makes `update`'s pruning provably a no-op: a grant with
+    `end_date <= window_start(today)` is excluded from attribution, from the
+    active budget, and from the carryover, so deleting it from the config cannot
+    change the resolved limit.
     """
     base_limit = instance_config.target_limit_seconds
 
     if not instance_config.net_grants:
         return LimitBreakdown._base_limit_only(base_limit)
 
-    active_grants = [g for g in instance_config.net_grants if g.start_date.date() <= today < g.end_date.date()]
-    if not active_grants:
-        return LimitBreakdown._base_limit_only(base_limit)
-
     if base_limit is None:
         raise AssertionError("InstanceConfig invariant violated: net_grants without target_limit_seconds")
 
-    grant_total = sum(g.net_grant_seconds for g in active_grants)
-    boost_start_date = min(g.start_date.date() for g in active_grants)
+    relevant = [grant for grant in instance_config.net_grants if grant_still_credits(grant, today)]
+    if not relevant:
+        return LimitBreakdown._base_limit_only(base_limit)
 
-    earliest_in_window_date = window_start(today)
-    rolloff_end_date = boost_start_date - timedelta(days=1)
+    attribution = attribute_usage(relevant, instance_state.usage.daily_usage, today=today)
 
-    if rolloff_end_date < earliest_in_window_date:
-        rolloff = 0
-    else:
-        rolloff = sum(
-            seconds
-            for day, seconds in instance_state.usage.daily_usage.items()
-            if earliest_in_window_date <= day <= rolloff_end_date
-        )
+    active_indices = {i for i, grant in enumerate(relevant) if grant.start_date.date() <= today < grant.end_date.date()}
+    active_grant_seconds = sum(relevant[i].net_grant_seconds for i in active_indices)
+    expired_carryover = sum(
+        seconds for i, seconds in enumerate(attribution.grant_credited_seconds) if i not in active_indices
+    )
+
+    boost_start_date = min((relevant[i].start_date.date() for i in active_indices), default=None)
+    overage = max(0, attribution.base_before(boost_start_date) - base_limit) if boost_start_date is not None else 0
 
     return LimitBreakdown(
         base_seconds=base_limit,
-        active_grant_seconds=grant_total,
-        expired_carryover_seconds=0,
-        pre_boost_overage_seconds=max(0, rolloff - base_limit),
+        active_grant_seconds=active_grant_seconds,
+        expired_carryover_seconds=expired_carryover,
+        pre_boost_overage_seconds=overage,
         boost_start_date=boost_start_date,
     )
