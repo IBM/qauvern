@@ -5,6 +5,12 @@ All notable changes to qauvern will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-08-xx
+
+### Changed
+
+- `analyze` and `optimize` now error, rather than warn, if they cannot get an instance's usage data.
+
 ## [0.12.0] - 2026-08-12
 
 ### Changed
