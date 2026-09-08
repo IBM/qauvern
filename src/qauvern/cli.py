@@ -49,6 +49,7 @@ from .models import (
 from .optimizer import AllocationOptimizer
 from .plan import Plan, plan_from_name
 from .region import Region
+from .rolling_window import DAILY_USAGE_LOOKBACK_DAYS
 
 
 def enrich_instances_with_usage_data(
@@ -61,9 +62,9 @@ def enrich_instances_with_usage_data(
             # Get detailed usage for multiple time periods
             detailed_usage = client.get_detailed_usage(instance.crn, account.account_id)
 
-            # Fetch per-day usage for net grant rolloff calculation (60-day lookback)
+            # Fetch per-day usage for net grant rolloff calculation
             today_date = datetime.now(timezone.utc).date()
-            daily_start = today_date - timedelta(days=60)
+            daily_start = today_date - timedelta(days=DAILY_USAGE_LOOKBACK_DAYS)
             daily = client.get_daily_usage(instance.crn, account.account_id, daily_start, today_date)
 
             instance.detailed_usage = InstanceDetailedUsage(
@@ -166,7 +167,7 @@ def _fetch_instance_states(
 
 
 def handle_errors(func):
-    """Print any exception as ``Error: ...`` on stderr and exit with status 1."""
+    """Print any exception as `Error: ...` on stderr and exit with status 1."""
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
