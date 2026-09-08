@@ -55,6 +55,7 @@ def enrich_instances_with_usage_data(
     account: Account,
     client: IBMQuantumAPIClient,
 ) -> None:
+    """Populate each instance's detailed usage, aborting the run on any fetch failure."""
     for instance in account.instances:
         try:
             # Get detailed usage for multiple time periods
@@ -63,11 +64,7 @@ def enrich_instances_with_usage_data(
             # Fetch per-day usage for net grant rolloff calculation (60-day lookback)
             today_date = datetime.now(timezone.utc).date()
             daily_start = today_date - timedelta(days=60)
-            try:
-                daily = client.get_daily_usage(instance.crn, account.account_id, daily_start, today_date)
-            except Exception as daily_e:
-                click.echo(f"Warning: Could not fetch daily usage for {instance.name}: {daily_e}", err=True)
-                daily = {}
+            daily = client.get_daily_usage(instance.crn, account.account_id, daily_start, today_date)
 
             instance.detailed_usage = InstanceDetailedUsage(
                 consumed_14day=detailed_usage["consumed_14day"],
@@ -76,16 +73,8 @@ def enrich_instances_with_usage_data(
                 consumed_24h=detailed_usage["consumed_24h"],
                 daily_usage=daily,
             )
-
         except Exception as e:
-            click.echo(f"Warning: Could not fetch usage data for {instance.name}: {e}", err=True)
-            instance.detailed_usage = InstanceDetailedUsage(
-                consumed_14day=0,
-                consumed_7day=0,
-                consumed_3day=0,
-                consumed_24h=0,
-                daily_usage={},
-            )
+            raise click.ClickException(f"Could not fetch usage data for {instance.name}: {e}") from e
 
 
 config_option = click.option(
