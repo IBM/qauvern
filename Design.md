@@ -28,7 +28,7 @@ The config file is generated once with `configure` and is expected to be checked
 
 For each managed instance:
 
-1. **Resolve effective limit** via `LimitResolver` (see below). This is the upper bound on this instance's allocation for the upcoming run.
+1. **Resolve effective limit** via `resolve_limit` (see below). This is the upper bound on this instance's allocation for the upcoming run.
 2. **Compute an activity score** by summing weighted contributions from the 28d, 14d, 7d, 3d, and 24h usage buckets:
    - Each bucket contributes `(bucket_usage / bucket_days) * bias^exponent`, where the exponent reflects recency `(24h=5.0, 3d=4.0, 7d=3.0, 14d=2.0, 28d=1.0)`.
    - With `bias=2.0`, 24h usage carries 16× the weight of 28d usage.
@@ -68,15 +68,15 @@ Controls whether an instance's allocation is pinned at or above its 28-day consu
 
 ### `limit_seconds` (instance level)
 
-Sets a base usage limit on the instance. When set, the optimizer applies this limit on every run via `LimitResolver`. If absent, the optimizer leaves the live IQP limit alone.
+Sets a base usage limit on the instance. When set, the optimizer applies this limit on every run via `resolve_limit`. If absent, the optimizer leaves the live IQP limit alone.
 
 ### `net_grants` (instance level)
 
 A list of additive time-budget boosts above `limit_seconds`. Each grant has `start_date`, `net_grant_seconds`, and an optional `end_date` (defaults to `start_date + 28 days`). A grant is active when `start_date <= today < end_date`; once expired, the effective limit reverts to `limit_seconds`. Multiple active grants stack. Setting `net_grants` requires also setting `limit_seconds`.
 
-Note that the rolloff math used to compute the grants' contribution (see `LimitResolver`) is anchored on the 28-day rolling window from the earliest active grant's `start_date`, regardless of `end_date` — for grants longer than 28 days, the contribution plateaus once all pre-grant usage has exited the window.
+Note that the rolloff math used to compute the grants' contribution (see `resolve_limit` below) is anchored on the 28-day rolling window from the earliest active grant's `start_date`, regardless of `end_date` — for grants longer than 28 days, the contribution plateaus once all pre-grant usage has exited the window.
 
-### LimitResolver
+### `resolve_limit`
 
 [`src/qauvern/limit_resolver.py`](src/qauvern/limit_resolver.py) resolves the effective config-side limit per instance before the optimizer builds recommendations. Resolution order (first match wins):
 
@@ -87,6 +87,6 @@ Note that the rolloff math used to compute the grants' contribution (see `LimitR
 Where:
 - `grant_total` is the sum of `net_grant_seconds` across grants active today.
 - `boost_start` is the earliest `start_date` among active grants.
-- `rolloff` is the sum of `daily_usage` on days strictly before `boost_start` that are still inside the current 28-day rolling window `[today - 28, today)`.
+- `rolloff` is the sum of `daily_usage` on days strictly before `boost_start` that are still inside the current 28-day rolling window `[today - 28, today]` ([`src/qauvern/rolling_window.py`](src/qauvern/rolling_window.py) owns this window convention — inclusive on both ends, 29 calendar dates, chosen because it is the generous direction for logic whose purpose is to avoid under-crediting users).
 
 The `max(0, rolloff - limit_seconds)` term lets pre-grant usage that exceeded the base limit decay out of the effective limit as those days exit the rolling window. Pre-grant days that stayed at or below the base limit contribute nothing. When multiple grants are active, rolloff is anchored at the earliest active grant's start, not computed per-grant.

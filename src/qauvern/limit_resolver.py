@@ -13,6 +13,7 @@
 from datetime import date, timedelta
 
 from .models import InstanceConfig, InstanceState
+from .rolling_window import window_start
 
 
 def resolve_limit(instance_config: InstanceConfig, instance_state: InstanceState, today: date) -> int | None:
@@ -51,14 +52,16 @@ def resolve_limit(instance_config: InstanceConfig, instance_state: InstanceState
     grant_total = sum(g.net_grant_seconds for g in active_grants)
     boost_start = min(g.start_date.date() for g in active_grants)
 
-    window_floor = today - timedelta(days=28)
+    earliest_in_window = window_start(today)
     rolloff_end = boost_start - timedelta(days=1)
 
-    if rolloff_end < window_floor:
+    if rolloff_end < earliest_in_window:
         rolloff = 0
     else:
         rolloff = sum(
-            seconds for day, seconds in instance_state.usage.daily_usage.items() if window_floor <= day <= rolloff_end
+            seconds
+            for day, seconds in instance_state.usage.daily_usage.items()
+            if earliest_in_window <= day <= rolloff_end
         )
 
     return base_limit + grant_total + max(0, rolloff - base_limit)

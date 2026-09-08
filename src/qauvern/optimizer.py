@@ -116,7 +116,7 @@ class AllocationOptimizer:
         """Compute allocation and limit recommendations.
 
         Algorithm:
-        1. Resolve effective limit for each managed instance via LimitResolver.
+        1. Resolve effective limit for each managed instance via resolve_limit.
         2. Categorize active (activity_score > 0) vs inactive (score == 0).
         3. Pin every managed instance at floor = max(minimum_allocation_seconds,
            consumed_seconds). Inactive instances stay there.
