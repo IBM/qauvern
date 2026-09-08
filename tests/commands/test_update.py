@@ -76,7 +76,7 @@ allocation_reserve_percent: 5.0
 
 
 # ---------------------------------------------------------------------------
-# compute_update — pure logic
+# compute_update — net_grants retention
 # ---------------------------------------------------------------------------
 
 
@@ -130,8 +130,7 @@ instances:
         _discovered(active=(_disc(US_CRN_A, "A"),)),
         now=datetime(2026, 2, 1, tzinfo=timezone.utc),
     )
-    # End (01-29) has rolled past `today` but not yet past `window_start(today)` (01-04), so
-    # the grant is retained, not removed, and still contributes carryover.
+    # end (01-29) hasn't crossed window_start (01-04) yet -> retained, not removed.
     assert summary.removed_net_grants == []
     assert len(summary.retained_net_grants) == 1
     assert summary.retained_net_grants[0].prune_on == date(2026, 2, 26)
@@ -227,7 +226,7 @@ instances:
 """
     )
     doc = _load_yaml(text)
-    # today = end_date, so still in-window (window_start(today) < end_date) -> retained, not removed.
+    # today == end_date -> still in-window -> retained, not removed.
     summary = compute_update(
         doc,
         _discovered(active=(_disc(US_CRN_A, "A"),)),
@@ -243,13 +242,8 @@ instances:
     assert "# user comment that must survive" in output
 
 
-# ---------------------------------------------------------------------------
-# Cross-module agreement: update's removal predicate vs. the resolver's
-# `grant_still_credits`. This is what stops `update` and `resolve_limit` from
-# drifting apart on where the window boundary falls.
-# ---------------------------------------------------------------------------
-
-
+# Cross-module agreement: keeps update's removal predicate from drifting apart
+# from resolve_limit's `grant_still_credits`.
 @pytest.mark.parametrize("offset", range(-3, 4))
 def test_removal_predicate_agrees_with_grant_still_credits(offset: int) -> None:
     start = date(2026, 1, 1)
@@ -281,6 +275,11 @@ instances:
     )
     assert removed == (not grant_still_credits(grant, today))
     assert (end <= window_start(today)) == removed
+
+
+# ---------------------------------------------------------------------------
+# compute_update — instance reconciliation (rename, add, remove, limits)
+# ---------------------------------------------------------------------------
 
 
 def test_remove_archived_and_missing_instances() -> None:
