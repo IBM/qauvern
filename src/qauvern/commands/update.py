@@ -9,14 +9,15 @@
 # that they have been altered from the originals.
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from ruamel.yaml import YAML
 
 from ..config import parse_net_grant_dates
-from ..models import DiscoveredInstance, DiscoveredInstances
+from ..models import DiscoveredInstance, DiscoveredInstances, NetGrant
+from ..rolling_window import grant_removable_on, window_start
 
 
 @dataclass(frozen=True)
@@ -31,11 +32,24 @@ class UpdateActions:
 
 
 @dataclass(frozen=True)
-class ExpiredGrant:
+class RemovedGrant:
+    """A grant that has fully rolled out of the 28-day window and was dropped from the config."""
+
     instance_name: str
     crn: str
     start_date: datetime
     end_date: datetime
+
+
+@dataclass(frozen=True)
+class RetainedGrant:
+    """An expired grant kept in the config because it still credits usage in the window."""
+
+    instance_name: str
+    crn: str
+    start_date: datetime
+    end_date: datetime
+    prune_on: date
 
 
 @dataclass(frozen=True)
@@ -61,16 +75,19 @@ class LimitAdded:
 
 @dataclass
 class UpdateSummary:
-    expired_net_grants: list[ExpiredGrant] = field(default_factory=list)
+    removed_net_grants: list[RemovedGrant] = field(default_factory=list)
     added_instances: list[DiscoveredInstance] = field(default_factory=list)
     renamed_instances: list[InstanceRename] = field(default_factory=list)
     removed_instances: list[RemovedInstance] = field(default_factory=list)
     added_limits: list[LimitAdded] = field(default_factory=list)
+    # Deliberately excluded from `is_empty`: a retained grant is not a document change (the
+    # grant already lived in the config), just informational.
+    retained_net_grants: list[RetainedGrant] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
         return not (
-            self.expired_net_grants
+            self.removed_net_grants
             or self.added_instances
             or self.renamed_instances
             or self.removed_instances
@@ -79,25 +96,47 @@ class UpdateSummary:
 
 
 def _expire_net_grants(doc_instances: list, now: datetime, summary: UpdateSummary) -> None:
+    """Drop grants that have fully rolled out of the window; keep-but-note ones still crediting.
+
+    A grant that ended can still credit usage into `resolve_limit`'s rolling-window carryover
+    for up to 28 days past `end_date` (see `rolling_window.grant_still_credits`). Removing it
+    from the config any earlier than that would silently destroy the carryover it funded.
+    """
+    today = now.date()
     for entry in doc_instances:
         grants = entry.get("net_grants")
         if not grants:
             continue
         kept = []
-        for i, grant in enumerate(grants):
+        for i, grant_data in enumerate(grants):
             provenance = f"instances[{entry['name']}].net_grants[{i}]"
-            start_date, end_date = parse_net_grant_dates(grant, provenance=provenance)
-            if end_date <= now:
-                summary.expired_net_grants.append(
-                    ExpiredGrant(
+            start_date, end_date = parse_net_grant_dates(grant_data, provenance=provenance)
+            if end_date.date() <= window_start(today):
+                summary.removed_net_grants.append(
+                    RemovedGrant(
                         instance_name=entry["name"],
                         crn=entry["crn"],
                         start_date=start_date,
                         end_date=end_date,
                     )
                 )
-            else:
-                kept.append(grant)
+                continue
+            kept.append(grant_data)
+            if end_date.date() <= today:
+                grant = NetGrant(
+                    start_date=start_date,
+                    net_grant_seconds=grant_data.get("net_grant_seconds", 0),
+                    end_date=end_date,
+                )
+                summary.retained_net_grants.append(
+                    RetainedGrant(
+                        instance_name=entry["name"],
+                        crn=entry["crn"],
+                        start_date=start_date,
+                        end_date=end_date,
+                        prune_on=grant_removable_on(grant),
+                    )
+                )
         if not kept:
             del entry["net_grants"]
         elif len(kept) != len(grants):
@@ -211,19 +250,33 @@ def compute_update(
 
 def format_update_summary(summary: UpdateSummary) -> str:
     """Render an `UpdateSummary` as a human-readable multi-line string."""
-    if summary.is_empty:
-        return "No changes needed."
+    lines = ["No changes needed."] if summary.is_empty else ["Planned changes:"]
 
-    lines = ["Planned changes:"]
+    if not summary.is_empty:
+        _append_planned_changes(lines, summary)
 
+    if summary.retained_net_grants:
+        lines.append("")
+        lines.append("Notes:")
+        lines.append(f"  Expired net_grants kept for rolloff ({len(summary.retained_net_grants)}):")
+        for g in summary.retained_net_grants:
+            lines.append(
+                f"    - {g.instance_name}: {g.start_date.date()} → {g.end_date.date()} "
+                f"(still credited; removable on {g.prune_on})"
+            )
+
+    return "\n".join(lines)
+
+
+def _append_planned_changes(lines: list[str], summary: UpdateSummary) -> None:
     if summary.removed_instances:
         lines.append(f"  Remove ({len(summary.removed_instances)}):")
         for r in summary.removed_instances:
             lines.append(f"    - {r.name} [{r.reason}] ({r.crn})")
 
-    if summary.expired_net_grants:
-        lines.append(f"  Expired net_grants ({len(summary.expired_net_grants)}):")
-        for g in summary.expired_net_grants:
+    if summary.removed_net_grants:
+        lines.append(f"  Remove rolled-off net_grants ({len(summary.removed_net_grants)}):")
+        for g in summary.removed_net_grants:
             lines.append(f"    - {g.instance_name}: {g.start_date.date()} → {g.end_date.date()}")
 
     if summary.renamed_instances:
@@ -240,8 +293,6 @@ def format_update_summary(summary: UpdateSummary) -> str:
         lines.append(f"  Add ({len(summary.added_instances)}):")
         for a in summary.added_instances:
             lines.append(f"    - {a.name} ({a.crn})")
-
-    return "\n".join(lines)
 
 
 def _make_yaml() -> YAML:

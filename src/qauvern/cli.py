@@ -602,7 +602,7 @@ def configure(
 @region_option
 @click.option("--dry-run", is_flag=True, help="Show what would change without writing the file")
 @click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt (for automation)")
-@click.option("--no-net-grants", is_flag=True, help="Skip dropping expired net_grants")
+@click.option("--no-net-grants", is_flag=True, help="Skip removing rolled-off net_grants")
 @click.option("--no-add", is_flag=True, help="Skip adding newly discovered instances")
 @click.option("--no-names", is_flag=True, help="Skip fixing instance name drift")
 @click.option("--no-remove", is_flag=True, help="Skip removing archived/missing instances")
@@ -628,7 +628,9 @@ def update(
 ):
     """Reconcile a configuration file with the live IBM Quantum API.
 
-    Drops expired `net_grants`, adds newly discovered instances, fixes
+    Removes `net_grants` that have fully rolled out of the 28-day window
+    (expired grants are kept, and noted, until then so they keep crediting
+    `resolve_limit`'s carryover), adds newly discovered instances, fixes
     instance name drift, removes archived or missing instances, and pulls
     in `limit_seconds` from the live API for instances that don't yet
     have one configured (existing `limit_seconds` are never overwritten).

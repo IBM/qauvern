@@ -22,7 +22,7 @@ Likewise, project administrators want a way to temporarily increase the hard lim
 
 `qauvern` only operates on the instances listed in the config file. Any other instance on the same account+plan is **unconfigured** and is left exactly as-is — its allocation and limit are never touched. The optimizer still subtracts unconfigured allocation from the account budget when deciding how much to redistribute, so it never overcommits the cap.
 
-The config file is generated once with `configure` and is expected to be checked into version control. The `update` command helps catch drift between the file and the live API (instances added, archived, renamed; net grants expiring; missing `limit_seconds`).
+The config file is generated once with `configure` and is expected to be checked into version control. The `update` command helps catch drift between the file and the live API (instances added, archived, renamed; net grants rolling off; missing `limit_seconds`).
 
 ## Core load balancing algorithm
 
