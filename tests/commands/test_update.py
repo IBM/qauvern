@@ -11,7 +11,7 @@
 """Tests for the `qauvern update` command and its pure helpers."""
 
 import io
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,17 +21,19 @@ from ruamel.yaml import YAML
 
 from qauvern.cli import main
 from qauvern.commands.update import (
-    ExpiredGrant,
     InstanceRename,
     LimitAdded,
+    RemovedGrant,
     RemovedInstance,
+    RetainedGrant,
     UpdateActions,
     UpdateSummary,
     compute_update,
     format_update_summary,
 )
 from qauvern.config import ConfigParser
-from qauvern.models import DiscoveredInstance, DiscoveredInstances
+from qauvern.models import DiscoveredInstance, DiscoveredInstances, NetGrant
+from qauvern.rolling_window import ROLLING_WINDOW_DAYS, grant_still_credits, window_start
 from tests.mock_api import MockIBMQuantumAPIClient
 
 # ---------------------------------------------------------------------------
@@ -101,14 +103,15 @@ instances:
         _discovered(active=(_disc(US_CRN_A, "A"),)),
         now=datetime(2026, 5, 1, tzinfo=timezone.utc),
     )
-    assert len(summary.expired_net_grants) == 1
-    assert summary.expired_net_grants[0].instance_name == "A"
+    assert len(summary.removed_net_grants) == 1
+    assert summary.removed_net_grants[0].instance_name == "A"
     grants = doc["instances"][0]["net_grants"]
     assert len(grants) == 1
     assert grants[0]["net_grant_seconds"] == 2000
 
 
 def test_expire_net_grants_default_end_date_uses_28_day_window() -> None:
+    # start 2026-01-01, defaulted end = 2026-01-29 (start + 28 days).
     text = (
         BASE_HEADER
         + f"""\
@@ -127,11 +130,45 @@ instances:
         _discovered(active=(_disc(US_CRN_A, "A"),)),
         now=datetime(2026, 2, 1, tzinfo=timezone.utc),
     )
-    assert len(summary.expired_net_grants) == 1
-    assert "net_grants" not in doc["instances"][0]
+    # End (01-29) has rolled past `today` but not yet past `window_start(today)` (01-04), so
+    # the grant is retained, not removed, and still contributes carryover.
+    assert summary.removed_net_grants == []
+    assert len(summary.retained_net_grants) == 1
+    assert summary.retained_net_grants[0].prune_on == date(2026, 2, 26)
+    assert doc["instances"][0]["net_grants"][0]["net_grant_seconds"] == 1000
 
 
-def test_expire_net_grants_drops_key_when_emptied() -> None:
+@pytest.mark.parametrize(
+    ("today", "expect_removed"),
+    [
+        (date(2026, 2, 25), False),  # window_start == 2026-01-28, still inside end (01-29)
+        (date(2026, 2, 26), True),  # window_start == 2026-01-29 == end -> fully rolled off
+    ],
+)
+def test_expire_net_grants_removal_boundary_matches_prune_on(today: date, expect_removed: bool) -> None:
+    text = (
+        BASE_HEADER
+        + f"""\
+instances:
+  - name: A
+    crn: '{US_CRN_A}'
+    limit_seconds: 50000
+    net_grants:
+      - start_date: '2026-01-01T00:00:00+00:00'
+        net_grant_seconds: 1000
+"""
+    )
+    doc = _load_yaml(text)
+    summary = compute_update(
+        doc,
+        _discovered(active=(_disc(US_CRN_A, "A"),)),
+        now=datetime(today.year, today.month, today.day, tzinfo=timezone.utc),
+    )
+    assert (len(summary.removed_net_grants) == 1) == expect_removed
+    assert ("net_grants" not in doc["instances"][0]) == expect_removed
+
+
+def test_expire_net_grants_drops_key_when_fully_rolled_off() -> None:
     text = (
         BASE_HEADER
         + f"""\
@@ -148,6 +185,102 @@ instances:
     doc = _load_yaml(text)
     compute_update(doc, _discovered(active=(_disc(US_CRN_A, "A"),)), now=datetime(2026, 5, 1, tzinfo=timezone.utc))
     assert "net_grants" not in doc["instances"][0]
+
+
+def test_expire_net_grants_keeps_future_grant_untouched() -> None:
+    text = (
+        BASE_HEADER
+        + f"""\
+instances:
+  - name: A
+    crn: '{US_CRN_A}'
+    limit_seconds: 50000
+    net_grants:
+      - start_date: '2026-06-01T00:00:00+00:00'
+        end_date: '2026-07-01T00:00:00+00:00'
+        net_grant_seconds: 2000
+"""
+    )
+    doc = _load_yaml(text)
+    summary = compute_update(
+        doc,
+        _discovered(active=(_disc(US_CRN_A, "A"),)),
+        now=datetime(2026, 5, 1, tzinfo=timezone.utc),
+    )
+    assert summary.removed_net_grants == []
+    assert summary.retained_net_grants == []
+    assert doc["instances"][0]["net_grants"][0]["net_grant_seconds"] == 2000
+
+
+def test_expire_net_grants_retained_grant_leaves_config_untouched() -> None:
+    text = (
+        BASE_HEADER
+        + f"""\
+instances:
+  - name: A
+    crn: '{US_CRN_A}'
+    limit_seconds: 50000
+    net_grants:
+      - start_date: '2026-01-01T00:00:00+00:00'
+        end_date: '2026-02-01T00:00:00+00:00'
+        net_grant_seconds: 1000
+"""
+    )
+    doc = _load_yaml(text)
+    # today = end_date, so still in-window (window_start(today) < end_date) -> retained, not removed.
+    summary = compute_update(
+        doc,
+        _discovered(active=(_disc(US_CRN_A, "A"),)),
+        now=datetime(2026, 2, 1, tzinfo=timezone.utc),
+    )
+    assert summary.removed_net_grants == []
+    assert len(summary.retained_net_grants) == 1
+    assert summary.is_empty is True
+    grant = doc["instances"][0]["net_grants"][0]
+    assert grant["net_grant_seconds"] == 1000
+    assert grant["end_date"] == "2026-02-01T00:00:00+00:00"
+    output = _dump_yaml(doc)
+    assert "# user comment that must survive" in output
+
+
+# ---------------------------------------------------------------------------
+# Cross-module agreement: update's removal predicate vs. the resolver's
+# `grant_still_credits`. This is what stops `update` and `resolve_limit` from
+# drifting apart on where the window boundary falls.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("offset", range(-3, 4))
+def test_removal_predicate_agrees_with_grant_still_credits(offset: int) -> None:
+    start = date(2026, 1, 1)
+    end = date(2026, 3, 1)
+    today = end + timedelta(days=ROLLING_WINDOW_DAYS) + timedelta(days=offset)
+    now = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+
+    text = (
+        BASE_HEADER
+        + f"""\
+instances:
+  - name: A
+    crn: '{US_CRN_A}'
+    limit_seconds: 50000
+    net_grants:
+      - start_date: '{start.isoformat()}T00:00:00+00:00'
+        end_date: '{end.isoformat()}T00:00:00+00:00'
+        net_grant_seconds: 1000
+"""
+    )
+    doc = _load_yaml(text)
+    summary = compute_update(doc, _discovered(active=(_disc(US_CRN_A, "A"),)), now=now)
+
+    removed = len(summary.removed_net_grants) == 1
+    grant = NetGrant(
+        start_date=datetime(start.year, start.month, start.day, tzinfo=timezone.utc),
+        net_grant_seconds=1000,
+        end_date=datetime(end.year, end.month, end.day, tzinfo=timezone.utc),
+    )
+    assert removed == (not grant_still_credits(grant, today))
+    assert (end <= window_start(today)) == removed
 
 
 def test_remove_archived_and_missing_instances() -> None:
@@ -385,8 +518,8 @@ def test_format_update_summary_empty() -> None:
 def test_format_update_summary_all_sections() -> None:
     summary = UpdateSummary(
         removed_instances=[RemovedInstance(crn=US_CRN_B, name="Gone", reason="archived")],
-        expired_net_grants=[
-            ExpiredGrant(
+        removed_net_grants=[
+            RemovedGrant(
                 instance_name="A",
                 crn=US_CRN_A,
                 start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -401,7 +534,7 @@ def test_format_update_summary_all_sections() -> None:
     assert text.startswith("Planned changes:")
     assert "Remove (1)" in text
     assert "Gone" in text and "archived" in text
-    assert "Expired net_grants (1)" in text
+    assert "Remove rolled-off net_grants (1)" in text
     assert "2026-01-01" in text and "2026-02-01" in text
     assert "Rename (1)" in text
     assert '"Old"' in text and '"New"' in text
@@ -409,6 +542,26 @@ def test_format_update_summary_all_sections() -> None:
     assert "42000" in text
     assert "Add (1)" in text
     assert "Fresh" in text
+
+
+def test_format_update_summary_notes_only_starts_with_no_changes_needed() -> None:
+    summary = UpdateSummary(
+        retained_net_grants=[
+            RetainedGrant(
+                instance_name="A",
+                crn=US_CRN_A,
+                start_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                end_date=datetime(2026, 2, 1, tzinfo=timezone.utc),
+                prune_on=date(2026, 2, 28),
+            )
+        ]
+    )
+    assert summary.is_empty is True
+    text = format_update_summary(summary)
+    assert text.startswith("No changes needed.")
+    assert "Notes:" in text
+    assert "Expired net_grants kept for rolloff (1)" in text
+    assert "2026-02-28" in text
 
 
 # ---------------------------------------------------------------------------
@@ -677,3 +830,36 @@ instances:
     result = _invoke_update(runner, mock_client, ["--config", str(config_path), "--api-key", "k"])
     assert result.exit_code == 0, result.output
     assert "already up to date" in result.output
+
+
+def test_update_retained_grant_is_notes_only_and_does_not_prompt(runner: CliRunner, tmp_path: Path) -> None:
+    now = datetime.now(tz=timezone.utc)
+    start = now - timedelta(days=40)
+    end = now - timedelta(days=5)  # expired, but still inside the 28-day window -> retained
+    config_path = tmp_path / "config.yaml"
+    _write_config(
+        config_path,
+        f"""\
+instances:
+  - name: Live
+    crn: '{US_CRN_A}'
+    limit_seconds: 50000
+    net_grants:
+      - start_date: '{start.isoformat()}'
+        end_date: '{end.isoformat()}'
+        net_grant_seconds: 1000
+""",
+    )
+    original = config_path.read_text()
+
+    mock_client = MockIBMQuantumAPIClient()
+    mock_client.setup_account(account_id="acct-1", allocation_budget_seconds=0)
+    mock_client.setup_instance(crn=US_CRN_A, name="Live", allocation_seconds=36000, account_id="acct-1")
+
+    # No confirmation input: if the CLI tried to prompt, this would abort with a nonzero exit.
+    result = _invoke_update(runner, mock_client, ["--config", str(config_path), "--api-key", "k"], input=None)
+    assert result.exit_code == 0, result.output
+    assert "already up to date" in result.output
+    assert "Notes:" in result.output
+    assert "Expired net_grants kept for rolloff (1)" in result.output
+    assert config_path.read_text() == original
