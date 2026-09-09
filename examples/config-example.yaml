@@ -29,20 +29,13 @@ instances:
     # When set, the optimizer applies this limit on every run.
     # limit_seconds: 216000  # 60 hours
 
-    # Optional: Grant additional time above limit_seconds. REQUIRES limit_seconds
-    # to be set above (uncommenting net_grants alone yields a config that fails
-    # to load).
-    # A grant applies while start_date <= today < end_date: live on start_date,
-    # finished on end_date. Both must be tz-aware ISO timestamps.
-    # end_date is optional; defaults to start_date + 28 days if omitted.
-    # Multiple grants stack.
+    # Optional: Grant additional time above limit_seconds, which must also be set.
+    # A grant applies while start_date <= today < end_date; end_date is optional
+    # and defaults to start_date + 28 days. Multiple grants stack.
     #
-    # The limit does NOT snap back to limit_seconds on end_date. Usage a grant
-    # funded stays in IBM Quantum's 28-day rolling window, so the grant keeps
-    # crediting the limit until that usage rolls out too — an instance is never
-    # worse off after a grant expires than if the grant had never existed.
-    # Unspent grant time is not carried over. See the README's "How Net Grants
-    # Expire" for the full decay timeline.
+    # The limit does not snap back to limit_seconds on end_date: a grant keeps
+    # crediting the usage it funded until that usage leaves the 28-day rolling
+    # window. See "How Net Grants Expire" in the README.
     # net_grants:
     #   - start_date: "2026-05-01T00:00:00+00:00"
     #     net_grant_seconds: 360000  # 100 extra hours, default 28-day window

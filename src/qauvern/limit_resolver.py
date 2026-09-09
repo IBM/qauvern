@@ -22,16 +22,15 @@ from .rolling_window import grant_still_credits, window_start
 class UsageAttribution:
     """Per-day usage split between the grants that funded it and the base limit.
 
-    `grant_credited_seconds` is keyed **positionally** against the `grants`
-    argument of `attribute_usage`, not by `NetGrant` value: `NetGrant` is a
-    frozen (hashable) dataclass and the config does not dedupe, so two
-    identical grants must still get two independent budgets.
+    `grant_credited_seconds` aligns positionally with the `grants` argument to
+    `attribute_usage` — duplicate grants are indistinguishable by value, so
+    identity must be tracked by index, not by `NetGrant`.
     """
 
     grant_credited_seconds: tuple[int, ...]
     base_seconds_in_window: Mapping[date, int]
 
-    def base_before(self, day: date) -> int:
+    def base_seconds_before(self, day: date) -> int:
         """Sum in-window base usage on days strictly before `day`."""
         return sum(seconds for d, seconds in self.base_seconds_in_window.items() if d < day)
 
@@ -52,35 +51,35 @@ def attribute_usage(grants: Sequence[NetGrant], daily_usage: Mapping[date, int],
       has already rolled out of the window still counts as spent budget.
     - Days after `today` are ignored, and days outside the window contribute to
       neither `grant_credited_seconds` nor `base_seconds_in_window`.
-
-    Pure: no I/O and no clock — `today` is always supplied by the caller.
     """
-    earliest_in_window = window_start(today)
-    remaining = [grant.net_grant_seconds for grant in grants]
-    credited = [0] * len(grants)
-    base_in_window: dict[date, int] = {}
+    earliest_date_in_window = window_start(today)
+    remaining_grant_seconds = [grant.net_grant_seconds for grant in grants]
+    grant_credited_seconds = [0] * len(grants)
+    base_seconds_in_window: dict[date, int] = {}
 
     for day in sorted(daily_usage):
         if day > today:
             continue
-        in_window = earliest_in_window <= day <= today
-        unpaid = daily_usage[day]
-        covering = sorted(
+        in_window = earliest_date_in_window <= day <= today
+        unpaid_seconds = daily_usage[day]
+        covering_grant_indices = sorted(
             (i for i, grant in enumerate(grants) if grant.start_date.date() <= day < grant.end_date.date()),
             key=lambda i: (grants[i].end_date, grants[i].start_date, i),
         )
-        for i in covering:
-            if unpaid <= 0:
+        for i in covering_grant_indices:
+            if unpaid_seconds <= 0:
                 break
-            paid = min(unpaid, remaining[i])
-            remaining[i] -= paid
-            unpaid -= paid
+            paid_seconds = min(unpaid_seconds, remaining_grant_seconds[i])
+            remaining_grant_seconds[i] -= paid_seconds
+            unpaid_seconds -= paid_seconds
             if in_window:
-                credited[i] += paid
+                grant_credited_seconds[i] += paid_seconds
         if in_window:
-            base_in_window[day] = unpaid
+            base_seconds_in_window[day] = unpaid_seconds
 
-    return UsageAttribution(grant_credited_seconds=tuple(credited), base_seconds_in_window=base_in_window)
+    return UsageAttribution(
+        grant_credited_seconds=tuple(grant_credited_seconds), base_seconds_in_window=base_seconds_in_window
+    )
 
 
 @dataclass(frozen=True)
@@ -161,25 +160,29 @@ def resolve_limit(instance_config: InstanceConfig, instance_state: InstanceState
     if base_limit is None:
         raise AssertionError("InstanceConfig invariant violated: net_grants without target_limit_seconds")
 
-    relevant = [grant for grant in instance_config.net_grants if grant_still_credits(grant, today)]
-    if not relevant:
+    relevant_grants = [grant for grant in instance_config.net_grants if grant_still_credits(grant, today)]
+    if not relevant_grants:
         return LimitBreakdown._base_limit_only(base_limit)
 
-    attribution = attribute_usage(relevant, instance_state.usage.daily_usage, today=today)
+    attribution = attribute_usage(relevant_grants, instance_state.usage.daily_usage, today=today)
 
-    active_indices = {i for i, grant in enumerate(relevant) if grant.start_date.date() <= today < grant.end_date.date()}
-    active_grant_seconds = sum(relevant[i].net_grant_seconds for i in active_indices)
-    expired_carryover = sum(
-        seconds for i, seconds in enumerate(attribution.grant_credited_seconds) if i not in active_indices
+    active_grant_indices = {
+        i for i, grant in enumerate(relevant_grants) if grant.start_date.date() <= today < grant.end_date.date()
+    }
+    active_grant_seconds = sum(relevant_grants[i].net_grant_seconds for i in active_grant_indices)
+    expired_carryover_seconds = sum(
+        seconds for i, seconds in enumerate(attribution.grant_credited_seconds) if i not in active_grant_indices
     )
 
-    boost_start_date = min((relevant[i].start_date.date() for i in active_indices), default=None)
-    overage = max(0, attribution.base_before(boost_start_date) - base_limit) if boost_start_date is not None else 0
+    boost_start_date = min((relevant_grants[i].start_date.date() for i in active_grant_indices), default=None)
+    pre_boost_overage_seconds = (
+        max(0, attribution.base_seconds_before(boost_start_date) - base_limit) if boost_start_date is not None else 0
+    )
 
     return LimitBreakdown(
         base_seconds=base_limit,
         active_grant_seconds=active_grant_seconds,
-        expired_carryover_seconds=expired_carryover,
-        pre_boost_overage_seconds=overage,
+        expired_carryover_seconds=expired_carryover_seconds,
+        pre_boost_overage_seconds=pre_boost_overage_seconds,
         boost_start_date=boost_start_date,
     )

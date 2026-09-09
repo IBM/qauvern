@@ -74,26 +74,16 @@ Sets a base usage limit on the instance. When set, the optimizer applies this li
 
 A list of additive time-budget boosts above `limit_seconds`. Each grant has `start_date`, `net_grant_seconds`, and an optional `end_date` (defaults to `start_date + 28 days`). A grant is **active** when `start_date <= today < end_date` (half-open); multiple active grants stack. Setting `net_grants` requires also setting `limit_seconds`.
 
-An expired grant does **not** immediately vanish from the effective limit. IQP measures usage over a 28-day rolling window, so the minutes a grant funded stay counted against the instance long after the grant ends. Dropping the grant's contribution at `end_date` would leave an instance that spent a boost on the boost's last day facing its whole base limit already consumed — unable to run anything for up to 28 days. Instead, the usage a grant paid for keeps crediting the limit until that usage itself rolls out of the window. The guarantee is:
+An expired grant does **not** immediately vanish from the effective limit. Because IQP measures usage over a 28-day rolling window, the minutes a grant funded stay counted against the instance long after the grant ends, so the usage a grant paid for keeps crediting the limit until that usage itself rolls out of the window. The guarantee is:
 
 > **An instance is never worse off after a grant expires than if the grant had never existed.**
 
-Because attribution is **grant-first** (a day's usage is charged to the grants live that day before it is charged to the base limit), the guarantee holds in a stronger form. Once no grant is active, `breakdown.total - in-window usage` reduces exactly to
+[How net grants expire](README.md#how-net-grants-expire) in the README works this through with numbers and a decay timeline. Design points behind it:
 
-```
-available = limit_seconds - base_usage
-```
-
-where `limit_seconds` is the instance's configured base limit (`InstanceConfig.target_limit_seconds`) and `base_usage` is `sum(attribution.base_seconds_in_window.values())` — the in-window usage no grant could pay for. Spending grant time therefore cannot consume base capacity. The identity does not hold while a grant is still **active**, and should not: the instance can also draw on that grant's unspent budget, so available is higher by `net_grant_seconds - credited` (plus any pre-boost overage).
-
-For worked numbers, see the table under [How net grants expire](README.md#how-net-grants-expire) in the README — it walks a base-10/grant-100 instance through the under-spent, exactly-exhausted, past-grant, fully-spent, and overspent cases. Its `Available` column is this section's `limit_seconds - base_usage`, read against its `Paid by base` column.
-
-Charging base first would break the guarantee: with base 10 and a grant of 100 fully spent, 10 of that usage would bill to the base limit, leaving 0 available for up to 28 days — the starvation case the carryover exists to prevent.
-
-Two consequences worth knowing:
-
-- The limit qauvern writes to IQP stays **above** `limit_seconds` for up to 28 days after `end_date`. Someone watching IQP will not see it snap back at `end_date`, and while elevated it also raises the water-fill cap in `optimizer._water_fill`.
-- A cliff legitimately remains at expiry for the **unspent** portion of a grant (`net_grant_seconds - credited`). Headroom that was never used is not carried over; only usage the grant actually funded is.
+- Attribution is **grant-first** (a day's usage is charged to the grants live that day before the base limit), which makes the guarantee exact: once no grant is active, `breakdown.total - in-window usage` reduces to `InstanceConfig.target_limit_seconds - sum(attribution.base_seconds_in_window.values())`, so spending grant time cannot consume base capacity. Charging base first would break it — base 10 with a grant of 100 fully spent would bill 10 to the base limit, leaving 0 available for up to 28 days.
+- The identity does not hold while a grant is still **active**, and should not: the instance can also draw on that grant's unspent budget, so available is higher by `net_grant_seconds - credited` plus any pre-boost overage.
+- A cliff legitimately remains at expiry for the **unspent** portion of a grant; only usage a grant actually funded is carried over.
+- The limit written to IQP therefore stays above `limit_seconds` for up to 28 days after `end_date`, which also keeps the water-fill cap in `optimizer._water_fill` elevated that long.
 
 ### `resolve_limit`
 
@@ -105,18 +95,15 @@ Two consequences worth knowing:
 
 A grant **can still credit** (`rolling_window.grant_still_credits`) when it has started and its `end_date` has not yet rolled fully out of the window — i.e. `start_date <= today and end_date > window_start(today)`. Only those grants participate in resolution; see the pruning invariant below.
 
-All the terms are read off a single **per-day usage attribution** pass (`attribute_usage`), which charges each day's `daily_usage` to the grants active on that day, soonest-expiring first, and calls whatever no grant could pay for that day's *base* usage:
+All the terms come from one **per-day usage attribution** pass (`attribute_usage`), which charges each day's `daily_usage` to the grants active that day, soonest-expiring first, and calls whatever no grant could pay for that day's *base* usage:
 
 - `active_grant_budget` — sum of `net_grant_seconds` across grants active today. An active grant contributes its full budget, not its attributed usage.
 - `expired_carryover` — in-window usage attributed to grants that have since expired. This is the term that keeps a finished grant crediting the limit.
 - `boost_start` — earliest `start_date` among grants active today (`None` when none are active).
 - `unshielded_pre_boost` — in-window base usage on days strictly before `boost_start`, i.e. pre-grant usage that no grant paid for. Zero when no grant is active.
 
-Two properties of the attribution pass matter:
+Grant budgets are consumed over each grant's **full active period**, but only the share landing inside the window is *credited*: a grant can never credit back more than `net_grant_seconds`, and usage that has rolled out still counts as spent budget rather than freeing it for double credit. The window is `[window_start(today), today]`, inclusive on both ends — 29 calendar dates ([`src/qauvern/rolling_window.py`](src/qauvern/rolling_window.py) owns this convention, chosen because generous is the right direction for logic meant to avoid under-crediting users).
 
-- Grant budgets are consumed over each grant's **full active period**, but only the share landing inside the window is *credited*. A grant can therefore never credit back more than `net_grant_seconds`, and usage that has already rolled out still counts as spent budget rather than freeing it for double credit.
-- The window is `[window_start(today), today]`, inclusive on both ends — 29 calendar dates ([`src/qauvern/rolling_window.py`](src/qauvern/rolling_window.py) owns this convention, chosen because generous is the right direction for logic whose purpose is to avoid under-crediting users).
+The `max(0, unshielded_pre_boost - limit_seconds)` term lets pre-grant usage that exceeded the base limit decay out of the effective limit as those days exit the window; pre-grant days at or below the base limit contribute nothing. It is deliberately gated on having an *active* grant, so pre-grant debt forgiven during a boost snaps back at expiry — anchoring instead on the earliest still-crediting grant would *remove* forgiveness whenever an older expired grant precedes the active one, and snapping back still satisfies the guarantee above (the no-grant counterfactual is equally negative).
 
-The `max(0, unshielded_pre_boost - limit_seconds)` term lets pre-grant usage that exceeded the base limit decay out of the effective limit as those days exit the window; pre-grant days at or below the base limit contribute nothing. It is deliberately gated on having an *active* grant, so pre-grant debt that was forgiven during a boost snaps back at expiry. Anchoring it on the earliest still-crediting grant instead would *remove* forgiveness whenever an older expired grant precedes the active one, and snapping back still satisfies the guarantee above — the no-grant counterfactual is equally negative.
-
-**Pruning invariant.** Attribution runs over the grants that can still credit, never over every configured grant. That makes `update`'s removal of rolled-off grants provably a no-op: a grant with `end_date <= window_start(today)` is excluded from attribution, from the active budget, and from the carryover, so deleting it from the config cannot change the resolved limit. Under all-grants attribution a long-dead grant would absorb out-of-window usage and leave more budget in a live grant, so pruning would silently change other grants' carryover.
+**Pruning invariant.** Attribution runs over the still-crediting grants, never over every configured grant, which makes `update`'s removal of rolled-off grants provably a no-op: a grant with `end_date <= window_start(today)` contributes to no term, so deleting it cannot change the resolved limit. Under all-grants attribution a long-dead grant would absorb out-of-window usage and leave more budget in a live grant, so pruning would silently change other grants' carryover.
