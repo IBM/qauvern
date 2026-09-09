@@ -329,13 +329,25 @@ What a grant does *not* do is disappear from the effective limit the moment it e
 
 > **An instance is never worse off after a grant expires than if the grant had never existed.**
 
-With `limit_seconds: 10` and a grant of `100` fully spent on the grant's last day:
+The mechanism is that **grant time is spent before base time.** Usage on a day when a grant was live is charged to that grant's budget first, and only what the grant could not pay for is charged to your base limit. So after a grant expires:
 
-| Usage during the grant | Effective limit at expiry | Available |
-| --- | --- | --- |
-| 100 (the grant, exactly) | 10 + 100 | 10 — the whole base limit |
-| 105 (5 past the grant) | 10 + 100 | 5 |
-| 110 (grant + base) | 10 + 100 | 0 — spent, but not in debt |
+> **Available = `limit_seconds` − the in-window usage the grant could not pay for.**
+
+(`limit_seconds` is the plain base limit you set in the config — not an adjusted or effective value. While a grant is still active you have its unspent budget on top of this.)
+
+With `limit_seconds: 10` and a grant of `100` spent on the grant's last day:
+
+| Usage during the grant | Paid by grant | Paid by base | Effective limit at expiry | Available |
+| --- | --- | --- | --- | --- |
+| 40 (grant under-spent) | 40 | 0 | 10 + 40 = 50 | 10 — the whole base limit |
+| 100 (the grant, exactly) | 100 | 0 | 10 + 100 = 110 | 10 — the whole base limit |
+| 105 (5 past the grant) | 100 | 5 | 10 + 100 = 110 | 5 |
+| 110 (grant + base) | 100 | 10 | 10 + 100 = 110 | 0 — spent, but not in debt |
+| 120 (10 past both) | 100 | 20 | 10 + 100 = 110 | −10 — the grant credits at most 100 |
+
+Read the first two rows together: the unspent 60 of the grant is dropped at `end_date` (the limit is 50, not 110), but spending grant time never eats the base limit, so both rows still leave the full 10 available. A grant is a separate pot — you keep exactly what you drew from it, and nothing more.
+
+Charging base first instead would defeat the point. On the second row it would bill 10 of the 100 to the base limit, leaving a limit of 100 against 100 used and **0 available for up to 28 days** — punishing the instance for spending a grant it was entitled to spend.
 
 The credit then decays as the funded days age out. For `limit_seconds: 10`, a grant of `100` covering March 1–11 (`end_date: 2026-03-11`), with 70s used March 5 and 50s used March 8:
 

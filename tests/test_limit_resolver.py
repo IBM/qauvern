@@ -387,6 +387,9 @@ GRANT_1000 = NetGrant(
 @pytest.mark.parametrize(
     "used,expected_available",
     [
+        # Under-spent grant: only the 400 drawn is credited (limit 500, not 1100), yet
+        # attribution is grant-first, so none of it lands on base and all 100 is available.
+        (400, 100),
         # Spent within the grant: base is untouched, so all of it is still available.
         (1000, 100),
         # Spent 50 past the grant: only that 50 eats into base.

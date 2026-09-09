@@ -78,7 +78,17 @@ An expired grant does **not** immediately vanish from the effective limit. IQP m
 
 > **An instance is never worse off after a grant expires than if the grant had never existed.**
 
-With base 100 and a grant of 1000 fully spent on the grant's last day: usage 1000 leaves 100 available, usage 1050 leaves 50, usage ≥1100 leaves 0.
+Because attribution is **grant-first** (a day's usage is charged to the grants live that day before it is charged to the base limit), the guarantee holds in a stronger form. Once no grant is active, `breakdown.total - in-window usage` reduces exactly to
+
+```
+available = limit_seconds - base_usage
+```
+
+where `limit_seconds` is the instance's configured base limit (`InstanceConfig.target_limit_seconds`) and `base_usage` is `sum(attribution.base_seconds_in_window.values())` — the in-window usage no grant could pay for. Spending grant time therefore cannot consume base capacity. The identity does not hold while a grant is still **active**, and should not: the instance can also draw on that grant's unspent budget, so available is higher by `net_grant_seconds - credited` (plus any pre-boost overage).
+
+For worked numbers, see the table under [How net grants expire](README.md#how-net-grants-expire) in the README — it walks a base-10/grant-100 instance through the under-spent, exactly-exhausted, past-grant, fully-spent, and overspent cases. Its `Available` column is this section's `limit_seconds - base_usage`, read against its `Paid by base` column.
+
+Charging base first would break the guarantee: with base 10 and a grant of 100 fully spent, 10 of that usage would bill to the base limit, leaving 0 available for up to 28 days — the starvation case the carryover exists to prevent.
 
 Two consequences worth knowing:
 
