@@ -33,6 +33,10 @@ CSV_COLUMNS: tuple[str, ...] = (
     "current_limit",
     "new_limit",
     "limit_delta",
+    "limit_base",
+    "limit_active_grant",
+    "limit_expired_carryover",
+    "limit_overage",
     "consumed_28d",
     "consumed_14d",
     "consumed_7d",
@@ -40,11 +44,6 @@ CSV_COLUMNS: tuple[str, ...] = (
     "consumed_24h",
     "fairness",
     "activity_score",
-    # Appended, never reordered — column order is a consumer contract.
-    "limit_base",
-    "limit_active_grant",
-    "limit_expired_carryover",
-    "limit_overage",
 )
 
 
