@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `net_grant_seconds` now applies as a lifetime budget for the grant's whole period rather than a
+  per-window allowance. This only affects grants of 30 days or more, which previously re-granted
+  their full budget every window: a 90-day grant of 1000s could be drawn about four times over.
+- `net_grants` no longer snap out of the effective limit on `end_date`. The usage a grant funded
+  stays in IBM Quantum's 28-day rolling window after the grant ends, so qauvern now keeps crediting it
+  until that usage rolls out too. As a result, an instance is no longer left waiting up to 28 days to use its
+  base limit again. Undrawn budget is still forfeit at `end_date`.
+  - `update` keeps expired `net_grants` until they have fully rolled out of the window (`end_date` +
+    28 days), reporting them under `Notes:` with the date they become removable. Removing them
+    earlier dropped the credit they still funded.
+  - `analyze` reports the effective limit's terms: a `LIMIT BREAKDOWN` section in `--format table`,
+    `limit_breakdown` in `--format json`, and `limit_base` / `limit_grant_funded` /
+    `limit_unspent_grant` / `limit_overage` columns in `--format csv`.
 - `analyze` and `optimize` now error, rather than warn, if they cannot get an instance's usage data.
 
 ## [0.12.0] - 2026-08-12

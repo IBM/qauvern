@@ -42,6 +42,7 @@ from .models import (
     Account,
     AllocationChange,
     DiscoveredInstance,
+    InstanceConfig,
     InstanceDetailedUsage,
     InstanceState,
     LimitChange,
@@ -49,22 +50,29 @@ from .models import (
 from .optimizer import AllocationOptimizer
 from .plan import Plan, plan_from_name
 from .region import Region
-from .rolling_window import DAILY_USAGE_LOOKBACK_DAYS
+from .rolling_window import daily_usage_lookback_days
 
 
 def enrich_instances_with_usage_data(
     account: Account,
     client: IBMQuantumAPIClient,
+    instance_configs: Sequence[InstanceConfig],
 ) -> None:
-    """Populate each instance's detailed usage, aborting the run on any fetch failure."""
+    """Populate each instance's detailed usage, aborting the run on any fetch failure.
+
+    `instance_configs` sets how far back per-day usage is fetched, since a long
+    net grant needs more history than the rolling window alone.
+    """
+    grants_by_crn = {config.crn: config.net_grants for config in instance_configs}
     for instance in account.instances:
         try:
             # Get detailed usage for multiple time periods
             detailed_usage = client.get_detailed_usage(instance.crn, account.account_id)
 
-            # Fetch per-day usage for net grant rolloff calculation
+            # Fetch per-day usage for net grant attribution and rolloff
             today_date = datetime.now(timezone.utc).date()
-            daily_start = today_date - timedelta(days=DAILY_USAGE_LOOKBACK_DAYS)
+            lookback = daily_usage_lookback_days(grants_by_crn.get(instance.crn, ()), today_date)
+            daily_start = today_date - timedelta(days=lookback)
             daily = client.get_daily_usage(instance.crn, account.account_id, daily_start, today_date)
 
             instance.detailed_usage = InstanceDetailedUsage(
@@ -352,7 +360,7 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str):
     account = client.get_account(account_id, plan, instance_states)
 
     click.echo("Fetching usage data for different time periods...", err=True)
-    enrich_instances_with_usage_data(account, client)
+    enrich_instances_with_usage_data(account, client, instance_configs)
 
     click.echo("Analyzing allocations...", err=True)
     optimizer = AllocationOptimizer(
@@ -411,7 +419,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
     account = client.get_account(account_id, plan, instance_states)
 
     # Enrich instances with target usage (no detailed usage needed for optimize)
-    enrich_instances_with_usage_data(account, client)
+    enrich_instances_with_usage_data(account, client, instance_configs)
 
     # Get minimum allocation from config
     minimum_allocation_seconds = config_parser.minimum_allocation_seconds
@@ -652,7 +660,7 @@ def update(
     discovered = client.discover_instances(config_parser.plan).filter_by_region(region)
 
     actions = UpdateActions(
-        expire_net_grants=not no_net_grants,
+        prune_net_grants=not no_net_grants,
         add_instances=not no_add,
         fix_names=not no_names,
         remove_instances=not no_remove,

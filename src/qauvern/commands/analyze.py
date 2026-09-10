@@ -18,6 +18,7 @@ from typing import Any
 from tabulate import tabulate
 
 from ..formatting import format_instance_analysis_table, format_reserve_summary, format_seconds
+from ..limit_resolver import LimitBreakdown
 from ..models import Account, InstanceConfig, OptimizationResult
 from ..optimizer import AllocationOptimizer
 from ..plan import Plan
@@ -32,6 +33,10 @@ CSV_COLUMNS: tuple[str, ...] = (
     "current_limit",
     "new_limit",
     "limit_delta",
+    "limit_base",
+    "limit_grant_funded",
+    "limit_unspent_grant",
+    "limit_overage",
     "consumed_28d",
     "consumed_14d",
     "consumed_7d",
@@ -54,6 +59,7 @@ class AnalyzeReport:
     usage_floor_warnings: tuple[str, ...]
     allocation_reserve_percent: float
     redistribution_pool_seconds: int
+    limit_breakdowns: dict[str, LimitBreakdown | None]
 
     @classmethod
     def from_optimizer(
@@ -78,7 +84,17 @@ class AnalyzeReport:
             usage_floor_warnings=tuple(warnings),
             allocation_reserve_percent=optimizer.allocation_reserve_percent,
             redistribution_pool_seconds=pool_seconds,
+            limit_breakdowns=optimizer.limit_breakdowns,
         )
+
+
+def _shaped_by_grant(breakdown: LimitBreakdown) -> bool:
+    """Whether any net-grant term contributes to this instance's effective limit."""
+    return (
+        breakdown.grant_funded_seconds > 0
+        or breakdown.unspent_grant_seconds > 0
+        or breakdown.pre_boost_overage_seconds > 0
+    )
 
 
 def format_analyze_table(report: AnalyzeReport) -> str:
@@ -135,6 +151,8 @@ def format_analyze_table(report: AnalyzeReport) -> str:
     )
     lines.append(tabulate(table_data, headers=headers, tablefmt="grid"))
 
+    lines += _format_limit_breakdown_section(report)
+
     total_changes = len(result.allocation_changes) + len(result.limit_changes)
     if total_changes:
         lines += [
@@ -147,6 +165,56 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         lines += ["", "✓ No optimization recommendations. Allocations are optimal."]
 
     return "\n".join(lines)
+
+
+def _breakdown_payload(breakdown: LimitBreakdown | None) -> dict[str, Any] | None:
+    """JSON view of an effective-limit breakdown; None when the config sets no limit."""
+    if breakdown is None:
+        return None
+    return {
+        "base_seconds": breakdown.base_seconds,
+        "grant_funded_seconds": breakdown.grant_funded_seconds,
+        "unspent_grant_seconds": breakdown.unspent_grant_seconds,
+        "pre_boost_overage_seconds": breakdown.pre_boost_overage_seconds,
+        "boost_start_date": breakdown.boost_start_date.isoformat() if breakdown.boost_start_date else None,
+        "total_seconds": breakdown.total,
+    }
+
+
+def _format_limit_breakdown_section(report: AnalyzeReport) -> list[str]:
+    """Render the per-instance effective-limit terms, or nothing when no grant applies.
+
+    Instances with no grant shaping their limit are skipped: their effective limit is
+    just `limit_seconds`, already in the instance table.
+    """
+    rows: list[list[str]] = []
+    for inst in report.account.instances:
+        breakdown = report.limit_breakdowns.get(inst.crn)
+        if breakdown is None or not _shaped_by_grant(breakdown):
+            continue
+        rows.append(
+            [
+                inst.name,
+                format_seconds(breakdown.base_seconds),
+                format_seconds(breakdown.grant_funded_seconds),
+                format_seconds(breakdown.unspent_grant_seconds),
+                format_seconds(breakdown.pre_boost_overage_seconds),
+                format_seconds(breakdown.total),
+            ]
+        )
+    if not rows:
+        return []
+
+    headers = ["Instance", "Base", "Grant-funded usage", "Unspent grant", "Pre-boost overage", "Effective limit"]
+    return [
+        "",
+        "=" * 80,
+        "LIMIT BREAKDOWN",
+        "=" * 80,
+        tabulate(rows, headers=headers, tablefmt="grid"),
+        "Grant-funded usage keeps the minutes a grant paid for out of the base limit, and",
+        "decays as they leave the 28-day window. Unspent grant is forfeit at end_date.",
+    ]
 
 
 def format_analyze_json(report: AnalyzeReport) -> str:
@@ -193,6 +261,7 @@ def format_analyze_json(report: AnalyzeReport) -> str:
                 "consumed_24h_seconds": inst.usage.consumed_24h,
                 "fairness": fairness,
                 "activity_score": inst.activity_score,
+                "limit_breakdown": _breakdown_payload(report.limit_breakdowns.get(inst.crn)),
             }
         )
 
@@ -239,6 +308,7 @@ def format_analyze_csv(report: AnalyzeReport) -> str:
         allocation_delta = new_allocation - inst.allocation_seconds
 
         new_limit = limit_rec.new if limit_rec is not None else inst.limit_seconds
+        breakdown = report.limit_breakdowns.get(inst.crn)
         if limit_rec is not None and inst.limit_seconds is not None:
             limit_delta: int | str = limit_rec.new - inst.limit_seconds
         else:
@@ -262,6 +332,10 @@ def format_analyze_csv(report: AnalyzeReport) -> str:
                 "consumed_24h": inst.usage.consumed_24h,
                 "fairness": f"{inst.fairness:.6f}",
                 "activity_score": f"{inst.activity_score:.6f}",
+                "limit_base": breakdown.base_seconds if breakdown is not None else "",
+                "limit_grant_funded": breakdown.grant_funded_seconds if breakdown is not None else "",
+                "limit_unspent_grant": breakdown.unspent_grant_seconds if breakdown is not None else "",
+                "limit_overage": breakdown.pre_boost_overage_seconds if breakdown is not None else "",
             }
         )
     return buf.getvalue()

@@ -10,6 +10,7 @@
 
 """Tests that usage-fetch failures abort `analyze`/`optimize` instead of degrading silently."""
 
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,6 +18,7 @@ import pytest
 from click.testing import CliRunner, Result
 
 from qauvern.cli import main
+from qauvern.rolling_window import DAILY_USAGE_LOOKBACK_DAYS
 from tests.mock_api import MockIBMQuantumAPIClient
 
 CRN_A = "crn:v1:bluemix:public:quantum-computing:us-east:a/acc:inst-a::"
@@ -87,3 +89,54 @@ def test_daily_usage_fetch_failure_aborts_run(runner: CliRunner, tmp_path: Path,
 
     assert result.exit_code != 0
     assert "daily boom" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Per-day usage lookback follows the configured grants
+# ---------------------------------------------------------------------------
+
+
+def test_daily_usage_lookback_widens_for_a_long_grant(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    """A 90-day grant must be fetched back to its start_date, not just the 60-day floor.
+
+    A day missing from `daily_usage` reads as unspent budget and inflates the limit.
+    Dates are relative to today so the grant stays in its post-expiry crediting tail.
+    """
+    today = datetime.now(timezone.utc).date()
+    grant_start = today - timedelta(days=100)
+    grant_end = today - timedelta(days=10)  # expired, but still inside the window
+    config_text = f"""\
+account_id: acct-1
+plan: internal
+minimum_allocation_seconds: 60
+instances:
+  - name: Instance A
+    crn: '{CRN_A}'
+    limit_seconds: 1000
+    net_grants:
+      - start_date: '{grant_start.isoformat()}T00:00:00+00:00'
+        end_date: '{grant_end.isoformat()}T00:00:00+00:00'
+        net_grant_seconds: 5000
+  - name: Instance B
+    crn: '{CRN_B}'
+"""
+
+    client = _mock_client_with_instances()
+    requested: dict[str, date] = {}
+    original = client.get_daily_usage
+
+    def _record(instance_crn: str, account_id: str, start_date: date, end_date: date) -> dict[date, int]:
+        requested[instance_crn] = start_date
+        return original(instance_crn, account_id, start_date, end_date)
+
+    monkeypatch.setattr(client, "get_daily_usage", _record)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(config_text)
+    result = _invoke(runner, client, "analyze", config_path)
+    assert result.exit_code == 0, result.output
+
+    # Instance A reaches back to the grant's start_date; B has no grants, so it
+    # stays on the DAILY_USAGE_LOOKBACK_DAYS floor.
+    assert requested[CRN_A] == grant_start
+    assert requested[CRN_B] == today - timedelta(days=DAILY_USAGE_LOOKBACK_DAYS)

@@ -17,6 +17,7 @@ direction rather than the stingy one, since this module backs logic (net-grant
 carryover, rolloff) whose purpose is to avoid under-crediting users.
 """
 
+from collections.abc import Iterable
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
@@ -25,9 +26,8 @@ if TYPE_CHECKING:
 
 ROLLING_WINDOW_DAYS = 28
 
-# How far back to fetch per-day usage from the API. Must be at least
-# ROLLING_WINDOW_DAYS so the rolling window is always fully covered; the
-# extra headroom tolerates grants that started slightly outside the window.
+# Floor for how far back to fetch per-day usage from the API. Grants can need more;
+# `daily_usage_lookback_days` works out how much.
 DAILY_USAGE_LOOKBACK_DAYS = 60
 
 
@@ -46,10 +46,23 @@ def grant_still_credits(grant: "NetGrant", today: date) -> bool:
     return grant.start_date.date() <= today and grant.end_date.date() > window_start(today)
 
 
-def grant_removable_on(grant: "NetGrant") -> date:
-    """Return the first date on which `grant` can no longer credit any usage.
+def grant_removable_on(end_date: date) -> date:
+    """Return the first date on which a grant ending on `end_date` can no longer credit.
 
     That is the first `today` for which `grant_still_credits(grant, today)`
     is false, i.e. `end_date + ROLLING_WINDOW_DAYS`.
     """
-    return grant.end_date.date() + timedelta(days=ROLLING_WINDOW_DAYS)
+    return end_date + timedelta(days=ROLLING_WINDOW_DAYS)
+
+
+def daily_usage_lookback_days(grants: Iterable["NetGrant"], today: date) -> int:
+    """Return how many days of per-day usage `attribute_usage` needs for `grants`.
+
+    Budgets are consumed over a grant's full active period, so attribution needs
+    every day back to a still-crediting grant's `start_date` — a 90-day grant needs
+    ~117 days. A missing day makes spent budget look unspent and inflates the limit,
+    so this follows the longest grant rather than a fixed constant. Never returns
+    less than `DAILY_USAGE_LOOKBACK_DAYS`.
+    """
+    starts = [(today - grant.start_date.date()).days for grant in grants if grant_still_credits(grant, today)]
+    return max([DAILY_USAGE_LOOKBACK_DAYS, *starts])

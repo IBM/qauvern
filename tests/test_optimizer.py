@@ -26,6 +26,7 @@ from qauvern.models import (
     OptimizationResult,
 )
 from qauvern.optimizer import AllocationOptimizer
+from tests.mock_api import MockIBMQuantumAPIClient
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1110,3 +1111,40 @@ def test_end_to_end_mixed_passes_validation(mixed_account: tuple[Account, list[I
     assert projected["crn:active_med_capped"] <= 400_000
     # High-activity instance soaks up most of the headroom.
     assert projected["crn:active_high"] > account.instances[0].allocation_seconds
+
+
+# ---------------------------------------------------------------------------
+# Expired-grant carryover, end to end through the mock API
+# ---------------------------------------------------------------------------
+
+
+def test_expired_but_retained_grant_keeps_the_limit_elevated() -> None:
+    """A grant burned on its last day still raises the limit written back to IQP."""
+    crn = "crn:v1:bluemix:public:quantum-computing:us-east:a/acc:boosted::"
+    client = MockIBMQuantumAPIClient()
+    client.setup_account("acct-1", allocation_budget_seconds=5_000)
+    client.setup_instance(
+        crn,
+        "Boosted",
+        allocation_seconds=1_000,
+        consumed_seconds=1_000,
+        limit_seconds=100,
+        account_id="acct-1",
+        consumed_24h=1_000,
+        daily_usage={date(2026, 3, 28): 1_000},
+    )
+    account = client.get_account("acct-1")
+    grant = NetGrant(
+        start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        net_grant_seconds=1_000,
+        end_date=datetime(2026, 3, 29, tzinfo=timezone.utc),
+    )
+    cfg = InstanceConfig(name="Boosted", crn=crn, target_limit_seconds=100, net_grants=(grant,))
+
+    # today == end_date: expired, retained by `update`, and still crediting.
+    optimizer = AllocationOptimizer(account, [cfg], today=date(2026, 3, 29))
+    result = optimizer.optimize()
+
+    assert result.limit_changes[crn].new == 100 + 1_000
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors

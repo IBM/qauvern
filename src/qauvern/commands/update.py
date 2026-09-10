@@ -16,7 +16,7 @@ from typing import Any, Literal
 from ruamel.yaml import YAML
 
 from ..config import parse_net_grant_dates
-from ..models import DiscoveredInstance, DiscoveredInstances, NetGrant
+from ..models import DiscoveredInstance, DiscoveredInstances
 from ..rolling_window import grant_removable_on, window_start
 
 
@@ -24,7 +24,7 @@ from ..rolling_window import grant_removable_on, window_start
 class UpdateActions:
     """Which reconciliation actions to perform."""
 
-    expire_net_grants: bool = True
+    prune_net_grants: bool = True
     add_instances: bool = True
     fix_names: bool = True
     remove_instances: bool = True
@@ -95,12 +95,12 @@ class UpdateSummary:
         )
 
 
-def _expire_net_grants(doc_instances: list, now: datetime, summary: UpdateSummary) -> None:
+def _prune_net_grants(doc_instances: list, now: datetime, summary: UpdateSummary) -> None:
     """Drop grants that have fully rolled out of the window; keep-but-note ones still crediting.
 
-    A grant that ended can still credit usage into `resolve_limit`'s rolling-window carryover
-    for up to 28 days past `end_date` (see `rolling_window.grant_still_credits`). Removing it
-    from the config any earlier than that would silently destroy the carryover it funded.
+    A grant that ended keeps crediting the usage it funded for up to 28 days past
+    `end_date` (see `rolling_window.grant_still_credits`). Removing it any earlier
+    would drop that credit and put the instance in debt.
     """
     today = now.date()
     for entry in doc_instances:
@@ -123,18 +123,13 @@ def _expire_net_grants(doc_instances: list, now: datetime, summary: UpdateSummar
                 continue
             kept.append(grant_data)
             if end_date.date() <= today:
-                grant = NetGrant(
-                    start_date=start_date,
-                    net_grant_seconds=grant_data.get("net_grant_seconds", 0),
-                    end_date=end_date,
-                )
                 summary.retained_net_grants.append(
                     RetainedGrant(
                         instance_name=entry["name"],
                         crn=entry["crn"],
                         start_date=start_date,
                         end_date=end_date,
-                        prune_on=grant_removable_on(grant),
+                        prune_on=grant_removable_on(end_date.date()),
                     )
                 )
         if not kept:
@@ -231,8 +226,8 @@ def compute_update(
         known_crns = archived_crns | {d.crn for d in discovered.active}
         _remove_instances(doc_instances, archived_crns, known_crns, summary)
 
-    if actions.expire_net_grants:
-        _expire_net_grants(doc_instances, now, summary)
+    if actions.prune_net_grants:
+        _prune_net_grants(doc_instances, now, summary)
 
     active_by_crn = {d.crn: d for d in discovered.active}
 

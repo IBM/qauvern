@@ -8,20 +8,29 @@
 # copyright notice, and modified files need to carry a notice indicating
 # that they have been altered from the originals.
 
-"""Tests for resolve_limit.
+"""Tests for resolve_limit and attribute_usage.
 
-Formula under test (when at least one grant is active today):
-    result = base + grant_total + max(0, rolloff - base)
+Formula under test, over the grants that can still credit today:
+    result = base + grant_funded + unspent_grant + max(0, unshielded_pre_boost - base)
 
-where rolloff sums daily_usage on days in [today - 28, boost_start - 1].
+where per-day usage is first attributed to the grants active on that day
+(soonest-expiring first), `grant_funded` sums the in-window share charged to
+those grants, `unspent_grant` sums the budget the grants active today have never
+drawn, and `unshielded_pre_boost` sums the in-window leftover on days strictly
+before the earliest active grant's start.
+
+`net_grant_seconds` is a lifetime budget for the whole grant period, so
+`unspent_grant` only ever shrinks — it is never replenished when funded days roll
+out of the window.
 """
 
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
-from qauvern.limit_resolver import resolve_limit
+from qauvern.limit_resolver import attribute_usage, resolve_limit
 from qauvern.models import InstanceConfig, InstanceDetailedUsage, InstanceState, NetGrant
+from qauvern.rolling_window import ROLLING_WINDOW_DAYS, grant_removable_on, window_start
 
 
 def _dt(d: date) -> datetime:
@@ -103,8 +112,8 @@ def test_base_only_breakdown_has_zeroed_grant_fields() -> None:
     limit_breakdown = resolve_limit(make_config(limit_seconds=500), make_instance(), date(2026, 4, 27))
     assert limit_breakdown is not None
     assert limit_breakdown.base_seconds == 500
-    assert limit_breakdown.active_grant_seconds == 0
-    assert limit_breakdown.expired_carryover_seconds == 0
+    assert limit_breakdown.grant_funded_seconds == 0
+    assert limit_breakdown.unspent_grant_seconds == 0
     assert limit_breakdown.pre_boost_overage_seconds == 0
     assert limit_breakdown.boost_start_date is None
     assert limit_breakdown.total == 500
@@ -123,8 +132,8 @@ def test_active_grant_breakdown_fields() -> None:
     limit_breakdown = resolve_limit(cfg, instance, today)
     assert limit_breakdown is not None
     assert limit_breakdown.base_seconds == 12
-    assert limit_breakdown.active_grant_seconds == 6
-    assert limit_breakdown.expired_carryover_seconds == 0
+    assert limit_breakdown.grant_funded_seconds == 0
+    assert limit_breakdown.unspent_grant_seconds == 6
     assert limit_breakdown.pre_boost_overage_seconds == 4
     assert limit_breakdown.boost_start_date == date(2026, 4, 20)
     assert limit_breakdown.total == 22
@@ -368,3 +377,422 @@ def decay_scenario() -> tuple[InstanceConfig, InstanceState]:
 def test_decay_timeline(decay_scenario: tuple[InstanceConfig, InstanceState], today: date, expected: int) -> None:
     cfg, instance = decay_scenario
     assert _total(cfg, instance, today) == expected
+
+
+# -------------------------------------------------------------------
+# Expired-grant carryover: no minute debt the day a grant ends
+# -------------------------------------------------------------------
+
+GRANT_1000 = NetGrant(
+    start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+    net_grant_seconds=1000,
+    end_date=datetime(2026, 3, 29, tzinfo=timezone.utc),
+)
+
+
+@pytest.mark.parametrize(
+    "used,expected_available",
+    [
+        # Under-spent grant: only the 400 drawn is credited (limit 500, not 1100), yet
+        # attribution is grant-first, so none of it lands on base and all 100 is available.
+        (400, 100),
+        # Spent within the grant: base is untouched, so all of it is still available.
+        (1000, 100),
+        # Spent 50 past the grant: only that 50 eats into base.
+        (1050, 50),
+        # Spent the whole grant plus the whole base: nothing left, but no debt either.
+        (1100, 0),
+    ],
+)
+def test_never_worse_off_the_day_a_grant_expires(used: int, expected_available: int) -> None:
+    """base 100 + grant 1000, all spent on the grant's last day, checked the day it ends."""
+    today = date(2026, 3, 29)  # == end_date, so the grant is expired but still crediting
+    cfg = make_config(limit_seconds=100, net_grants=[GRANT_1000])
+    instance = make_instance(daily_usage={date(2026, 3, 28): used})
+    total = _total(cfg, instance, today)
+    assert total is not None
+    # 100 + 0 active + min(used, 1000) carryover + 0 overage
+    assert total == 100 + min(used, 1000)
+    assert total - used == expected_available
+
+
+def test_carryover_caps_at_the_grant_budget() -> None:
+    """A grant can never credit back more than net_grant_seconds, however much was burned."""
+    cfg = make_config(limit_seconds=100, net_grants=[GRANT_1000])
+    instance = make_instance(daily_usage={date(2026, 3, 28): 5000})
+    limit_breakdown = resolve_limit(cfg, instance, date(2026, 3, 29))
+    assert limit_breakdown is not None
+    assert limit_breakdown.grant_funded_seconds == 1000
+    assert limit_breakdown.unspent_grant_seconds == 0
+    assert limit_breakdown.total == 100 + 1000
+
+
+@pytest.mark.parametrize(
+    "today,expected",
+    [
+        # end_date Mar 29 + 28 = Apr 26 is the first day the grant cannot credit.
+        (date(2026, 4, 25), 100 + 1000),
+        (date(2026, 4, 26), 100),
+    ],
+)
+def test_relevance_boundary_matches_attribution_boundary(today: date, expected: int) -> None:
+    """The last day a grant is `relevant` is the last day its usage is still in-window."""
+    cfg = make_config(limit_seconds=100, net_grants=[GRANT_1000])
+    instance = make_instance(daily_usage={date(2026, 3, 28): 1000})
+    assert _total(cfg, instance, today) == expected
+
+
+def test_budget_consumed_over_full_period_credited_only_in_window() -> None:
+    """Out-of-window usage still spends the grant, so it can't be credited twice."""
+    today = date(2026, 3, 30)  # window floor Mar 2, so the Mar 1 usage has rolled out
+    cfg = make_config(limit_seconds=100, net_grants=[GRANT_1000])
+    instance = make_instance(daily_usage={date(2026, 3, 1): 900, date(2026, 3, 20): 200})
+
+    attribution = attribute_usage([GRANT_1000], instance.usage.daily_usage, today=today)
+    # Mar 1 spends 900 of the budget but is out of window, so only the remaining 100 is credited.
+    assert attribution.grant_credited_seconds == (100,)
+    assert attribution.base_seconds_in_window == {date(2026, 3, 20): 100}
+
+    # 100 + 0 active + 100 carryover + 0 overage. In-window-only attribution would say 300.
+    assert _total(cfg, instance, today) == 200
+
+
+def test_carryover_and_overage_do_not_double_count_the_same_usage() -> None:
+    """Usage shielded by an expired grant is not also charged as pre-boost overage."""
+    today = date(2026, 3, 20)
+    g1 = NetGrant(
+        start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        net_grant_seconds=1000,
+        end_date=datetime(2026, 3, 11, tzinfo=timezone.utc),
+    )
+    g2 = NetGrant(
+        start_date=datetime(2026, 3, 15, tzinfo=timezone.utc),
+        net_grant_seconds=100,
+        end_date=datetime(2026, 4, 15, tzinfo=timezone.utc),
+    )
+    cfg = make_config(limit_seconds=100, net_grants=[g1, g2])
+    instance = make_instance(daily_usage={date(2026, 3, 5): 900})
+    limit_breakdown = resolve_limit(cfg, instance, today)
+    assert limit_breakdown is not None
+    # g1 paid for all 900, so nothing is left over to charge before g2's start.
+    assert limit_breakdown.pre_boost_overage_seconds == 0
+    assert limit_breakdown.grant_funded_seconds == 900
+    assert limit_breakdown.unspent_grant_seconds == 100
+    # 100 + 100 + 900 + 0. Adding an independent carryover on top of the old rolloff gives 1900.
+    assert limit_breakdown.total == 1100
+    assert limit_breakdown.total - 900 == 100 + 100  # available == base + the active grant
+
+
+def test_uncovered_pre_boost_days_still_produce_overage() -> None:
+    """The old rolloff behavior survives: days no grant covered fall through to base."""
+    today = date(2026, 3, 20)
+    expired = NetGrant(
+        start_date=datetime(2026, 3, 10, tzinfo=timezone.utc),
+        net_grant_seconds=50,
+        end_date=datetime(2026, 3, 12, tzinfo=timezone.utc),
+    )
+    active = NetGrant(
+        start_date=datetime(2026, 3, 15, tzinfo=timezone.utc),
+        net_grant_seconds=100,
+        end_date=datetime(2026, 4, 15, tzinfo=timezone.utc),
+    )
+    cfg = make_config(limit_seconds=10, net_grants=[expired, active])
+    # Mar 5 predates both grants, so nothing shields it; Mar 11 is covered by the expired grant.
+    instance = make_instance(daily_usage={date(2026, 3, 5): 40, date(2026, 3, 11): 50})
+    limit_breakdown = resolve_limit(cfg, instance, today)
+    assert limit_breakdown is not None
+    assert limit_breakdown.pre_boost_overage_seconds == 30  # max(0, 40 - 10)
+    assert limit_breakdown.grant_funded_seconds == 50
+    assert limit_breakdown.unspent_grant_seconds == 100
+    assert limit_breakdown.total == 10 + 50 + 100 + 30
+
+
+# -------------------------------------------------------------------
+# Attribution order across overlapping grants
+# -------------------------------------------------------------------
+
+
+def _overlapping_grants() -> tuple[NetGrant, NetGrant]:
+    """Two grants covering Mar 5, one expiring soon and one still active on Mar 20."""
+    soon = NetGrant(
+        start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        net_grant_seconds=100,
+        end_date=datetime(2026, 3, 10, tzinfo=timezone.utc),
+    )
+    late = NetGrant(
+        start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        net_grant_seconds=100,
+        end_date=datetime(2026, 4, 20, tzinfo=timezone.utc),
+    )
+    return soon, late
+
+
+def test_overlapping_grants_charge_soonest_expiring_first() -> None:
+    soon, late = _overlapping_grants()
+    cfg = make_config(limit_seconds=10, net_grants=[soon, late])
+    instance = make_instance(daily_usage={date(2026, 3, 5): 150})
+    limit_breakdown = resolve_limit(cfg, instance, date(2026, 3, 20))
+    assert limit_breakdown is not None
+    # `soon` absorbs its full 100 first; `late` covers the remaining 50 out of its own budget,
+    # so 150 is funded and only `late`'s undrawn 50 is still available.
+    assert limit_breakdown.grant_funded_seconds == 150
+    assert limit_breakdown.unspent_grant_seconds == 50
+    # 10 + 100 + 100 + 0. Charging the latest-expiring grant first credits `soon` only 50 → 160.
+    assert limit_breakdown.total == 210
+
+
+def test_attribution_order_follows_end_date_not_list_position() -> None:
+    """Reversing the argument order mirrors the credits positionally, it does not change them."""
+    soon, late = _overlapping_grants()
+    usage = {date(2026, 3, 5): 150}
+    forward = attribute_usage([soon, late], usage, today=date(2026, 3, 20))
+    reversed_ = attribute_usage([late, soon], usage, today=date(2026, 3, 20))
+    assert forward.grant_credited_seconds == (100, 50)
+    assert reversed_.grant_credited_seconds == (50, 100)
+
+
+def test_two_identical_grants_get_independent_budgets() -> None:
+    """Credits are keyed positionally: identical (hence equal-hashing) grants must not merge."""
+    grant = NetGrant(
+        start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        net_grant_seconds=500,
+        end_date=datetime(2026, 3, 29, tzinfo=timezone.utc),
+    )
+    attribution = attribute_usage([grant, grant], {date(2026, 3, 5): 800}, today=date(2026, 3, 20))
+    assert attribution.grant_credited_seconds == (500, 300)
+    assert attribution.base_seconds_in_window == {date(2026, 3, 5): 0}
+
+
+def test_active_grant_contributes_what_it_funded_plus_what_is_left() -> None:
+    """While no funded day has rolled out, funded + undrawn is exactly net_grant_seconds."""
+    today = date(2026, 3, 10)
+    grant = NetGrant(
+        start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        net_grant_seconds=1000,
+        end_date=datetime(2026, 4, 1, tzinfo=timezone.utc),
+    )
+    cfg = make_config(limit_seconds=100, net_grants=[grant])
+    instance = make_instance(daily_usage={date(2026, 3, 5): 400})
+    limit_breakdown = resolve_limit(cfg, instance, today)
+    assert limit_breakdown is not None
+    assert limit_breakdown.grant_funded_seconds == 400
+    assert limit_breakdown.unspent_grant_seconds == 600
+    assert limit_breakdown.total == 1100
+
+
+# -------------------------------------------------------------------
+# Post-expiry decay: availability never drops as days roll out
+# -------------------------------------------------------------------
+
+CARRYOVER_DECAY_TODAYS = [
+    date(2026, 3, 11),  # the day the grant ends
+    date(2026, 4, 2),  # both usage days still in window
+    date(2026, 4, 3),  # Mar 5 rolls out
+    date(2026, 4, 6),  # Mar 8 rolls out too
+    date(2026, 4, 8),  # the grant itself stops being relevant
+]
+
+
+@pytest.mark.parametrize("spend", [(500, 300), (700, 500)])
+def test_carryover_decay_never_reduces_availability(spend: tuple[int, int]) -> None:
+    """Availability is monotonically non-decreasing as the funded days roll out of the window.
+
+    A property, not a table of magic numbers: whatever the limit does, an operator
+    must never see less headroom tomorrow than today purely from time passing.
+    """
+    grant = NetGrant(
+        start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        net_grant_seconds=1000,
+        end_date=datetime(2026, 3, 11, tzinfo=timezone.utc),
+    )
+    cfg = make_config(limit_seconds=100, net_grants=[grant])
+    daily_usage = {date(2026, 3, 5): spend[0], date(2026, 3, 8): spend[1]}
+    instance = make_instance(daily_usage=daily_usage)
+
+    available = []
+    for today in CARRYOVER_DECAY_TODAYS:
+        total = _total(cfg, instance, today)
+        assert total is not None
+        in_window = sum(s for d, s in daily_usage.items() if today - timedelta(days=28) <= d <= today)
+        available.append(total - in_window)
+
+    assert available == sorted(available)
+    assert available[-1] == 100  # fully decayed back to base, with no debt carried in
+
+
+def test_pre_grant_debt_snaps_back_at_expiry_matching_the_no_grant_case() -> None:
+    """The active-gate on overage is deliberate: forgiveness ends with the grant.
+
+    That still satisfies "never worse off than if the grant never existed" — the
+    no-grant counterfactual is equally negative.
+    """
+    grant = NetGrant(
+        start_date=datetime(2026, 3, 10, tzinfo=timezone.utc),
+        net_grant_seconds=1000,
+        end_date=datetime(2026, 3, 20, tzinfo=timezone.utc),
+    )
+    cfg = make_config(limit_seconds=100, net_grants=[grant])
+    no_grant_cfg = make_config(limit_seconds=100)
+    instance = make_instance(daily_usage={date(2026, 3, 1): 500})
+
+    # While active, the 400 of pre-grant debt above base is forgiven.
+    assert _total(cfg, instance, date(2026, 3, 15)) == 100 + 1000 + 400
+    # At expiry it snaps back — and lands exactly where it would with no grant at all.
+    assert _total(cfg, instance, date(2026, 3, 20)) == _total(no_grant_cfg, instance, date(2026, 3, 20)) == 100
+
+
+# -------------------------------------------------------------------
+# Degenerate inputs
+# -------------------------------------------------------------------
+
+
+def test_no_daily_usage_with_relevant_expired_grant_returns_base() -> None:
+    cfg = make_config(limit_seconds=100, net_grants=[GRANT_1000])
+    assert _total(cfg, make_instance(), date(2026, 3, 29)) == 100
+
+
+def test_usage_after_today_is_ignored() -> None:
+    cfg = make_config(limit_seconds=100, net_grants=[GRANT_1000])
+    instance = make_instance(daily_usage={date(2026, 3, 28): 400, date(2026, 3, 30): 999})
+    assert _total(cfg, instance, date(2026, 3, 29)) == 100 + 400
+
+
+def test_zero_length_grant_credits_nothing() -> None:
+    """`start.date() == end.date()` covers no day, so it can never be charged usage."""
+    grant = NetGrant(
+        start_date=datetime(2026, 3, 5, tzinfo=timezone.utc),
+        net_grant_seconds=1000,
+        end_date=datetime(2026, 3, 5, tzinfo=timezone.utc),
+    )
+    cfg = make_config(limit_seconds=100, net_grants=[grant])
+    instance = make_instance(daily_usage={date(2026, 3, 5): 400})
+    assert _total(cfg, instance, date(2026, 3, 10)) == 100
+
+
+def test_grants_without_base_limit_raise_even_when_none_is_active() -> None:
+    """The config invariant is checked whenever grants exist, not only on the active path."""
+    cfg = make_config(net_grants=[GRANT_1000])
+    with pytest.raises(AssertionError, match="net_grants without target_limit_seconds"):
+        resolve_limit(cfg, make_instance(), date(2026, 12, 1))
+
+
+# -------------------------------------------------------------------
+# Grants longer than the rolling window: the budget is a lifetime budget
+# -------------------------------------------------------------------
+
+# 61 days, so funded days roll out while the grant is still active — the only
+# regime where a per-window reading of `net_grant_seconds` diverges from a lifetime one.
+LONG_GRANT = NetGrant(
+    start_date=datetime(2026, 3, 1, tzinfo=timezone.utc),
+    net_grant_seconds=1000,
+    end_date=datetime(2026, 5, 1, tzinfo=timezone.utc),
+)
+
+
+@pytest.mark.parametrize(
+    "today,expected",
+    [
+        # Mar 5 in window: 1000 funded, nothing left undrawn.
+        (date(2026, 4, 2), 100 + 1000),
+        # Mar 5 has rolled out. The budget stays spent, so only base remains — a
+        # per-window budget would hand back 1000 here and let it be drawn twice.
+        (date(2026, 4, 3), 100),
+        (date(2026, 4, 20), 100),
+        # end_date, then fully rolled off.
+        (date(2026, 5, 1), 100),
+        (date(2026, 5, 29), 100),
+    ],
+)
+def test_exhausted_long_grant_is_not_re_granted_each_window(today: date, expected: int) -> None:
+    cfg = make_config(limit_seconds=100, net_grants=[LONG_GRANT])
+    instance = make_instance(daily_usage={date(2026, 3, 5): 1000})
+    assert _total(cfg, instance, today) == expected
+
+
+def test_long_grant_keeps_its_undrawn_budget_across_a_window_boundary() -> None:
+    """Undrawn budget survives rolloff (it was never spent); drawn budget does not."""
+    cfg = make_config(limit_seconds=100, net_grants=[LONG_GRANT])
+    instance = make_instance(daily_usage={date(2026, 3, 5): 200})
+
+    # Mar 5 still in window: 200 funded, 800 left to draw.
+    while_funded = resolve_limit(cfg, instance, date(2026, 4, 2))
+    assert while_funded is not None
+    assert (while_funded.grant_funded_seconds, while_funded.unspent_grant_seconds) == (200, 800)
+    assert while_funded.total == 100 + 200 + 800
+
+    # Mar 5 rolled out: the 200 leaves both the limit and the window; the undrawn 800 stays.
+    after_rolloff = resolve_limit(cfg, instance, date(2026, 4, 3))
+    assert after_rolloff is not None
+    assert (after_rolloff.grant_funded_seconds, after_rolloff.unspent_grant_seconds) == (0, 800)
+    assert after_rolloff.total == 100 + 800
+
+    # At end_date the undrawn 800 is forfeit.
+    assert _total(cfg, instance, date(2026, 5, 1)) == 100
+
+
+@pytest.mark.parametrize("grant_days", [28, 29, 30, 35, 61, 91])
+def test_greedy_spending_never_exceeds_budget_plus_base_per_window(grant_days: int) -> None:
+    """A grant is worth its budget once, plus the base limit per rolling window.
+
+    An instance spending everything the limit offers, every day, must never draw more
+    than that, and must never be pushed into debt by headroom it was offered.
+    """
+    base, budget = 100, 1000
+    start = date(2026, 3, 1)
+    grant = NetGrant(start_date=_dt(start), net_grant_seconds=budget, end_date=_dt(start + timedelta(days=grant_days)))
+    cfg = make_config(limit_seconds=base, net_grants=[grant])
+
+    daily_usage: dict[date, int] = {}
+    horizon = grant_days + 2 * ROLLING_WINDOW_DAYS
+    for offset in range(horizon):
+        today = start + timedelta(days=offset)
+        total = _total(cfg, make_instance(daily_usage=dict(daily_usage)), today)
+        assert total is not None
+        in_window = sum(s for d, s in daily_usage.items() if window_start(today) <= d <= today)
+        available = total - in_window
+        assert available >= 0, f"grant of {grant_days}d put the instance {-available}s in debt on {today}"
+        if available > 0:
+            daily_usage[today] = available
+
+    windows_elapsed = horizon / ROLLING_WINDOW_DAYS
+    assert sum(daily_usage.values()) <= budget + base * (windows_elapsed + 1)
+
+
+# -------------------------------------------------------------------
+# Cross-module: pruning a rolled-off grant cannot change the limit
+# -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("offset", [0, 1, 7])
+def test_pruning_a_rolled_off_grant_is_a_no_op(offset: int) -> None:
+    """From `grant_removable_on` onward, the limit must not depend on the grant's presence.
+
+    The invariant `update` relies on, asserted directly rather than via its predicate.
+    """
+    today = grant_removable_on(GRANT_1000.end_date.date()) + timedelta(days=offset)
+    instance = make_instance(daily_usage={date(2026, 3, 28): 1000, today - timedelta(days=1): 40})
+
+    with_grant = resolve_limit(make_config(limit_seconds=100, net_grants=[GRANT_1000]), instance, today)
+    without_grant = resolve_limit(make_config(limit_seconds=100), instance, today)
+    assert with_grant == without_grant
+
+
+# -------------------------------------------------------------------
+# The expiry cliff for undrawn budget
+# -------------------------------------------------------------------
+
+
+def test_undrawn_budget_is_forfeit_at_end_date_but_drawn_budget_is_not() -> None:
+    """The one cliff that legitimately remains: unspent grant does not survive expiry."""
+    cfg = make_config(limit_seconds=100, net_grants=[GRANT_1000])
+    instance = make_instance(daily_usage={date(2026, 3, 28): 400})
+
+    last_active = resolve_limit(cfg, instance, date(2026, 3, 28))
+    assert last_active is not None
+    assert (last_active.grant_funded_seconds, last_active.unspent_grant_seconds) == (400, 600)
+
+    at_expiry = resolve_limit(cfg, instance, date(2026, 3, 29))
+    assert at_expiry is not None
+    assert (at_expiry.grant_funded_seconds, at_expiry.unspent_grant_seconds) == (400, 0)
+    # The 400 drawn keeps crediting, so the whole base limit is still available.
+    assert at_expiry.total - 400 == 100

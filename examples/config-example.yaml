@@ -29,11 +29,13 @@ instances:
     # When set, the optimizer applies this limit on every run.
     # limit_seconds: 216000  # 60 hours
 
-    # Optional: Grant additional time above limit_seconds.
-    # Pre-grant usage that exceeded limit_seconds decays out of the effective
-    # limit as those days exit the 28-day rolling window.
-    # Multiple grants stack. Limit snaps back to limit_seconds after end_date.
-    # end_date is optional; defaults to start_date + 28 days if omitted.
+    # Optional: Grant additional time above limit_seconds, which must also be set.
+    # Applies while start_date <= today < end_date; end_date is optional and
+    # defaults to start_date + 28 days. Multiple grants stack.
+    #
+    # net_grant_seconds is a lifetime budget for the whole grant. The limit does not snap back
+    # until it has rollen out of the 28-day usage window; see "How Net Grants Expire" in the
+    # README.
     # net_grants:
     #   - start_date: "2026-05-01T00:00:00+00:00"
     #     net_grant_seconds: 360000  # 100 extra hours, default 28-day window

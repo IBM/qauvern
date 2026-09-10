@@ -22,7 +22,7 @@ Refer to [How it works](#how-it-works) for more information on the algorithm.
 - **Fairness**: Ratio of consumed time to allocated time. Lower fairness = higher priority
 - **Allocation**: The target consumption for an instance during the rolling window. An instance can exceed its allocation, but its priority will decrease due to the fairness score.
 - **Limit**: An optional hard cap on instance consumption.
-- **Net Grant**: A bonus configured in the `qauvern` config file to temporarily boost an instance' limit. Multiple grants stack. Any pre-grant usage that exceeded the base limit decays out of the effective limit as those days exit the 28-day rolling window.
+- **Net Grant**: A bonus configured in the `qauvern` config file to temporarily boost an instance's limit. `net_grant_seconds` is a lifetime budget. Multiple grants stack, and a grant keeps crediting the limit after it expires until the usage it funded rolls out of the 28-day rolling window — see [How net grants expire](#how-net-grants-expire).
 
 ## Installation
 
@@ -91,8 +91,11 @@ instances:
     # Optional: Hard limit applied on every optimize run
     # limit_seconds: 216000
 
-    # Optional: Temporary time bonus above limit_seconds.
-    # end_date is optional; defaults to start_date + 28 days if omitted.
+    # Optional: Temporary time bonus above limit_seconds (requires limit_seconds).
+    # Applies while start_date <= today < end_date, with tz-aware ISO timestamps;
+    # end_date defaults to start_date + 28 days, and any length works.
+    # net_grant_seconds is a lifetime budget. Multiple grants stack, and a grant keeps crediting
+    # the limit until it rolls out of the 28-day window — see "How Net Grants Expire".
     # net_grants:
     #   - start_date: "2026-05-01T00:00:00+00:00"
     #     net_grant_seconds: 360000  # 100 extra hours for a May sprint
@@ -168,12 +171,13 @@ qauvern update --config config.yaml --dry-run   # preview changes only
 
 The `update` command asks for confirmation before making edits.
 
-Whereas `configure` generates a fresh file from scratch, `update` is for ongoing maintenance of an existing config. It performs four reconciliation steps by default:
+Whereas `configure` generates a fresh file from scratch, `update` is for ongoing maintenance of an existing config. It performs five reconciliation steps by default:
 
-- **Expire net_grants**: drops `net_grants` entries whose `end_date` has passed
+- **Prune net_grants**: drops `net_grants` entries that have fully rolled out of the 28-day window (`end_date` more than 28 days ago). Grants that have ended but are still crediting the limit are kept and reported under `Notes:` with the date they become removable (see [How net grants expire](#how-net-grants-expire)).
 - **Remove instances**: removes entries for archived or missing instances
 - **Fix names**: updates instance names that have drifted from the live API
 - **Add instances**: appends newly discovered instances
+- **Add missing limits**: fills in `limit_seconds` from the live API for instances that have a live limit but none configured. Existing `limit_seconds` are never overwritten.
 
 Comments and customizations (`limit_seconds`, `allocation_reserve_percent`, custom dates, etc.) are preserved because the file is rewritten in round-trip YAML mode.
 
@@ -183,7 +187,7 @@ Options:
 - `--region`: Limit discovery to a specific region, like `us-east` or `eu-de`.
 - `--dry-run`: Print planned changes without writing the file
 - `--yes, -y`: Skip the confirmation prompt (for automation)
-- `--no-net-grants`: Skip expiring `net_grants`
+- `--no-net-grants`: Skip removing rolled-off `net_grants`
 - `--no-add`: Skip adding newly discovered instances
 - `--no-names`: Skip fixing instance name drift
 - `--no-remove`: Skip removing archived/missing instances
@@ -225,7 +229,7 @@ This command identifies underutilized instances, calculates optimal reallocation
 
 Use `--format` to choose how results are rendered:
 
-- `table` (default) — human-readable summary block plus an instance table.
+- `table` (default) — human-readable summary block plus an instance table, followed by a `LIMIT BREAKDOWN` section for any instance whose limit is currently shaped by a net grant.
 - `csv` — one row per configured instance, suitable for spreadsheets or quick pipelines. Account-level info is omitted because CSV is a flat row-based format.
 - `json` — a structured payload for scripts. Includes account-level info, the reserve, validation errors, and per-instance rows with pre-computed allocation and limit deltas.
 
@@ -242,6 +246,7 @@ Common notes for both machine formats:
 
 - All durations are raw integer seconds.
 - The "new" allocation/limit value is always emitted, even if it is the same as the current value. Use the delta fields to quickly determine if there was a change, such as `limit_delta_seconds` with `json`. 
+- The effective limit is broken into its terms (see [How net grants expire](#how-net-grants-expire)) as `limit_breakdown` in `json` and as the trailing `limit_base`, `limit_grant_funded`, `limit_unspent_grant`, `limit_overage` columns in `csv` — `null`/blank when the config sets no limit.
 
 Inspect the JSON schema with `jq keys` and `jq '.instances[0] | keys'` against a real run.
 
@@ -256,10 +261,10 @@ qauvern optimize --config config.yaml --dry-run   # preview only
 
 This command will:
 1. Determine if there are changes to any instance's limit from setting `limit_seconds` and `net_grants` in the config file.
-1. Calculate optimal allocations.
-2. Display proposed changes.
-3. Prompt for confirmation.
-4. Apply allocation and limit updates via API.
+2. Calculate optimal allocations.
+3. Display proposed changes.
+4. Prompt for confirmation.
+5. Apply allocation and limit updates via API.
 
 Use `--dry-run` to compute and display changes without applying them. Use `--yes` / `-y` to skip the confirmation prompt in automated pipelines.
 
@@ -304,7 +309,7 @@ The `--staging` flag is a global option and applies to all commands.
 
 For each managed instance, qauvern:
 
-1. **Resolves the effective limit** from `limit_seconds` and any active `net_grants` in the config file. If the config file does not set `limit_seconds` or `net_grants`, use the live limit in IBM Quantum Platform, if any. `qauvern` will apply this new effective limit and also use it as the upper bound on the instance's allocation.
+1. **Resolves the effective limit** from `limit_seconds` and any `net_grants` in the config file, including recently expired grants that are still crediting (see [How net grants expire](#how-net-grants-expire)). If the config file does not set `limit_seconds` or `net_grants`, `qauvern` uses the live limit in IBM Quantum Platform, if any. `qauvern` will apply this new effective limit and also use it as the upper bound on the instance's allocation.
 2. **Computes an activity score** by exponentially weighting recent usage (24h carries 16× the weight of 28d). Instances with no usage across all buckets get score 0 and are classified inactive.
 
 Then, account-wide:
@@ -314,6 +319,61 @@ Then, account-wide:
 5. **Uses the water-fill algorithm to distribute the pool across active instances** proportional to activity score. When an instance hits its effective limit, it drops out and its surplus flows to the rest. If every active instance is capped, leftover capacity stays unallocated rather than being forced onto any instance.
 
 See [Design.md](Design.md) for full algorithm details and the invariants the optimizer enforces.
+
+### How Net Grants Expire
+
+A grant is active while `start_date <= today < end_date`, but it does not vanish from the effective limit the moment it ends. IBM Quantum measures usage over a 28-day rolling window, so the minutes a grant paid for stay counted against the instance for up to 28 days after the grant is over — an instance that spent its grant on the last day would otherwise find its whole base limit already consumed. qauvern keeps crediting the usage a grant funded until that usage itself rolls out, which guarantees:
+
+> **An instance is never worse off after a grant expires than if the grant had never existed.**
+
+To uphold this invariant, qauvern spends grant time before base time: each day's usage is charged first to any active grant with remaining budget, and only the shortfall is charged to the base limit. For example, with `limit_seconds: 10` and a grant of `100` spent on the grant's last day:
+
+| Usage during the grant | Paid by grant | Paid by base | Effective limit at expiry | Available |
+| --- | --- | --- | --- | --- |
+| 40 (grant under-spent) | 40 | 0 | 10 + 40 = 50 | 10 — the whole base limit |
+| 100 (the grant, exactly) | 100 | 0 | 10 + 100 = 110 | 10 — the whole base limit |
+| 105 (5 past the grant) | 100 | 5 | 10 + 100 = 110 | 5 |
+| 110 (grant + base) | 100 | 10 | 10 + 100 = 110 | 0 — spent, but not in debt |
+| 120 (10 past both) | 100 | 20 | 10 + 100 = 110 | −10 — the grant credits at most 100 |
+
+A grant is a separate pot: spending it never eats the base limit, and you keep only what you drew from it — hence the first row's unspent 60 is dropped at `end_date` (limit 50, not 110).
+
+The credit then decays as the funded days age out. For example, with `limit_seconds: 10` and a grant of `100` covering March 1–11, with 70s used on March 5 and 50s used on March 8:
+
+| Date | Grant status | Effective limit | Usage in window | Available |
+| --- | --- | --- | --- | --- |
+| Mar 10 | active | 110 | 120 | −10 |
+| Mar 11 | expired, still crediting | 110 | 120 | −10 |
+| Apr 2 | expired, still crediting | 110 | 120 | −10 |
+| Apr 3 | Mar 5 rolled out | 40 | 50 | −10 |
+| Apr 6 | Mar 8 rolled out | 10 | 0 | 10 |
+| Apr 8 | fully rolled off | 10 | 0 | 10 |
+
+The credit decays the same way even when the base limit only absorbs a little of the overage. For example, imagine the same `limit_seconds: 10` and `100` grant covering March 1–11. This time, only 105s is used, all on March 5: the grant pays the first 100, and the base pays the remaining 5.
+
+| Date | Grant status | Effective limit | Usage in window | Available |
+| --- | --- | --- | --- | --- |
+| Mar 5 | active | 110 | 105 | 5 |
+| Mar 11 | expired, still crediting | 110 | 105 | 5 |
+| Apr 2 | expired, still crediting | 110 | 105 | 5 |
+| Apr 3 | Mar 5 rolled out | 10 | 0 | 10 |
+
+Once Mar 5 rolls out of the 28-day window, the credit (100) and the usage it funded (105) roll out together, so availability returns to the full base limit of 10 rather than staying negative.
+
+#### The budget is a lifetime budget
+
+`net_grant_seconds` covers the grant's whole period. Meanwhile, `limit_seconds` refreshes as usage rolls out of the 28-day rolling window. A grant is therefore worth its budget **once**, plus the base limit per rolling window. 
+
+For example, take `limit_seconds: 100` and a grant of `net_grant_seconds: 1000` running March 1 to May 1 (61 days — longer than the 28-day window). Say the instance draws 600 seconds of usage in a single day, March 5, and nothing else for the rest of the grant:
+
+| Date | What's happening | Grant-funded (in window) | Unspent grant | Effective limit | Available |
+| --- | --- | --- | --- | --- | --- |
+| Mar 5 | the 600 is drawn and charged to the grant | 600 | 400 | 100 + 600 + 400 = 1100 | 500 |
+| Apr 2 | Mar 5 is still inside the 28-day window | 600 | 400 | 1100 | 500 |
+| Apr 3 | Mar 5 rolls out of the window | 0 | 400 | 100 + 0 + 400 = 500 | 500 |
+| May 1 (`end_date`) | grant ends; the undrawn 400 is forfeit | 0 | 0 | 100 | 100 |
+
+Two separate numbers move here: `grant-funded` tracks usage inside today's 28-day window and decays as that usage ages out (0 by Apr 3, since the only usage was Mar 5); `unspent grant` tracks budget not yet drawn and only changes when the instance spends it or the grant ends. Availability holds steady at 500 across the Apr 3 rolloff because the two exactly offset — the grant-funded usage that ages out is matched by the unspent budget still sitting unclaimed. It only drops, to the base 100, when the grant ends on May 1 and that unspent 400 is forfeit.
 
 ### Configured vs. Unconfigured Instances
 
@@ -354,7 +414,7 @@ qauvern analyze --config config.yaml
 qauvern optimize --config config.yaml
 ```
 
-After the initial setup, run `qauvern update --config config.yaml` periodically to keep the config in sync with the live API (new instances, renames, archived instances, expired net_grants).
+After the initial setup, run `qauvern update --config config.yaml` periodically to keep the config in sync with the live API (new instances, renames, archived instances, fully rolled-off net_grants).
 
 ### Automations
 
