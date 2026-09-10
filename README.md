@@ -250,6 +250,22 @@ Common notes for both machine formats:
 
 Inspect the JSON schema with `jq keys` and `jq '.instances[0] | keys'` against a real run.
 
+##### Previewing a future date
+
+`--preview-date YYYY-MM-DD` evaluates net-grant activation and rolling-window boundaries as of that
+date instead of today — e.g. to see how a limit will look once a scheduled grant starts, or after
+it expires:
+
+```bash
+qauvern analyze --config config.yaml --preview-date 2026-12-01
+```
+
+This is _not_ a usage forecast: `consumed_*` figures always reflect real, current usage. If the
+preview date is far enough ahead that the 28-day rolling window no longer overlaps any real usage,
+those figures will show near zero — that's the rolling window working as designed. The
+effective date used is echoed back as `preview_date` in `--format json` and as a `Preview date:`
+line in `--format table`; `--format csv` omits it.
+
 #### Optimize Allocations
 
 Apply optimization recommendations to update instance allocations:

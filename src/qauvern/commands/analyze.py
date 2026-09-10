@@ -13,6 +13,7 @@ import io
 import json
 import math
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from tabulate import tabulate
@@ -60,6 +61,7 @@ class AnalyzeReport:
     allocation_reserve_percent: float
     redistribution_pool_seconds: int
     limit_breakdowns: dict[str, LimitBreakdown | None]
+    preview_date: date
 
     @classmethod
     def from_optimizer(
@@ -85,6 +87,7 @@ class AnalyzeReport:
             allocation_reserve_percent=optimizer.allocation_reserve_percent,
             redistribution_pool_seconds=pool_seconds,
             limit_breakdowns=optimizer.limit_breakdowns,
+            preview_date=optimizer.today,
         )
 
 
@@ -121,6 +124,7 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         "ACCOUNT PLAN ALLOCATION SUMMARY",
         "=" * 80,
         f"Plan: {report.plan.value}",
+        f"Preview date: {report.preview_date.isoformat()}",
         f"Allocation budget: {format_seconds(account.allocation_budget_seconds)}",
         f"Unallocated: {format_seconds(account.unallocated_seconds)}",
         f"Consumed (28-day, configured): {format_seconds(account.consumed_seconds)}",
@@ -267,6 +271,7 @@ def format_analyze_json(report: AnalyzeReport) -> str:
 
     payload = {
         "plan": report.plan.value,
+        "preview_date": report.preview_date.isoformat(),
         "account": {
             "account_id": account.account_id,
             "allocation_budget_seconds": account.allocation_budget_seconds,

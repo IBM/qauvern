@@ -10,6 +10,7 @@
 
 """Tests that usage-fetch failures abort `analyze`/`optimize` instead of degrading silently."""
 
+import json
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -140,3 +141,133 @@ instances:
     # stays on the DAILY_USAGE_LOOKBACK_DAYS floor.
     assert requested[CRN_A] == grant_start
     assert requested[CRN_B] == today - timedelta(days=DAILY_USAGE_LOOKBACK_DAYS)
+
+
+# ---------------------------------------------------------------------------
+# `analyze --preview-date`
+# ---------------------------------------------------------------------------
+
+
+def _config_with_future_grant(grant_start: date, grant_end: date) -> str:
+    return f"""\
+account_id: acct-1
+plan: internal
+minimum_allocation_seconds: 60
+instances:
+  - name: Instance A
+    crn: '{CRN_A}'
+    limit_seconds: 1000
+    net_grants:
+      - start_date: '{grant_start.isoformat()}T00:00:00+00:00'
+        end_date: '{grant_end.isoformat()}T00:00:00+00:00'
+        net_grant_seconds: 5000
+"""
+
+
+def test_preview_date_activates_future_grant(runner: CliRunner, tmp_path: Path) -> None:
+    """A grant that hasn't started yet under the real date becomes active under --preview-date."""
+    today = datetime.now(timezone.utc).date()
+    grant_start = today + timedelta(days=30)
+    grant_end = grant_start + timedelta(days=28)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(_config_with_future_grant(grant_start, grant_end))
+
+    client = MockIBMQuantumAPIClient()
+    client.setup_account(account_id="acct-1", allocation_budget_seconds=200000)
+    client.setup_instance(crn=CRN_A, name="Instance A", allocation_seconds=100000, account_id="acct-1")
+
+    with patch("qauvern.cli.IBMQuantumAPIClient", return_value=client):
+        real_today_result = runner.invoke(
+            main, ["analyze", "--config", str(config_path), "--api-key", "k", "--format", "json"]
+        )
+    assert real_today_result.exit_code == 0, real_today_result.output
+    real_today_payload = json.loads(real_today_result.stdout)
+    assert real_today_payload["instances"][0]["limit_breakdown"]["unspent_grant_seconds"] == 0
+
+    preview_date = grant_start + timedelta(days=5)
+    with patch("qauvern.cli.IBMQuantumAPIClient", return_value=client):
+        preview_result = runner.invoke(
+            main,
+            [
+                "analyze",
+                "--config",
+                str(config_path),
+                "--api-key",
+                "k",
+                "--format",
+                "json",
+                "--preview-date",
+                preview_date.isoformat(),
+            ],
+        )
+    assert preview_result.exit_code == 0, preview_result.output
+    preview_payload = json.loads(preview_result.stdout)
+    assert preview_payload["preview_date"] == preview_date.isoformat()
+    assert preview_payload["instances"][0]["limit_breakdown"]["unspent_grant_seconds"] == 5000
+
+
+def test_preview_date_does_not_change_usage_fetch_range(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
+    """`--preview-date` only shifts grant/window resolution — usage stays fetched from real now."""
+    today = datetime.now(timezone.utc).date()
+    grant_start = today + timedelta(days=30)
+    grant_end = grant_start + timedelta(days=28)
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(_config_with_future_grant(grant_start, grant_end))
+
+    client = MockIBMQuantumAPIClient()
+    client.setup_account(account_id="acct-1", allocation_budget_seconds=200000)
+    client.setup_instance(crn=CRN_A, name="Instance A", allocation_seconds=100000, account_id="acct-1")
+
+    requested: dict[str, tuple[date, date]] = {}
+    original = client.get_daily_usage
+
+    def _record(instance_crn: str, account_id: str, start_date: date, end_date: date) -> dict[date, int]:
+        requested[instance_crn] = (start_date, end_date)
+        return original(instance_crn, account_id, start_date, end_date)
+
+    monkeypatch.setattr(client, "get_daily_usage", _record)
+
+    preview_date = grant_start + timedelta(days=5)
+    with patch("qauvern.cli.IBMQuantumAPIClient", return_value=client):
+        result = runner.invoke(
+            main,
+            [
+                "analyze",
+                "--config",
+                str(config_path),
+                "--api-key",
+                "k",
+                "--preview-date",
+                preview_date.isoformat(),
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert requested[CRN_A][1] == today  # end of the fetched range is real today, not the preview date
+
+
+def test_preview_date_rejected_on_optimize(runner: CliRunner, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(CONFIG_TEXT)
+    client = _mock_client_with_instances()
+
+    with patch("qauvern.cli.IBMQuantumAPIClient", return_value=client):
+        result = runner.invoke(
+            main,
+            ["optimize", "--config", str(config_path), "--api-key", "k", "-y", "--preview-date", "2026-12-01"],
+        )
+    assert result.exit_code == 2
+
+
+def test_preview_date_invalid_format_rejected(runner: CliRunner, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(CONFIG_TEXT)
+    client = _mock_client_with_instances()
+
+    with patch("qauvern.cli.IBMQuantumAPIClient", return_value=client):
+        result = runner.invoke(
+            main,
+            ["analyze", "--config", str(config_path), "--api-key", "k", "--preview-date", "not-a-date"],
+        )
+    assert result.exit_code == 2

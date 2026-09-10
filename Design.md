@@ -97,6 +97,8 @@ An expired grant does **not** immediately vanish from the effective limit. Becau
 
 A grant **can still credit** (`rolling_window.grant_still_credits`) when it has started and its `end_date` has not yet rolled fully out of the window — i.e. `start_date <= today and end_date > window_start(today)`. Only those grants participate in resolution; see the pruning invariant below.
 
+`today` is `AllocationOptimizer.today`, injectable via its constructor (defaults to real UTC today). `analyze --preview-date DATE` is the only CLI surface that overrides it, letting operators see how grant activation and window boundaries will resolve on a future (or past) date. The override only reaches this resolution path — usage inputs (`enrich_instances_with_usage_data`, `InstanceState.usage`) are always fetched relative to real now, so nothing about future usage is forecast.
+
 All the terms come from one **per-day usage attribution** pass (`attribute_usage`), which charges each day's `daily_usage` to the grants active that day, soonest-expiring first, and calls whatever no grant could pay for that day's *base* usage:
 
 - `grant_funded` — in-window usage attributed to those grants, active or expired. Keeps the minutes a grant paid for out of the base limit, and is what a finished grant keeps crediting as it decays.

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.13.0] - 2026-08-xx
 
+### Added
+
+- Added `--preview-date` to `analyze`, showing how net grants and limits will resolve on a future
+  (or past) date. This does _not_ try to estimate future usage numbers.
+
 ### Changed
 
 - `net_grant_seconds` now applies as a lifetime budget for the grant's whole period rather than a

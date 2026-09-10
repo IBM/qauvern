@@ -336,9 +336,17 @@ def instances(ctx, config: str, api_key: str | None):
     show_default=True,
     help="Output format. table (default, human-readable), json (structured), csv (instances only).",
 )
+@click.option(
+    "--preview-date",
+    type=click.DateTime(formats=["%Y-%m-%d"]),
+    default=None,
+    help="Preview grant/limit resolution as of DATE (YYYY-MM-DD) instead of today. Usage figures "
+    "stay real/current — only grant activation and rolling-window boundaries are evaluated as of "
+    "DATE. Not a usage forecast.",
+)
 @click.pass_context
 @handle_errors
-def analyze(ctx, config: str, api_key: str | None, output_format: str):
+def analyze(ctx, config: str, api_key: str | None, output_format: str, preview_date: datetime | None):
     """Analyze allocations and show optimization recommendations.
 
     Only instances listed in the config file are analyzed and modified.
@@ -369,6 +377,7 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str):
         config_parser.minimum_allocation_seconds,
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
         usage_floor_relax_above_percent=config_parser.usage_floor_relax_above_percent,
+        today=preview_date.date() if preview_date else None,
     )
     result = optimizer.optimize()
 
