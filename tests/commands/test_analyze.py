@@ -194,6 +194,18 @@ def test_from_optimizer_pool_populated_when_reserve_set() -> None:
     assert report.redistribution_pool_seconds == expected_pool
 
 
+def test_from_optimizer_preview_date_defaults_to_optimizer_today() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    report = _report(account, result, cfgs, optimizer)
+    assert report.preview_date == optimizer.today
+
+
+def test_from_optimizer_preview_date_reflects_override() -> None:
+    account, result, cfgs, optimizer = _carryover_setup()
+    report = _report(account, result, cfgs, optimizer)
+    assert report.preview_date == date(2026, 3, 29)
+
+
 # ---------------------------------------------------------------------------
 # format_analyze_table — no changes
 # ---------------------------------------------------------------------------
@@ -210,6 +222,12 @@ def test_table_no_validation_errors_block_by_default() -> None:
     account, result, cfgs, optimizer = _no_changes_setup()
     output = format_analyze_table(_report(account, result, cfgs, optimizer))
     assert "VALIDATION ERRORS" not in output
+
+
+def test_table_preview_date_line_shows_optimizer_today() -> None:
+    account, result, cfgs, optimizer = _carryover_setup()
+    output = format_analyze_table(_report(account, result, cfgs, optimizer))
+    assert "Preview date: 2026-03-29" in output
 
 
 # ---------------------------------------------------------------------------
@@ -511,6 +529,7 @@ def test_json_top_level_keys_present() -> None:
     payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
     assert set(payload.keys()) == {
         "plan",
+        "preview_date",
         "account",
         "reserve",
         "validation_errors",
@@ -530,6 +549,12 @@ def test_json_plan_value_is_string() -> None:
     account, result, cfgs, optimizer = _no_changes_setup()
     payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer, plan=Plan.PAYGO)))
     assert payload["plan"] == "paygo"
+
+
+def test_json_preview_date_reflects_optimizer_today() -> None:
+    account, result, cfgs, optimizer = _carryover_setup()
+    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
+    assert payload["preview_date"] == "2026-03-29"
 
 
 def test_json_account_includes_unmanaged_allocation() -> None:
