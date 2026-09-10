@@ -34,7 +34,8 @@ instances:
     # defaults to start_date + 28 days. Multiple grants stack.
     #
     # net_grant_seconds is a lifetime budget for the whole grant. The limit does not snap back
-    # on end_date; see "How Net Grants Expire" in the README.
+    # until it has rollen out of the 28-day usage window; see "How Net Grants Expire" in the
+    # README.
     # net_grants:
     #   - start_date: "2026-05-01T00:00:00+00:00"
     #     net_grant_seconds: 360000  # 100 extra hours, default 28-day window

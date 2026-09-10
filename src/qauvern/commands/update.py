@@ -100,7 +100,7 @@ def _prune_net_grants(doc_instances: list, now: datetime, summary: UpdateSummary
 
     A grant that ended keeps crediting the usage it funded for up to 28 days past
     `end_date` (see `rolling_window.grant_still_credits`). Removing it any earlier
-    drops that credit and puts the instance in debt.
+    would drop that credit and put the instance in debt.
     """
     today = now.date()
     for entry in doc_instances:

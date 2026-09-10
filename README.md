@@ -22,7 +22,7 @@ Refer to [How it works](#how-it-works) for more information on the algorithm.
 - **Fairness**: Ratio of consumed time to allocated time. Lower fairness = higher priority
 - **Allocation**: The target consumption for an instance during the rolling window. An instance can exceed its allocation, but its priority will decrease due to the fairness score.
 - **Limit**: An optional hard cap on instance consumption.
-- **Net Grant**: A bonus configured in the `qauvern` config file to temporarily boost an instance's limit. `net_grant_seconds` is a lifetime budget for the whole grant, not a per-window allowance. Multiple grants stack, and a grant keeps crediting the limit after it expires until the usage it funded rolls out of the 28-day window — see [How net grants expire](#how-net-grants-expire).
+- **Net Grant**: A bonus configured in the `qauvern` config file to temporarily boost an instance's limit. `net_grant_seconds` is a lifetime budget. Multiple grants stack, and a grant keeps crediting the limit after it expires until the usage it funded rolls out of the 28-day rolling window — see [How net grants expire](#how-net-grants-expire).
 
 ## Installation
 
@@ -94,9 +94,8 @@ instances:
     # Optional: Temporary time bonus above limit_seconds (requires limit_seconds).
     # Applies while start_date <= today < end_date, with tz-aware ISO timestamps;
     # end_date defaults to start_date + 28 days, and any length works.
-    # net_grant_seconds is a lifetime budget for the whole grant, not a per-window
-    # allowance. Multiple grants stack, and a grant keeps crediting the limit
-    # after it ends — see "How Net Grants Expire".
+    # net_grant_seconds is a lifetime budget. Multiple grants stack, and a grant keeps crediting
+    # the limit until it rolls out of the 28-day window — see "How Net Grants Expire".
     # net_grants:
     #   - start_date: "2026-05-01T00:00:00+00:00"
     #     net_grant_seconds: 360000  # 100 extra hours for a May sprint
@@ -247,7 +246,7 @@ Common notes for both machine formats:
 
 - All durations are raw integer seconds.
 - The "new" allocation/limit value is always emitted, even if it is the same as the current value. Use the delta fields to quickly determine if there was a change, such as `limit_delta_seconds` with `json`. 
-- The effective limit is broken into its terms (see [How net grants expire](#how-net-grants-expire)) as `limit_breakdown` in `json` and as the trailing `limit_base`, `limit_grant_funded`, `limit_unspent_grant`, `limit_overage` columns in `csv` — `null`/blank when the config sets no limit. New CSV columns are always appended to the end, so existing column positions stay stable.
+- The effective limit is broken into its terms (see [How net grants expire](#how-net-grants-expire)) as `limit_breakdown` in `json` and as the trailing `limit_base`, `limit_grant_funded`, `limit_unspent_grant`, `limit_overage` columns in `csv` — `null`/blank when the config sets no limit.
 
 Inspect the JSON schema with `jq keys` and `jq '.instances[0] | keys'` against a real run.
 
@@ -310,7 +309,7 @@ The `--staging` flag is a global option and applies to all commands.
 
 For each managed instance, qauvern:
 
-1. **Resolves the effective limit** from `limit_seconds` and any `net_grants` in the config file, including recently expired grants that are still crediting (see [How net grants expire](#how-net-grants-expire)). If the config file does not set `limit_seconds` or `net_grants`, use the live limit in IBM Quantum Platform, if any. `qauvern` will apply this new effective limit and also use it as the upper bound on the instance's allocation.
+1. **Resolves the effective limit** from `limit_seconds` and any `net_grants` in the config file, including recently expired grants that are still crediting (see [How net grants expire](#how-net-grants-expire)). If the config file does not set `limit_seconds` or `net_grants`, `qauvern` uses the live limit in IBM Quantum Platform, if any. `qauvern` will apply this new effective limit and also use it as the upper bound on the instance's allocation.
 2. **Computes an activity score** by exponentially weighting recent usage (24h carries 16× the weight of 28d). Instances with no usage across all buckets get score 0 and are classified inactive.
 
 Then, account-wide:
@@ -350,32 +349,20 @@ The credit then decays as the funded days age out. For `limit_seconds: 10` and a
 | Apr 6 | Mar 8 rolled out | 10 | 0 | 10 |
 | Apr 8 | fully rolled off | 10 | 0 | 10 |
 
-Through that tail, availability only ever climbs: a day's credit and the usage it offsets leave the window together. Two consequences:
-
-- The limit in IBM Quantum stays above `limit_seconds` for up to 28 days after `end_date` instead of snapping back, and while elevated it also raises the cap the water-fill step allocates up to.
-- `qauvern update` only prunes a grant once it can no longer credit, so pruning never changes another grant's contribution.
-
 #### The budget is a lifetime budget
 
-`net_grant_seconds` covers the grant's whole period, and only `limit_seconds` refreshes as usage rolls out of the window. A grant is therefore worth its budget **once**, plus the base limit per rolling window: with `limit_seconds: 100` and a grant of `1000` running March 1 to May 1, an instance can draw about 1200 over those two months, not 1000 per window. Grants of any length work this way.
+`net_grant_seconds` covers the grant's whole period. Meanwhile, `limit_seconds` refreshes as usage rolls out of the 28-day rolling window. A grant is therefore worth its budget **once**, plus the base limit per rolling window. 
 
-Undrawn budget survives rolloff, since it was never spent. With 600 of that grant drawn on March 5:
+For example, take `limit_seconds: 100` and a grant of `net_grant_seconds: 1000` running March 1 to May 1 (61 days — longer than the 28-day window). Say the instance draws 600 seconds of usage in a single day, March 5, and nothing else for the rest of the grant:
 
-| Date | Grant-funded | Unspent grant | Effective limit | Usage in window | Available |
+| Date | What's happening | Grant-funded (in window) | Unspent grant | Effective limit | Available |
 | --- | --- | --- | --- | --- | --- |
-| Mar 5 | 600 | 400 | 1100 | 600 | 500 |
-| Apr 2 | 600 | 400 | 1100 | 600 | 500 |
-| Apr 3 (Mar 5 rolled out) | 0 | 400 | 500 | 0 | 500 |
-| May 1 (`end_date`) | 0 | 0 | 100 | 0 | 100 |
+| Mar 5 | the 600 is drawn and charged to the grant | 600 | 400 | 100 + 600 + 400 = 1100 | 500 |
+| Apr 2 | Mar 5 is still inside the 28-day window | 600 | 400 | 1100 | 500 |
+| Apr 3 | Mar 5 rolls out of the window | 0 | 400 | 100 + 0 + 400 = 500 | 500 |
+| May 1 (`end_date`) | grant ends; the undrawn 400 is forfeit | 0 | 0 | 100 | 100 |
 
-Availability holds at 500 across the rolloff boundary — the undrawn 400 plus the base 100 — and only drops at `end_date`, when the undrawn 400 is forfeit. On a grant longer than the window the effective limit declines mid-grant as budget is drawn, so `qauvern optimize` writes a shrinking limit rather than a flat one.
-
-#### Gotchas
-
-- **Pre-grant debt is forgiven only while a grant is active.** An instance already over its base limit when a grant starts has that excess added to its limit for the grant's duration, then snapped back at `end_date`. Availability can drop at expiry in this one case — but never below where no grant at all would have left it.
-- **Backdating `start_date` is retroactive.** Usage on covered days is charged to the grant, so backdating over days an instance already paid for out of base refunds that usage, up to the budget. Usually what you want when granting time after the fact, but it makes a backdated grant worth more than a forward-dated one.
-
-`qauvern analyze` splits the limit into base, grant-funded usage, unspent grant, and pre-boost overage (the pre-grant usage that exceeded the base limit) for any instance a grant is currently shaping.
+Two separate numbers move here: `grant-funded` tracks usage inside today's 28-day window and decays as that usage ages out (0 by Apr 3, since the only usage was Mar 5); `unspent grant` tracks budget not yet drawn and only changes when the instance spends it or the grant ends. Availability holds steady at 500 across the Apr 3 rolloff because the two exactly offset — the grant-funded usage that ages out is matched by the unspent budget still sitting unclaimed. It only drops, to the base 100, when the grant ends on May 1 and that unspent 400 is forfeit.
 
 ### Configured vs. Unconfigured Instances
 
