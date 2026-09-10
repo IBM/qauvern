@@ -326,7 +326,7 @@ A grant is active while `start_date <= today < end_date`, but it does not vanish
 
 > **An instance is never worse off after a grant expires than if the grant had never existed.**
 
-The mechanism is that **grant time is spent before base time**: a day's usage is charged to the grants live that day first, and only what they cannot pay for is charged to the base limit. With `limit_seconds: 10` and a grant of `100` spent on the grant's last day:
+To uphold this invariant, qauvern spends grant time before base time: each day's usage is charged first to any active grant with remaining budget, and only the shortfall is charged to the base limit. For example, with `limit_seconds: 10` and a grant of `100` spent on the grant's last day:
 
 | Usage during the grant | Paid by grant | Paid by base | Effective limit at expiry | Available |
 | --- | --- | --- | --- | --- |
@@ -338,7 +338,7 @@ The mechanism is that **grant time is spent before base time**: a day's usage is
 
 A grant is a separate pot: spending it never eats the base limit, and you keep only what you drew from it — hence the first row's unspent 60 is dropped at `end_date` (limit 50, not 110).
 
-The credit then decays as the funded days age out. For `limit_seconds: 10` and a grant of `100` covering March 1–11 (`end_date: 2026-03-11`), with 70s used March 5 and 50s used March 8:
+The credit then decays as the funded days age out. For example, with `limit_seconds: 10` and a grant of `100` covering March 1–11, with 70s used on March 5 and 50s used on March 8:
 
 | Date | Grant status | Effective limit | Usage in window | Available |
 | --- | --- | --- | --- | --- |
@@ -348,6 +348,17 @@ The credit then decays as the funded days age out. For `limit_seconds: 10` and a
 | Apr 3 | Mar 5 rolled out | 40 | 50 | −10 |
 | Apr 6 | Mar 8 rolled out | 10 | 0 | 10 |
 | Apr 8 | fully rolled off | 10 | 0 | 10 |
+
+The credit decays the same way even when the base limit only absorbs a little of the overage. For example, imagine the same `limit_seconds: 10` and `100` grant covering March 1–11. This time, only 105s is used, all on March 5: the grant pays the first 100, and the base pays the remaining 5.
+
+| Date | Grant status | Effective limit | Usage in window | Available |
+| --- | --- | --- | --- | --- |
+| Mar 5 | active | 110 | 105 | 5 |
+| Mar 11 | expired, still crediting | 110 | 105 | 5 |
+| Apr 2 | expired, still crediting | 110 | 105 | 5 |
+| Apr 3 | Mar 5 rolled out | 10 | 0 | 10 |
+
+Once Mar 5 rolls out of the 28-day window, the credit (100) and the usage it funded (105) roll out together, so availability returns to the full base limit of 10 rather than staying negative.
 
 #### The budget is a lifetime budget
 
