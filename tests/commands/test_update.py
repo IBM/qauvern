@@ -80,7 +80,7 @@ allocation_reserve_percent: 5.0
 # ---------------------------------------------------------------------------
 
 
-def test_expire_net_grants_drops_past_grants_keeps_future() -> None:
+def test_prune_net_grants_drops_past_grants_keeps_future() -> None:
     text = (
         BASE_HEADER
         + f"""\
@@ -110,7 +110,7 @@ instances:
     assert grants[0]["net_grant_seconds"] == 2000
 
 
-def test_expire_net_grants_default_end_date_uses_28_day_window() -> None:
+def test_prune_net_grants_default_end_date_uses_28_day_window() -> None:
     # start 2026-01-01, defaulted end = 2026-01-29 (start + 28 days).
     text = (
         BASE_HEADER
@@ -144,7 +144,7 @@ instances:
         (date(2026, 2, 26), True),  # window_start == 2026-01-29 == end -> fully rolled off
     ],
 )
-def test_expire_net_grants_removal_boundary_matches_prune_on(today: date, expect_removed: bool) -> None:
+def test_prune_net_grants_removal_boundary_matches_prune_on(today: date, expect_removed: bool) -> None:
     text = (
         BASE_HEADER
         + f"""\
@@ -167,7 +167,7 @@ instances:
     assert ("net_grants" not in doc["instances"][0]) == expect_removed
 
 
-def test_expire_net_grants_drops_key_when_fully_rolled_off() -> None:
+def test_prune_net_grants_drops_key_when_fully_rolled_off() -> None:
     text = (
         BASE_HEADER
         + f"""\
@@ -186,7 +186,7 @@ instances:
     assert "net_grants" not in doc["instances"][0]
 
 
-def test_expire_net_grants_keeps_future_grant_untouched() -> None:
+def test_prune_net_grants_keeps_future_grant_untouched() -> None:
     text = (
         BASE_HEADER
         + f"""\
@@ -211,7 +211,7 @@ instances:
     assert doc["instances"][0]["net_grants"][0]["net_grant_seconds"] == 2000
 
 
-def test_expire_net_grants_retained_grant_leaves_config_untouched() -> None:
+def test_prune_net_grants_retained_grant_leaves_config_untouched() -> None:
     text = (
         BASE_HEADER
         + f"""\
@@ -384,7 +384,7 @@ instances:
         _discovered(active=(_disc(US_CRN_A, "Renamed"), _disc(US_CRN_B, "B"))),
         now=datetime(2026, 5, 1, tzinfo=timezone.utc),
         actions=UpdateActions(
-            expire_net_grants=False,
+            prune_net_grants=False,
             add_instances=False,
             fix_names=False,
             remove_instances=False,

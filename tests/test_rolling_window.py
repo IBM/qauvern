@@ -18,7 +18,9 @@ from datetime import date, datetime, timedelta, timezone
 
 from qauvern.models import NetGrant
 from qauvern.rolling_window import (
+    DAILY_USAGE_LOOKBACK_DAYS,
     ROLLING_WINDOW_DAYS,
+    daily_usage_lookback_days,
     grant_removable_on,
     grant_still_credits,
     window_start,
@@ -95,12 +97,62 @@ def test_degenerate_zero_length_grant_still_counts_as_relevant() -> None:
 
 def test_grant_removable_on_is_end_date_plus_window() -> None:
     grant = make_grant(date(2026, 3, 1), date(2026, 3, 29))
-    assert grant_removable_on(grant) == date(2026, 3, 29) + timedelta(days=ROLLING_WINDOW_DAYS)
+    assert grant_removable_on(grant.end_date.date()) == date(2026, 3, 29) + timedelta(days=ROLLING_WINDOW_DAYS)
 
 
 def test_grant_removable_on_agrees_with_grant_still_credits() -> None:
     """grant_removable_on must be the exact first date grant_still_credits flips to False."""
     grant = make_grant(date(2026, 3, 1), date(2026, 3, 29))
-    prune_on = grant_removable_on(grant)
+    prune_on = grant_removable_on(grant.end_date.date())
     assert grant_still_credits(grant, prune_on) is False
     assert grant_still_credits(grant, prune_on - timedelta(days=1)) is True
+
+
+# ---------------------------------------------------------------------------
+# daily_usage_lookback_days
+# ---------------------------------------------------------------------------
+
+
+def _grant(start: date, end: date, seconds: int = 1000) -> NetGrant:
+    return NetGrant(
+        start_date=datetime(start.year, start.month, start.day, tzinfo=timezone.utc),
+        net_grant_seconds=seconds,
+        end_date=datetime(end.year, end.month, end.day, tzinfo=timezone.utc),
+    )
+
+
+def test_lookback_falls_back_to_the_constant_without_grants() -> None:
+    assert daily_usage_lookback_days([], date(2026, 6, 1)) == DAILY_USAGE_LOOKBACK_DAYS
+
+
+def test_lookback_ignores_short_grants_already_covered_by_the_constant() -> None:
+    """A default 28-day grant needs 55 days at its last crediting day — under the floor."""
+    end = date(2026, 4, 1)
+    grant = _grant(end - timedelta(days=ROLLING_WINDOW_DAYS), end)
+    today = grant_removable_on(end) - timedelta(days=1)
+    assert (today - grant.start_date.date()).days == 55
+    assert daily_usage_lookback_days([grant], today) == DAILY_USAGE_LOOKBACK_DAYS
+
+
+def test_lookback_reaches_back_to_a_long_grants_start_date() -> None:
+    """A 90-day grant needs its whole active period, which the constant does not cover."""
+    start, end = date(2026, 3, 1), date(2026, 5, 30)
+    grant = _grant(start, end)
+    today = grant_removable_on(end) - timedelta(days=1)
+    assert daily_usage_lookback_days([grant], today) == (today - start).days
+    assert daily_usage_lookback_days([grant], today) > DAILY_USAGE_LOOKBACK_DAYS
+
+
+def test_lookback_follows_the_earliest_still_crediting_grant() -> None:
+    today = date(2026, 6, 1)
+    long_grant = _grant(date(2026, 2, 1), date(2026, 6, 15))
+    short_grant = _grant(date(2026, 5, 20), date(2026, 6, 17))
+    assert daily_usage_lookback_days([short_grant, long_grant], today) == (today - date(2026, 2, 1)).days
+
+
+def test_lookback_ignores_grants_that_can_no_longer_credit() -> None:
+    """A rolled-off grant is excluded from attribution, so its history is not needed."""
+    today = date(2026, 9, 1)
+    rolled_off = _grant(date(2026, 1, 1), date(2026, 3, 1))
+    assert not grant_still_credits(rolled_off, today)
+    assert daily_usage_lookback_days([rolled_off], today) == DAILY_USAGE_LOOKBACK_DAYS

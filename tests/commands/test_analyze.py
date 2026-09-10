@@ -690,7 +690,7 @@ def test_report_carries_the_optimizer_breakdowns() -> None:
     report = _report(account, result, cfgs, optimizer)
     breakdown = report.limit_breakdowns[CRN_A]
     assert breakdown is not None
-    assert breakdown.expired_carryover_seconds == 1_000
+    assert breakdown.grant_funded_seconds == 1_000
     assert breakdown.total == 1_100
 
 
@@ -698,7 +698,7 @@ def test_table_limit_breakdown_section_shown_when_a_grant_applies() -> None:
     account, result, cfgs, optimizer = _carryover_setup()
     output = format_analyze_table(_report(account, result, cfgs, optimizer))
     assert "LIMIT BREAKDOWN" in output
-    assert "Expired carryover" in output
+    assert "Grant-funded usage" in output
 
 
 def test_table_limit_breakdown_section_omitted_without_grants() -> None:
@@ -713,8 +713,8 @@ def test_json_limit_breakdown_per_instance() -> None:
     payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
     assert payload["instances"][0]["limit_breakdown"] == {
         "base_seconds": 100,
-        "active_grant_seconds": 0,
-        "expired_carryover_seconds": 1_000,
+        "grant_funded_seconds": 1_000,
+        "unspent_grant_seconds": 0,
         "pre_boost_overage_seconds": 0,
         "boost_start_date": None,
         "total_seconds": 1_100,
@@ -731,8 +731,8 @@ def test_csv_limit_breakdown_columns_present() -> None:
     account, result, cfgs, optimizer = _carryover_setup()
     _, rows = _parse_csv(format_analyze_csv(_report(account, result, cfgs, optimizer)))
     assert rows[0]["limit_base"] == "100"
-    assert rows[0]["limit_active_grant"] == "0"
-    assert rows[0]["limit_expired_carryover"] == "1000"
+    assert rows[0]["limit_grant_funded"] == "1000"
+    assert rows[0]["limit_unspent_grant"] == "0"
     assert rows[0]["limit_overage"] == "0"
 
 

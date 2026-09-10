@@ -34,8 +34,8 @@ CSV_COLUMNS: tuple[str, ...] = (
     "new_limit",
     "limit_delta",
     "limit_base",
-    "limit_active_grant",
-    "limit_expired_carryover",
+    "limit_grant_funded",
+    "limit_unspent_grant",
     "limit_overage",
     "consumed_28d",
     "consumed_14d",
@@ -88,11 +88,11 @@ class AnalyzeReport:
         )
 
 
-def _grant_funded(breakdown: LimitBreakdown) -> bool:
+def _shaped_by_grant(breakdown: LimitBreakdown) -> bool:
     """Whether any net-grant term contributes to this instance's effective limit."""
     return (
-        breakdown.active_grant_seconds > 0
-        or breakdown.expired_carryover_seconds > 0
+        breakdown.grant_funded_seconds > 0
+        or breakdown.unspent_grant_seconds > 0
         or breakdown.pre_boost_overage_seconds > 0
     )
 
@@ -173,8 +173,8 @@ def _breakdown_payload(breakdown: LimitBreakdown | None) -> dict[str, Any] | Non
         return None
     return {
         "base_seconds": breakdown.base_seconds,
-        "active_grant_seconds": breakdown.active_grant_seconds,
-        "expired_carryover_seconds": breakdown.expired_carryover_seconds,
+        "grant_funded_seconds": breakdown.grant_funded_seconds,
+        "unspent_grant_seconds": breakdown.unspent_grant_seconds,
         "pre_boost_overage_seconds": breakdown.pre_boost_overage_seconds,
         "boost_start_date": breakdown.boost_start_date.isoformat() if breakdown.boost_start_date else None,
         "total_seconds": breakdown.total,
@@ -184,21 +184,20 @@ def _breakdown_payload(breakdown: LimitBreakdown | None) -> dict[str, Any] | Non
 def _format_limit_breakdown_section(report: AnalyzeReport) -> list[str]:
     """Render the per-instance effective-limit terms, or nothing when no grant applies.
 
-    Only instances whose limit is currently shaped by a net grant get a row —
-    for everything else the effective limit is just `limit_seconds`, already
-    visible in the instance table.
+    Instances with no grant shaping their limit are skipped: their effective limit is
+    just `limit_seconds`, already in the instance table.
     """
     rows: list[list[str]] = []
     for inst in report.account.instances:
         breakdown = report.limit_breakdowns.get(inst.crn)
-        if breakdown is None or not _grant_funded(breakdown):
+        if breakdown is None or not _shaped_by_grant(breakdown):
             continue
         rows.append(
             [
                 inst.name,
                 format_seconds(breakdown.base_seconds),
-                format_seconds(breakdown.active_grant_seconds),
-                format_seconds(breakdown.expired_carryover_seconds),
+                format_seconds(breakdown.grant_funded_seconds),
+                format_seconds(breakdown.unspent_grant_seconds),
                 format_seconds(breakdown.pre_boost_overage_seconds),
                 format_seconds(breakdown.total),
             ]
@@ -206,15 +205,15 @@ def _format_limit_breakdown_section(report: AnalyzeReport) -> list[str]:
     if not rows:
         return []
 
-    headers = ["Instance", "Base", "Active grant", "Expired carryover", "Pre-boost overage", "Effective limit"]
+    headers = ["Instance", "Base", "Grant-funded usage", "Unspent grant", "Pre-boost overage", "Effective limit"]
     return [
         "",
         "=" * 80,
         "LIMIT BREAKDOWN",
         "=" * 80,
         tabulate(rows, headers=headers, tablefmt="grid"),
-        "Expired carryover keeps a finished grant crediting the limit until the usage it",
-        "funded rolls out of the 28-day window, so the limit does not snap back at end_date.",
+        "Grant-funded usage keeps the minutes a grant paid for out of the base limit, and",
+        "decays as they leave the 28-day window. Unspent grant is forfeit at end_date.",
     ]
 
 
@@ -334,8 +333,8 @@ def format_analyze_csv(report: AnalyzeReport) -> str:
                 "fairness": f"{inst.fairness:.6f}",
                 "activity_score": f"{inst.activity_score:.6f}",
                 "limit_base": breakdown.base_seconds if breakdown is not None else "",
-                "limit_active_grant": breakdown.active_grant_seconds if breakdown is not None else "",
-                "limit_expired_carryover": breakdown.expired_carryover_seconds if breakdown is not None else "",
+                "limit_grant_funded": breakdown.grant_funded_seconds if breakdown is not None else "",
+                "limit_unspent_grant": breakdown.unspent_grant_seconds if breakdown is not None else "",
                 "limit_overage": breakdown.pre_boost_overage_seconds if breakdown is not None else "",
             }
         )
