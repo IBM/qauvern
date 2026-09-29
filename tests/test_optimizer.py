@@ -103,13 +103,15 @@ def _inactive_instance(
     )
 
 
-def _make_account(target: int, *instances: InstanceState) -> AccountPlan:
+def _make_account(target: int, *instances: InstanceState, consumed: int | None = None) -> AccountPlan:
+    """`consumed` is plan-wide usage; it defaults to the sum over `instances`."""
     allocated = sum(i.allocation_seconds for i in instances)
     return AccountPlan(
         account_id="test",
         plan=Plan.PAYGO,
         allocation_budget_seconds=target,
         unallocated_seconds=max(0, target - allocated),
+        consumed_seconds=consumed if consumed is not None else sum(i.consumed_seconds for i in instances),
         limit_seconds=None,
         instances=instances,
     )
@@ -189,6 +191,7 @@ def test_validate_allocations_includes_unmanaged() -> None:
         plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=1,
+        consumed_seconds=0,
         limit_seconds=None,
         instances=(_make_instance("crn:test:1", 4),),
     )
@@ -308,6 +311,7 @@ def test_optimize_unmanaged_drag_overruns_budget_with_diagnostic() -> None:
             plan=Plan.PAYGO,
             allocation_budget_seconds=100,
             unallocated_seconds=5,
+            consumed_seconds=inst.consumed_seconds,
             limit_seconds=None,
             instances=(inst,),
         ),
@@ -372,6 +376,7 @@ def test_validate_allocations_reserve_fails_when_floors_exceed_cap() -> None:
         plan=Plan.PAYGO,
         allocation_budget_seconds=100,
         unallocated_seconds=0,
+        consumed_seconds=inst.consumed_seconds,
         limit_seconds=None,
         instances=(inst,),
     )
@@ -396,6 +401,7 @@ def test_reserve_too_high_names_minimum_allocation_driver() -> None:
         plan=Plan.PAYGO,
         allocation_budget_seconds=100,
         unallocated_seconds=20,
+        consumed_seconds=inst.consumed_seconds,
         limit_seconds=None,
         instances=(inst,),
     )
@@ -515,6 +521,20 @@ def test_usage_floor_relaxed_just_above_threshold() -> None:
     floor = optimizer._floor(inst)
     assert floor.source == "minimum_allocation_seconds"
     assert floor.value == 60
+
+
+def test_usage_floor_relax_threshold_uses_plan_wide_usage() -> None:
+    """Usage by unconfigured instances counts toward the relax threshold."""
+    inst = _make_instance("crn:a", 200, consumed=100)
+    # Configured usage is 10% of budget, but plan-wide usage is 50%.
+    optimizer = AllocationOptimizer(
+        _make_account(1000, inst, consumed=500),
+        [_make_config("crn:a")],
+        minimum_allocation_seconds=60,
+        usage_floor_relax_above_percent=20.0,
+    )
+    floor = optimizer._floor(inst)
+    assert floor.source == "minimum_allocation_seconds"
 
 
 def test_usage_floor_relaxed_when_budget_is_zero() -> None:
@@ -1108,6 +1128,7 @@ def mixed_account() -> tuple[AccountPlan, list[InstanceConfig]]:
         plan=Plan.PAYGO,
         allocation_budget_seconds=2_000_000,
         unallocated_seconds=700_000,
+        consumed_seconds=sum(i.consumed_seconds for i in (active_high, inactive, active_med_capped)),
         limit_seconds=None,
         instances=(active_high, inactive, active_med_capped),
     )

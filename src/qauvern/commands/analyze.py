@@ -123,6 +123,7 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         f"Preview date: {report.preview_date.isoformat()}",
         f"Allocation budget: {format_seconds(account.allocation_budget_seconds)}",
         f"Unallocated: {format_seconds(account.unallocated_seconds)}",
+        f"Consumed (28-day, all instances): {format_seconds(account.consumed_seconds)}",
         f"Consumed (28-day, configured): {format_seconds(account.configured_consumed_seconds)}",
     ]
 
@@ -272,6 +273,7 @@ def format_analyze_json(report: AnalyzeReport) -> str:
             "account_id": account.account_id,
             "allocation_budget_seconds": account.allocation_budget_seconds,
             "unallocated_seconds": account.unallocated_seconds,
+            "consumed_seconds": account.consumed_seconds,
             "configured_consumed_seconds": account.configured_consumed_seconds,
             "limit_seconds": account.limit_seconds,
             "unmanaged_allocation_seconds": account.unmanaged_allocation_seconds,

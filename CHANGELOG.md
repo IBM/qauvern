@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.14.0] - 2026-xx-xx
 
+### Added
+
+- `analyze` and `show` now also report 28-day usage across every instance on the account and plan, including unconfigured instances.
+
 ### Changed
 
-- In `analyze --format json`, the key `account.consumed_seconds` was renamed to `account.configured_consumed_seconds` to make clear it only is the consumption of configured instances.
+- In `analyze --format json`, `account.consumed_seconds` now includes usage by unconfigured instances. The previous value, which only counted configured instances, is now `account.configured_consumed_seconds`.
+- `usage_floor_relax_above_percent` now compares the account budget against 28-day usage from every instance on the account and plan, including unconfigured instances, rather than only configured instances.
 
 ## [0.13.0] - 2026-08-10
 

@@ -21,6 +21,7 @@ import requests
 from .models import AccountPlan, DiscoveredInstance, DiscoveredInstances, InstanceState
 from .plan import Plan, plan_id_for
 from .region import Region, extract_region_from_crn
+from .rolling_window import ROLLING_WINDOW_DAYS
 
 QUANTUM_COMPUTING_RESOURCE_ID = "b6049020-80f4-11eb-a0f7-e35ec9b4054f"
 
@@ -200,6 +201,23 @@ class IBMQuantumAPIClient:
         usage_ms = data.get("usage", 0)
         return int(usage_ms / 1000) if usage_ms else 0
 
+    def get_plan_usage_seconds(self, plan: Plan, start_date: datetime, end_date: datetime, account_id: str) -> int:
+        """Get usage analytics across every instance on the account for `plan`, including unconfigured ones.
+
+        Uses the non-regional base URL, the same one `get_account` reads the allocation budget from.
+        """
+        url = f"{self.base_url}/v1/analytics/usage"
+        params = {
+            "plan": plan.value,
+            "interval_start": start_date.isoformat(),
+            "interval_end": end_date.isoformat(),
+        }
+        data = self._request_json("GET", url, account_id=account_id, params=params)
+
+        # The analytics endpoint returns usage in MILLISECONDS, convert to seconds
+        usage_ms = data.get("usage", 0)
+        return int(usage_ms / 1000) if usage_ms else 0
+
     def get_detailed_usage(self, instance_crn: str, account_id: str) -> dict:
         """Get detailed usage data for multiple time periods using analytics endpoint.
 
@@ -363,11 +381,17 @@ class IBMQuantumAPIClient:
             raise ValueError(f"No plan found for plan {plan.value} (plan_id {plan_id})")
         api_plan = plans[0]
 
+        end_date = datetime.now(tz=timezone.utc)
+        consumed = self.get_plan_usage_seconds(
+            plan, end_date - timedelta(days=ROLLING_WINDOW_DAYS), end_date, account_id
+        )
+
         return AccountPlan(
             account_id=account_id,
             plan=plan,
             allocation_budget_seconds=api_plan.get("usage_allocation_seconds", 0),
             unallocated_seconds=api_plan.get("unallocated_usage_seconds", 0),
+            consumed_seconds=consumed,
             limit_seconds=api_plan.get("usage_limit_seconds"),
             instances=tuple(instances),
         )

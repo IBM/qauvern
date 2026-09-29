@@ -128,6 +128,7 @@ def test_account_configured_consumed_seconds_is_sum_of_instances() -> None:
         plan=Plan.PAYGO,
         allocation_budget_seconds=1000000,
         unallocated_seconds=0,
+        consumed_seconds=250000,
         limit_seconds=None,
         instances=(i1, i2),
     )
@@ -150,6 +151,7 @@ def test_account_unmanaged_allocation_seconds() -> None:
         plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=1,
+        consumed_seconds=0,
         limit_seconds=None,
         instances=(loaded,),
     )
@@ -161,6 +163,7 @@ def test_account_unmanaged_allocation_seconds() -> None:
         plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=6,
+        consumed_seconds=0,
         limit_seconds=None,
         instances=(loaded,),
     )
@@ -173,6 +176,7 @@ def test_account_unmanaged_allocation_seconds() -> None:
         plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=8,
+        consumed_seconds=0,
         limit_seconds=None,
         instances=(loaded,),
     )
