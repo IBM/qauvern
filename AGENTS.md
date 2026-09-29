@@ -33,7 +33,7 @@ All commits must be DCO signed-off. Use `git commit -s`.
 ## CLI Output Rules
 
 Progress/log messages must use `click.echo(..., err=True)` so stdout stays clean for data output
-(e.g. JSON from `analyze --export`). Only final structured output goes to stdout.
+(e.g. JSON from `analyze --format json`). Only final structured output goes to stdout.
 
 ## Key Prohibitions
 

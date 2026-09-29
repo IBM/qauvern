@@ -201,6 +201,19 @@ class AllocationOptimizer:
         remaining = pool
 
         while remaining > 0 and candidates:
+            # Drop candidates with no room (new_alloc >= limit) before computing
+            # total_score. This can be true from the first round: new_alloc starts
+            # at each instance's floor (consumed_seconds), which can exceed the
+            # effective limit if target_limit_seconds was tightened below 28-day
+            # usage.
+            candidates = [
+                inst
+                for inst in candidates
+                if (limit := effective_limits[inst.crn]) is None or limit > new_alloc[inst.crn]
+            ]
+            if not candidates:
+                break
+
             total_score = sum(scores[inst.crn] for inst in candidates)
             if total_score <= 0:
                 break
@@ -220,8 +233,8 @@ class AllocationOptimizer:
             remaining -= awarded
             candidates = still_active
             if awarded == 0:
-                # Either every remaining candidate is at its cap, or rounding left
-                # nothing distributable this round. Either way, no further progress.
+                # Every remaining candidate hit rounding-to-zero on its share this
+                # round, so break.
                 break
 
     def _reason_for(self, inst: InstanceState, projected: int, effective_limit: int | None) -> str:

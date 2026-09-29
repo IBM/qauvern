@@ -918,6 +918,28 @@ def test_in_debt_instance_pinned_at_consumed_above_limit() -> None:
     assert is_valid, errors
 
 
+def test_water_fill_negative_room_candidate_does_not_abandon_pool() -> None:
+    """An instance whose limit was tightened below its usage must not starve its peers.
+
+    crn:a's limit (400) is below its consumed (600), so its floor already exceeds its
+    cap -- it can only ever receive 0 more seconds. Before the fix, its huge
+    activity_score still counted toward total_score, truncating crn:b's int(share) to
+    0 each round, which looked like "no progress" and abandoned the pool before crn:b
+    got its share.
+    """
+    a = _active_instance("crn:a", allocation=600, consumed=600, consumed_24h=1_000_000)
+    b = _active_instance("crn:b", allocation=100, consumed=0, consumed_24h=1)
+    cfg_a = _make_config("crn:a", target_limit_seconds=400)
+    cfg_b = _make_config("crn:b")
+    optimizer = AllocationOptimizer(_make_account(10_000, a, b), [cfg_a, cfg_b])
+
+    result = optimizer.optimize()
+    projected = _projected(result, optimizer.account)
+
+    assert projected["crn:a"] == 600  # floor (consumed) already exceeds its 400s limit
+    assert projected["crn:b"] > 60  # pool was not abandoned; crn:b got its share
+
+
 def test_zero_consumed_active_grows_to_share() -> None:
     inst = _active_instance("crn:a", allocation=100, consumed=0, consumed_24h=5)
     cfg = _make_config("crn:a")
