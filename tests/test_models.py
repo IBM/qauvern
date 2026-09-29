@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from qauvern.models import AccountPlan, InstanceDetailedUsage, InstanceState
+from qauvern.plan import Plan
 
 # -------------------------------------------------------------------
 # Helpers
@@ -124,7 +125,7 @@ def test_account_configured_consumed_seconds_is_sum_of_instances() -> None:
     )
     account = AccountPlan(
         account_id="test-account",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=1000000,
         unallocated_seconds=0,
         limit_seconds=None,
@@ -146,7 +147,7 @@ def test_account_unmanaged_allocation_seconds() -> None:
     # target=10, available=1, loaded holds 4, so 5 must be on instances not loaded.
     partial = AccountPlan(
         account_id="test-account",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=1,
         limit_seconds=None,
@@ -157,7 +158,7 @@ def test_account_unmanaged_allocation_seconds() -> None:
     # When every instance is present (target − available == sum of allocations) it is 0.
     fully_loaded = AccountPlan(
         account_id="test-account",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=6,
         limit_seconds=None,
@@ -169,7 +170,7 @@ def test_account_unmanaged_allocation_seconds() -> None:
     # rather than reported as negative — negative would falsely create cap headroom.
     inconsistent = AccountPlan(
         account_id="test-account",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=8,
         limit_seconds=None,

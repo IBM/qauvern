@@ -41,16 +41,14 @@ class MockIBMQuantumAPIClient:
         self.usage_data: dict[str, dict] = {}
         self.daily_usage_data: dict[str, dict[date, int]] = {}
 
-    def _build_account(self, account_id: str) -> AccountPlan:
+    def _build_account(self, account_id: str, plan: Plan = Plan.PAYGO) -> AccountPlan:
         if account_id not in self._account_params:
             raise ValueError(f"Account {account_id} not found in mock data")
         params = self._account_params[account_id]
         instances = tuple(
             self.instances[crn] for crn in self._account_instances.get(account_id, []) if crn in self.instances
         )
-        return AccountPlan(
-            account_id=account_id, plan_id="test-plan", limit_seconds=None, instances=instances, **params
-        )
+        return AccountPlan(account_id=account_id, plan=plan, limit_seconds=None, instances=instances, **params)
 
     def setup_account(
         self,
@@ -209,7 +207,7 @@ class MockIBMQuantumAPIClient:
         instances: Sequence[InstanceState] | None = None,
     ) -> AccountPlan:
         """Get mock account, optionally attaching the given instances directly."""
-        account = self._build_account(account_id)
+        account = self._build_account(account_id, plan=plan if plan is not None else Plan.PAYGO)
         if instances is not None:
             return dataclasses.replace(account, instances=tuple(instances))
         return account

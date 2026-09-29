@@ -26,6 +26,7 @@ from qauvern.models import (
     OptimizationResult,
 )
 from qauvern.optimizer import AllocationOptimizer
+from qauvern.plan import Plan
 from tests.mock_api import MockIBMQuantumAPIClient
 
 # ---------------------------------------------------------------------------
@@ -106,7 +107,7 @@ def _make_account(target: int, *instances: InstanceState) -> AccountPlan:
     allocated = sum(i.allocation_seconds for i in instances)
     return AccountPlan(
         account_id="test",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=target,
         unallocated_seconds=max(0, target - allocated),
         limit_seconds=None,
@@ -185,7 +186,7 @@ def test_validate_allocations_includes_unmanaged() -> None:
     # target=10, available=1, loaded holds 4 → 5 sits on instances we did not load.
     account = AccountPlan(
         account_id="test",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=1,
         limit_seconds=None,
@@ -304,7 +305,7 @@ def test_optimize_unmanaged_drag_overruns_budget_with_diagnostic() -> None:
     optimizer = AllocationOptimizer(
         AccountPlan(
             account_id="test",
-            plan_id="test-plan",
+            plan=Plan.PAYGO,
             allocation_budget_seconds=100,
             unallocated_seconds=5,
             limit_seconds=None,
@@ -368,7 +369,7 @@ def test_validate_allocations_reserve_fails_when_floors_exceed_cap() -> None:
     inst = _make_instance("crn:a", 100, consumed=100)
     account = AccountPlan(
         account_id="test",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=100,
         unallocated_seconds=0,
         limit_seconds=None,
@@ -392,7 +393,7 @@ def test_reserve_too_high_names_minimum_allocation_driver() -> None:
     inst = _make_instance("crn:a", 80, consumed=0)
     account = AccountPlan(
         account_id="test",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=100,
         unallocated_seconds=20,
         limit_seconds=None,
@@ -1104,7 +1105,7 @@ def mixed_account() -> tuple[AccountPlan, list[InstanceConfig]]:
     )
     account = AccountPlan(
         account_id="test",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=2_000_000,
         unallocated_seconds=700_000,
         limit_seconds=None,

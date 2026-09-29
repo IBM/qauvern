@@ -381,7 +381,7 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str, preview_d
     )
     result = optimizer.optimize()
 
-    report = AnalyzeReport.from_optimizer(account, result, plan, instance_configs, optimizer)
+    report = AnalyzeReport.from_optimizer(account, result, instance_configs, optimizer)
     fmt = output_format.lower()
     if fmt == "csv":
         for error in report.validation_errors:

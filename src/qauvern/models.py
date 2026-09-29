@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from functools import cached_property
 
+from .plan import Plan
 from .region import Region, extract_region_from_crn
 
 
@@ -142,7 +143,7 @@ class AccountPlan:
     """IBM Cloud account with instances for a specific plan."""
 
     account_id: str
-    plan_id: str
+    plan: Plan
     allocation_budget_seconds: int
     unallocated_seconds: int
     limit_seconds: int | None
