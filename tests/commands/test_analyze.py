@@ -23,7 +23,7 @@ from qauvern.commands.analyze import (
     format_analyze_table,
 )
 from qauvern.models import (
-    Account,
+    AccountPlan,
     AllocationChange,
     InstanceConfig,
     InstanceDetailedUsage,
@@ -74,8 +74,8 @@ def _make_account(
     *,
     unallocated: int = 0,
     limit: int | None = None,
-) -> Account:
-    return Account(
+) -> AccountPlan:
+    return AccountPlan(
         account_id="test-account",
         plan_id="test-plan",
         allocation_budget_seconds=budget,

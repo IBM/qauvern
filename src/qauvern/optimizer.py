@@ -16,7 +16,7 @@ from functools import cached_property
 from typing import Literal
 
 from .limit_resolver import LimitBreakdown, resolve_limit
-from .models import Account, AllocationChange, InstanceConfig, InstanceState, LimitChange, OptimizationResult
+from .models import AccountPlan, AllocationChange, InstanceConfig, InstanceState, LimitChange, OptimizationResult
 
 FloorSource = Literal["consumed_seconds", "minimum_allocation_seconds"]
 
@@ -47,7 +47,7 @@ class AllocationOptimizer:
 
     def __init__(
         self,
-        account: Account,
+        account: AccountPlan,
         instance_configs: list[InstanceConfig],
         minimum_allocation_seconds: int = 60,
         allocation_reserve_percent: float = 0.0,
@@ -57,7 +57,7 @@ class AllocationOptimizer:
         """Initialize the optimizer.
 
         Args:
-            account: Account with instances to optimize
+            account: AccountPlan with instances to optimize
             instance_configs: List of instance configs with allocation constraints
             minimum_allocation_seconds: Minimum allocation to maintain for each instance (default: 60 seconds)
             allocation_reserve_percent: Fraction of available seconds to hold back from redistribution
@@ -79,7 +79,7 @@ class AllocationOptimizer:
         elif usage_floor_relax_above_percent >= 100:
             self._usage_floor_relaxed = False
         else:
-            usage_percent = account.consumed_seconds / account.allocation_budget_seconds * 100
+            usage_percent = account.configured_consumed_seconds / account.allocation_budget_seconds * 100
             self._usage_floor_relaxed = usage_percent > usage_floor_relax_above_percent
 
         self.today = today or datetime.now(timezone.utc).date()
@@ -344,7 +344,7 @@ class AllocationOptimizer:
         5. No managed instance's new_allocation is 0 (archiving is not allowed).
 
         Unmanaged instances (those not in self.account.instances) contribute their
-        current allocation to the total-cap check via Account.unmanaged_allocation_seconds.
+        current allocation to the total-cap check via AccountPlan.unmanaged_allocation_seconds.
         Per-instance invariants (2–5) only apply to instances present in
         self.account.instances that also have a config.
 

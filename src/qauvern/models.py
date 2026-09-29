@@ -138,7 +138,7 @@ class InstanceState:
 
 
 @dataclass(frozen=True)
-class Account:
+class AccountPlan:
     """IBM Cloud account with instances for a specific plan."""
 
     account_id: str
@@ -149,7 +149,7 @@ class Account:
     instances: tuple[InstanceState, ...]
 
     @cached_property
-    def consumed_seconds(self) -> int:
+    def configured_consumed_seconds(self) -> int:
         return sum(i.consumed_seconds for i in self.instances)
 
     @cached_property
