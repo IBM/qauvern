@@ -16,7 +16,7 @@ from datetime import date, datetime, timezone
 import pytest
 
 from qauvern.models import (
-    Account,
+    AccountPlan,
     AllocationChange,
     InstanceConfig,
     InstanceDetailedUsage,
@@ -26,6 +26,7 @@ from qauvern.models import (
     OptimizationResult,
 )
 from qauvern.optimizer import AllocationOptimizer
+from qauvern.plan import Plan
 from tests.mock_api import MockIBMQuantumAPIClient
 
 # ---------------------------------------------------------------------------
@@ -102,11 +103,11 @@ def _inactive_instance(
     )
 
 
-def _make_account(target: int, *instances: InstanceState) -> Account:
+def _make_account(target: int, *instances: InstanceState) -> AccountPlan:
     allocated = sum(i.allocation_seconds for i in instances)
-    return Account(
+    return AccountPlan(
         account_id="test",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=target,
         unallocated_seconds=max(0, target - allocated),
         limit_seconds=None,
@@ -122,7 +123,7 @@ def _make_config(crn: str, *, name: str | None = None, target_limit_seconds: int
     )
 
 
-def _projected(result: OptimizationResult, account: Account) -> dict[str, int]:
+def _projected(result: OptimizationResult, account: AccountPlan) -> dict[str, int]:
     """Return projected allocation per crn, applying any AllocationChange."""
     return {
         inst.crn: result.allocation_changes[inst.crn].new
@@ -183,9 +184,9 @@ def test_validate_allocations_uses_result_overrides() -> None:
 def test_validate_allocations_includes_unmanaged() -> None:
     """Allocation held by instances not loaded must still count toward the cap."""
     # target=10, available=1, loaded holds 4 → 5 sits on instances we did not load.
-    account = Account(
+    account = AccountPlan(
         account_id="test",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=1,
         limit_seconds=None,
@@ -302,9 +303,9 @@ def test_optimize_unmanaged_drag_overruns_budget_with_diagnostic() -> None:
     # floor_required = 60 + 45 = 105 > 100.
     inst = _inactive_instance("crn:a", allocation=50, consumed=10)
     optimizer = AllocationOptimizer(
-        Account(
+        AccountPlan(
             account_id="test",
-            plan_id="test-plan",
+            plan=Plan.PAYGO,
             allocation_budget_seconds=100,
             unallocated_seconds=5,
             limit_seconds=None,
@@ -366,9 +367,9 @@ def test_validate_allocations_reserve_fails_when_floors_exceed_cap() -> None:
     """
     # Only managed instance is parked at its consumed floor; unallocated=0 (account is full).
     inst = _make_instance("crn:a", 100, consumed=100)
-    account = Account(
+    account = AccountPlan(
         account_id="test",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=100,
         unallocated_seconds=0,
         limit_seconds=None,
@@ -390,9 +391,9 @@ def test_reserve_too_high_names_minimum_allocation_driver() -> None:
     message names minimum_allocation_seconds and offers lowering it as a fix."""
     # No usage, so the floor is driven entirely by minimum_allocation_seconds=80.
     inst = _make_instance("crn:a", 80, consumed=0)
-    account = Account(
+    account = AccountPlan(
         account_id="test",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=100,
         unallocated_seconds=20,
         limit_seconds=None,
@@ -1074,7 +1075,7 @@ def test_unmanaged_instances_are_ignored_by_optimizer() -> None:
 
 
 @pytest.fixture
-def mixed_account() -> tuple[Account, list[InstanceConfig]]:
+def mixed_account() -> tuple[AccountPlan, list[InstanceConfig]]:
     """Active+inactive+capped+uncapped, with realistic sizes."""
     active_high = InstanceState(
         crn="crn:active_high",
@@ -1102,9 +1103,9 @@ def mixed_account() -> tuple[Account, list[InstanceConfig]]:
         limit_seconds=400_000,
         detailed_usage=_usage(consumed_3day=20_000, consumed_7day=50_000, consumed_14day=100_000),
     )
-    account = Account(
+    account = AccountPlan(
         account_id="test",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=2_000_000,
         unallocated_seconds=700_000,
         limit_seconds=None,
@@ -1118,7 +1119,7 @@ def mixed_account() -> tuple[Account, list[InstanceConfig]]:
     return account, configs
 
 
-def test_end_to_end_mixed_passes_validation(mixed_account: tuple[Account, list[InstanceConfig]]) -> None:
+def test_end_to_end_mixed_passes_validation(mixed_account: tuple[AccountPlan, list[InstanceConfig]]) -> None:
     account, configs = mixed_account
     optimizer = AllocationOptimizer(account, configs)
     result = optimizer.optimize()

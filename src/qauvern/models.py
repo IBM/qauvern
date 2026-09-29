@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from functools import cached_property
 
+from .plan import Plan
 from .region import Region, extract_region_from_crn
 
 
@@ -138,18 +139,18 @@ class InstanceState:
 
 
 @dataclass(frozen=True)
-class Account:
+class AccountPlan:
     """IBM Cloud account with instances for a specific plan."""
 
     account_id: str
-    plan_id: str
+    plan: Plan
     allocation_budget_seconds: int
     unallocated_seconds: int
     limit_seconds: int | None
     instances: tuple[InstanceState, ...]
 
     @cached_property
-    def consumed_seconds(self) -> int:
+    def configured_consumed_seconds(self) -> int:
         return sum(i.consumed_seconds for i in self.instances)
 
     @cached_property

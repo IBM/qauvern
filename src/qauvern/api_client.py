@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import requests
 
-from .models import Account, DiscoveredInstance, DiscoveredInstances, InstanceState
+from .models import AccountPlan, DiscoveredInstance, DiscoveredInstances, InstanceState
 from .plan import Plan, plan_id_for
 from .region import Region, extract_region_from_crn
 
@@ -352,7 +352,7 @@ class IBMQuantumAPIClient:
 
         return DiscoveredInstances(active=tuple(live), archived=tuple(archived))
 
-    def get_account(self, account_id: str, plan: Plan, instances: Sequence[InstanceState]) -> Account:
+    def get_account(self, account_id: str, plan: Plan, instances: Sequence[InstanceState]) -> AccountPlan:
         """Get account-level allocation/usage data for `plan`, attaching the given instances."""
         plan_id = plan_id_for(plan)
         url = f"{self.base_url}/v1/accounts/{account_id}"
@@ -363,9 +363,9 @@ class IBMQuantumAPIClient:
             raise ValueError(f"No plan found for plan {plan.value} (plan_id {plan_id})")
         api_plan = plans[0]
 
-        return Account(
+        return AccountPlan(
             account_id=account_id,
-            plan_id=plan_id,
+            plan=plan,
             allocation_budget_seconds=api_plan.get("usage_allocation_seconds", 0),
             unallocated_seconds=api_plan.get("unallocated_usage_seconds", 0),
             limit_seconds=api_plan.get("usage_limit_seconds"),

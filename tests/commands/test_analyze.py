@@ -23,7 +23,7 @@ from qauvern.commands.analyze import (
     format_analyze_table,
 )
 from qauvern.models import (
-    Account,
+    AccountPlan,
     AllocationChange,
     InstanceConfig,
     InstanceDetailedUsage,
@@ -74,10 +74,11 @@ def _make_account(
     *,
     unallocated: int = 0,
     limit: int | None = None,
-) -> Account:
-    return Account(
+    plan: Plan = Plan.PAYGO,
+) -> AccountPlan:
+    return AccountPlan(
         account_id="test-account",
-        plan_id="test-plan",
+        plan=plan,
         allocation_budget_seconds=budget,
         unallocated_seconds=unallocated,
         limit_seconds=limit,
@@ -129,8 +130,8 @@ def _carryover_setup():
     return account, result, [cfg], optimizer
 
 
-def _report(account, result, cfgs, optimizer, *, plan: Plan = Plan.PAYGO) -> AnalyzeReport:
-    return AnalyzeReport.from_optimizer(account, result, plan, cfgs, optimizer)
+def _report(account, result, cfgs, optimizer) -> AnalyzeReport:
+    return AnalyzeReport.from_optimizer(account, result, cfgs, optimizer)
 
 
 # ---------------------------------------------------------------------------
@@ -546,8 +547,12 @@ def test_json_round_trips() -> None:
 
 
 def test_json_plan_value_is_string() -> None:
-    account, result, cfgs, optimizer = _no_changes_setup()
-    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer, plan=Plan.PAYGO)))
+    inst = _make_instance(CRN_A, allocation=60)
+    account = _make_account((inst,), budget=60, plan=Plan.PAYGO)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = optimizer.optimize()
+    payload = json.loads(format_analyze_json(_report(account, result, [cfg], optimizer)))
     assert payload["plan"] == "paygo"
 
 

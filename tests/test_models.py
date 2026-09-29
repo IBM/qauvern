@@ -14,7 +14,8 @@ from typing import Any
 
 import pytest
 
-from qauvern.models import Account, InstanceDetailedUsage, InstanceState
+from qauvern.models import AccountPlan, InstanceDetailedUsage, InstanceState
+from qauvern.plan import Plan
 
 # -------------------------------------------------------------------
 # Helpers
@@ -101,11 +102,11 @@ def test_activity_score_recent_outweighs_old() -> None:
 
 
 # -------------------------------------------------------------------
-# Account — validation
+# AccountPlan — validation
 # -------------------------------------------------------------------
 
 
-def test_account_consumed_seconds_is_sum_of_instances() -> None:
+def test_account_configured_consumed_seconds_is_sum_of_instances() -> None:
     i1 = InstanceState(
         crn="crn:test:1",
         name="A",
@@ -122,15 +123,15 @@ def test_account_consumed_seconds_is_sum_of_instances() -> None:
         limit_seconds=None,
         detailed_usage=None,
     )
-    account = Account(
+    account = AccountPlan(
         account_id="test-account",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=1000000,
         unallocated_seconds=0,
         limit_seconds=None,
         instances=(i1, i2),
     )
-    assert account.consumed_seconds == 250000
+    assert account.configured_consumed_seconds == 250000
 
 
 def test_account_unmanaged_allocation_seconds() -> None:
@@ -144,9 +145,9 @@ def test_account_unmanaged_allocation_seconds() -> None:
         detailed_usage=None,
     )
     # target=10, available=1, loaded holds 4, so 5 must be on instances not loaded.
-    partial = Account(
+    partial = AccountPlan(
         account_id="test-account",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=1,
         limit_seconds=None,
@@ -155,9 +156,9 @@ def test_account_unmanaged_allocation_seconds() -> None:
     assert partial.unmanaged_allocation_seconds == 5
 
     # When every instance is present (target − available == sum of allocations) it is 0.
-    fully_loaded = Account(
+    fully_loaded = AccountPlan(
         account_id="test-account",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=6,
         limit_seconds=None,
@@ -167,9 +168,9 @@ def test_account_unmanaged_allocation_seconds() -> None:
 
     # An inconsistent snapshot (configured + available > target) is clamped at 0
     # rather than reported as negative — negative would falsely create cap headroom.
-    inconsistent = Account(
+    inconsistent = AccountPlan(
         account_id="test-account",
-        plan_id="test-plan",
+        plan=Plan.PAYGO,
         allocation_budget_seconds=10,
         unallocated_seconds=8,
         limit_seconds=None,

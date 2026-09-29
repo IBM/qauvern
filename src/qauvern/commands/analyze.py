@@ -20,9 +20,8 @@ from tabulate import tabulate
 
 from ..formatting import format_instance_analysis_table, format_reserve_summary, format_seconds
 from ..limit_resolver import LimitBreakdown
-from ..models import Account, InstanceConfig, OptimizationResult
+from ..models import AccountPlan, InstanceConfig, OptimizationResult
 from ..optimizer import AllocationOptimizer
-from ..plan import Plan
 
 CSV_COLUMNS: tuple[str, ...] = (
     "name",
@@ -52,8 +51,7 @@ CSV_COLUMNS: tuple[str, ...] = (
 class AnalyzeReport:
     """Everything a formatter needs to render `analyze` output."""
 
-    plan: Plan
-    account: Account
+    account: AccountPlan
     result: OptimizationResult
     instance_configs: tuple[InstanceConfig, ...]
     validation_errors: tuple[str, ...]
@@ -66,9 +64,8 @@ class AnalyzeReport:
     @classmethod
     def from_optimizer(
         cls,
-        account: Account,
+        account: AccountPlan,
         result: OptimizationResult,
-        plan: Plan,
         instance_configs: list[InstanceConfig],
         optimizer: AllocationOptimizer,
     ) -> "AnalyzeReport":
@@ -78,7 +75,6 @@ class AnalyzeReport:
         if optimizer.allocation_reserve_percent > 0:
             pool_seconds, _ = optimizer.redistribution_pool()
         return cls(
-            plan=plan,
             account=account,
             result=result,
             instance_configs=tuple(instance_configs),
@@ -123,11 +119,11 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         "=" * 80,
         "ACCOUNT PLAN ALLOCATION SUMMARY",
         "=" * 80,
-        f"Plan: {report.plan.value}",
+        f"Plan: {report.account.plan.value}",
         f"Preview date: {report.preview_date.isoformat()}",
         f"Allocation budget: {format_seconds(account.allocation_budget_seconds)}",
         f"Unallocated: {format_seconds(account.unallocated_seconds)}",
-        f"Consumed (28-day, configured): {format_seconds(account.consumed_seconds)}",
+        f"Consumed (28-day, configured): {format_seconds(account.configured_consumed_seconds)}",
     ]
 
     if account.unmanaged_allocation_seconds > 0:
@@ -270,13 +266,13 @@ def format_analyze_json(report: AnalyzeReport) -> str:
         )
 
     payload = {
-        "plan": report.plan.value,
+        "plan": report.account.plan.value,
         "preview_date": report.preview_date.isoformat(),
         "account": {
             "account_id": account.account_id,
             "allocation_budget_seconds": account.allocation_budget_seconds,
             "unallocated_seconds": account.unallocated_seconds,
-            "consumed_seconds": account.consumed_seconds,
+            "configured_consumed_seconds": account.configured_consumed_seconds,
             "limit_seconds": account.limit_seconds,
             "unmanaged_allocation_seconds": account.unmanaged_allocation_seconds,
         },

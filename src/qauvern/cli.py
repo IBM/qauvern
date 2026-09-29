@@ -39,7 +39,7 @@ from .formatting import (
     parse_seconds,
 )
 from .models import (
-    Account,
+    AccountPlan,
     AllocationChange,
     DiscoveredInstance,
     InstanceConfig,
@@ -54,7 +54,7 @@ from .rolling_window import daily_usage_lookback_days
 
 
 def enrich_instances_with_usage_data(
-    account: Account,
+    account: AccountPlan,
     client: IBMQuantumAPIClient,
     instance_configs: Sequence[InstanceConfig],
 ) -> None:
@@ -239,7 +239,7 @@ def show(ctx, config: str, api_key: str | None):
     click.echo(f"Plan: {config_parser.plan.value}")
     click.echo(f"Allocation budget: {format_seconds(account.allocation_budget_seconds)}")
     click.echo(f"Unallocated: {format_seconds(account.unallocated_seconds)}")
-    click.echo(f"Consumed (configured instances): {format_seconds(account.consumed_seconds)}")
+    click.echo(f"Consumed (configured instances): {format_seconds(account.configured_consumed_seconds)}")
     if account.unmanaged_allocation_seconds > 0:
         click.echo(
             f"Held by unconfigured instances: {format_seconds(account.unmanaged_allocation_seconds)} "
@@ -381,7 +381,7 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str, preview_d
     )
     result = optimizer.optimize()
 
-    report = AnalyzeReport.from_optimizer(account, result, plan, instance_configs, optimizer)
+    report = AnalyzeReport.from_optimizer(account, result, instance_configs, optimizer)
     fmt = output_format.lower()
     if fmt == "csv":
         for error in report.validation_errors:
