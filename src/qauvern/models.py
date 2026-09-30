@@ -146,11 +146,14 @@ class AccountPlan:
     plan: Plan
     allocation_budget_seconds: int
     unallocated_seconds: int
+    # 28-day usage across every instance on the account for this plan, including unconfigured ones.
+    consumed_seconds: int
     limit_seconds: int | None
     instances: tuple[InstanceState, ...]
 
     @cached_property
     def configured_consumed_seconds(self) -> int:
+        """28-day usage summed over only `self.instances`."""
         return sum(i.consumed_seconds for i in self.instances)
 
     @cached_property

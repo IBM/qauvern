@@ -18,6 +18,7 @@ import pytest
 from click.testing import CliRunner
 
 from qauvern.cli import main
+from qauvern.plan import Plan
 from tests.mock_api import MockIBMQuantumAPIClient
 
 CRN = "crn:v1:bluemix:public:quantum-computing:us-east:a/acc:inst-a::"
@@ -137,3 +138,23 @@ instances:
 
     assert result.exit_code == 0, result.output
     assert client.instances[CRN].usage.consumed_14day == 1400
+
+
+# -------------------------------------------------------------------
+# Plan-wide usage
+# -------------------------------------------------------------------
+
+
+def test_plan_usage_defaults_to_sum_of_instances(client: MockIBMQuantumAPIClient) -> None:
+    client.setup_instance(CRN, "A", allocation_seconds=100, consumed_seconds=40, account_id="acct-1")
+    now = datetime.now(tz=timezone.utc)
+    assert client.get_account("acct-1").consumed_seconds == 40
+    assert client.get_plan_usage_seconds(Plan.PAYGO, now - timedelta(days=28), now, "acct-1") == 40
+
+
+def test_plan_usage_can_include_unconfigured_instances(client: MockIBMQuantumAPIClient) -> None:
+    client.setup_account("acct-2", allocation_budget_seconds=1000, consumed_seconds=500)
+    client.setup_instance(CRN, "A", allocation_seconds=100, consumed_seconds=40, account_id="acct-2")
+    account = client.get_account("acct-2")
+    assert account.consumed_seconds == 500
+    assert account.configured_consumed_seconds == 40

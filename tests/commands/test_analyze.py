@@ -75,12 +75,14 @@ def _make_account(
     unallocated: int = 0,
     limit: int | None = None,
     plan: Plan = Plan.PAYGO,
+    consumed: int | None = None,
 ) -> AccountPlan:
     return AccountPlan(
         account_id="test-account",
         plan=plan,
         allocation_budget_seconds=budget,
         unallocated_seconds=unallocated,
+        consumed_seconds=consumed if consumed is not None else sum(i.consumed_seconds for i in instances),
         limit_seconds=limit,
         instances=instances,
     )
@@ -573,6 +575,27 @@ def test_json_account_includes_unmanaged_allocation() -> None:
     payload = json.loads(format_analyze_json(_report(account, result, [cfg], optimizer)))
     assert payload["account"]["unmanaged_allocation_seconds"] == 40
     assert payload["account"]["allocation_budget_seconds"] == 100
+
+
+def _plan_wide_consumed_setup():
+    inst = _make_instance(CRN_A, allocation=200, consumed=150)
+    # 500s plan-wide, of which only 150s is by the configured instance.
+    account = _make_account((inst,), budget=1000, consumed=500)
+    cfg = _make_config(CRN_A)
+    optimizer = AllocationOptimizer(account, [cfg])
+    return account, optimizer.optimize(), [cfg], optimizer
+
+
+def test_table_shows_plan_wide_and_configured_consumed() -> None:
+    output = format_analyze_table(_report(*_plan_wide_consumed_setup()))
+    assert "Consumed (28-day, all instances): 500s" in output
+    assert "Consumed (28-day, configured): 150s" in output
+
+
+def test_json_account_includes_plan_wide_and_configured_consumed() -> None:
+    payload = json.loads(format_analyze_json(_report(*_plan_wide_consumed_setup())))
+    assert payload["account"]["consumed_seconds"] == 500
+    assert payload["account"]["configured_consumed_seconds"] == 150
 
 
 def test_json_reserve_zero_when_unset() -> None:

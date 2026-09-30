@@ -44,10 +44,12 @@ class MockIBMQuantumAPIClient:
     def _build_account(self, account_id: str, plan: Plan = Plan.PAYGO) -> AccountPlan:
         if account_id not in self._account_params:
             raise ValueError(f"Account {account_id} not found in mock data")
-        params = self._account_params[account_id]
+        params = dict(self._account_params[account_id])
         instances = tuple(
             self.instances[crn] for crn in self._account_instances.get(account_id, []) if crn in self.instances
         )
+        if params["consumed_seconds"] is None:
+            params["consumed_seconds"] = sum(i.consumed_seconds for i in instances)
         return AccountPlan(account_id=account_id, plan=plan, limit_seconds=None, instances=instances, **params)
 
     def setup_account(
@@ -55,11 +57,17 @@ class MockIBMQuantumAPIClient:
         account_id: str,
         allocation_budget_seconds: int,
         unallocated_seconds: int = 0,
+        consumed_seconds: int | None = None,
     ) -> AccountPlan:
-        """Setup a mock account for testing."""
+        """Setup a mock account for testing.
+
+        `consumed_seconds` is the plan-wide 28-day usage. It defaults to the sum over the
+        account's mock instances, i.e. as if every instance on the plan were configured.
+        """
         self._account_params[account_id] = {
             "allocation_budget_seconds": allocation_budget_seconds,
             "unallocated_seconds": unallocated_seconds,
+            "consumed_seconds": consumed_seconds,
         }
         self._account_instances.setdefault(account_id, [])
         return self._build_account(account_id)
@@ -162,6 +170,10 @@ class MockIBMQuantumAPIClient:
         if instance_crn not in self.instances:
             raise ValueError(f"Instance {instance_crn} not found in mock data")
         return self.instances[instance_crn].consumed_seconds
+
+    def get_plan_usage_seconds(self, plan: Plan, start_date: datetime, end_date: datetime, account_id: str) -> int:
+        """Return the plan-wide usage set up via `setup_account`, ignoring the date range."""
+        return self._build_account(account_id, plan=plan).consumed_seconds
 
     def update_instance_parameters(
         self,

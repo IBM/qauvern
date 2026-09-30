@@ -79,7 +79,7 @@ class AllocationOptimizer:
         elif usage_floor_relax_above_percent >= 100:
             self._usage_floor_relaxed = False
         else:
-            usage_percent = account.configured_consumed_seconds / account.allocation_budget_seconds * 100
+            usage_percent = account.consumed_seconds / account.allocation_budget_seconds * 100
             self._usage_floor_relaxed = usage_percent > usage_floor_relax_above_percent
 
         self.today = today or datetime.now(timezone.utc).date()
