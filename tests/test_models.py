@@ -135,6 +135,39 @@ def test_account_configured_consumed_seconds_is_sum_of_instances() -> None:
     assert account.configured_consumed_seconds == 250000
 
 
+def _account_plan(*, allocation_budget_seconds: int, consumed_seconds: int) -> AccountPlan:
+    return AccountPlan(
+        account_id="test-account",
+        plan=Plan.PAYGO,
+        allocation_budget_seconds=allocation_budget_seconds,
+        unallocated_seconds=0,
+        consumed_seconds=consumed_seconds,
+        limit_seconds=None,
+        instances=(),
+    )
+
+
+def test_over_allocation_budget_false_when_under() -> None:
+    account = _account_plan(allocation_budget_seconds=1000, consumed_seconds=999)
+    assert account.over_allocation_budget is False
+
+
+def test_over_allocation_budget_true_at_exact_threshold() -> None:
+    account = _account_plan(allocation_budget_seconds=1000, consumed_seconds=1000)
+    assert account.over_allocation_budget is True
+
+
+def test_over_allocation_budget_true_above_threshold() -> None:
+    account = _account_plan(allocation_budget_seconds=1000, consumed_seconds=1001)
+    assert account.over_allocation_budget is True
+
+
+def test_over_allocation_budget_true_when_budget_is_zero() -> None:
+    """A zero budget always counts as over, since there's nothing to be under."""
+    account = _account_plan(allocation_budget_seconds=0, consumed_seconds=0)
+    assert account.over_allocation_budget is True
+
+
 def test_account_unmanaged_allocation_seconds() -> None:
     """target − available − sum(loaded allocations) = allocation held by unloaded instances."""
     loaded = InstanceState(

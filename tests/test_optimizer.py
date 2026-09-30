@@ -231,22 +231,26 @@ def test_validate_allocations_includes_unmanaged() -> None:
 
 
 def test_optimize_in_debt_account_overruns_budget_with_consumed_floor_diagnostic() -> None:
-    """Floors driven by consumed_seconds: diagnostic blames 28-day usage and tells
-    the operator to raise the budget (config can't lower the floor)."""
-    # budget=100, unallocated=10. consumed (80, 70) ≥ min_alloc=60 so floors come
-    # from consumed_seconds and sum to 150 > 100. raw_pool is negative → pool=0.
+    """Floors driven by consumed_seconds: diagnostic blames 28-day usage and offers
+    no fix (config can't lower the floor)."""
+    # budget=200, usage 150 < 200 so under budget. consumed (80, 70) ≥ min_alloc=60
+    # so floors come from consumed_seconds and sum to 150; with 60 held by an
+    # unconfigured instance that's 210 > 200. raw_pool is negative → pool=0.
     a = _inactive_instance("crn:a", allocation=50, consumed=80)
     b = _inactive_instance("crn:b", allocation=40, consumed=70)
-    optimizer = AllocationOptimizer(_make_account(100, a, b), [_make_config("crn:a"), _make_config("crn:b")])
+    unconfigured = _inactive_instance("crn:u", allocation=60)
+    optimizer = AllocationOptimizer(
+        _make_account(200, a, b, unconfigured), [_make_config("crn:a"), _make_config("crn:b")]
+    )
 
     result = optimizer.optimize()
     projected = _projected(result, optimizer.account)
-    assert projected == {"crn:a": 80, "crn:b": 70}
+    assert projected == {"crn:a": 80, "crn:b": 70, "crn:u": 60}
 
     is_valid, errors = optimizer.validate_allocations(result)
     assert not is_valid
     msg = next(e for e in errors if "account budget" in e)
-    assert "exceed the 100s account budget by 50s" in msg
+    assert "exceed the 200s account budget by 10s" in msg
     assert "Driven by: 28-day usage requires 150s" in msg
     assert "minimum_allocation_seconds" not in msg
     # Consumed usage is the sole driver and no knob is in play: no fix is offered
@@ -284,16 +288,20 @@ def test_optimize_floor_tie_attributes_to_consumed_seconds() -> None:
 
     Diagnostic should blame 28-day usage (the unfixable source) rather than the config knob.
     """
-    # budget=100, two instances each with consumed=60 == min_alloc=60. floors sum to 120 > 100.
+    # budget=150, two instances each with consumed=60 == min_alloc=60, plus 40 on an
+    # unconfigured instance. floors sum to 120 + 40 = 160 > 150.
     a = _inactive_instance("crn:a", allocation=50, consumed=60)
     b = _inactive_instance("crn:b", allocation=50, consumed=60)
-    optimizer = AllocationOptimizer(_make_account(100, a, b), [_make_config("crn:a"), _make_config("crn:b")])
+    unconfigured = _inactive_instance("crn:u", allocation=40)
+    optimizer = AllocationOptimizer(
+        _make_account(150, a, b, unconfigured), [_make_config("crn:a"), _make_config("crn:b")]
+    )
 
     result = optimizer.optimize()
     is_valid, errors = optimizer.validate_allocations(result)
     assert not is_valid
     msg = next(e for e in errors if "account budget" in e)
-    assert "exceed the 100s account budget by 20s" in msg
+    assert "exceed the 150s account budget by 10s" in msg
     assert "Driven by: 28-day usage requires 120s" in msg
     assert "minimum_allocation_seconds" not in msg
     assert "To fix:" not in msg
@@ -366,11 +374,11 @@ def test_validate_allocations_reserve_fails_when_floors_exceed_cap() -> None:
 
     The reserve is a fixed fraction of the account budget, so it does not go silent
     just because the movable pool is empty. budget=100, reserve=50% → cap=50, but the
-    instance is parked at its consumed floor of 100 > 50, so the reserve cannot be
+    instance is parked at its consumed floor of 80 > 50, so the reserve cannot be
     honored and invariant 2 fires.
     """
-    # Only managed instance is parked at its consumed floor; unallocated=0 (account is full).
-    inst = _make_instance("crn:a", 100, consumed=100)
+    # Only managed instance is held above its consumed floor; unallocated=0 (account is full).
+    inst = _make_instance("crn:a", 100, consumed=80)
     account = AccountPlan(
         account_id="test",
         plan=Plan.PAYGO,
@@ -387,7 +395,7 @@ def test_validate_allocations_reserve_fails_when_floors_exceed_cap() -> None:
     # The reserve is unachievable, not just overshot: floors alone overflow the cap.
     # The message says it's unavoidable, names the reserve in the cap, and the driver.
     assert "exceed the 50s cap (100s account budget − 50s reserve at 50.0%) by 50s" in msg
-    assert "Driven by: 28-day usage requires 100s" in msg
+    assert "Driven by: 28-day usage requires 80s" in msg
     assert "To fix: lower allocation_reserve_percent." in msg
 
 
@@ -440,110 +448,12 @@ def test_validate_allocations_usage_floor_violation() -> None:
     assert any("28-day usage" in e for e in errors)
 
 
-def test_validate_allocations_usage_floor_skipped_when_relaxed() -> None:
-    """With the usage floor relaxed, new_allocation below consumed_seconds is not an error."""
-    inst = _make_instance("crn:a", 200, consumed=150)
-    optimizer = AllocationOptimizer(
-        _make_account(1000, inst), [_make_config("crn:a")], usage_floor_relax_above_percent=0.0
-    )
-    chg = AllocationChange(current=200, new=100, reason="t")
-    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
-    assert is_valid, errors
-
-
-def test_floor_ignores_consumed_seconds_when_relaxed() -> None:
-    """With the usage floor relaxed, _floor() never returns the consumed_seconds source."""
-    inst = _make_instance("crn:a", 200, consumed=150)
-    optimizer = AllocationOptimizer(
-        _make_account(1000, inst),
-        [_make_config("crn:a")],
-        minimum_allocation_seconds=60,
-        usage_floor_relax_above_percent=0.0,
-    )
-    floor = optimizer._floor(inst)
-    assert floor.source == "minimum_allocation_seconds"
-    assert floor.value == 60
-
-
-def test_usage_floor_warnings_empty_when_enforced() -> None:
-    """usage_floor_warnings is always empty when the usage floor is enforced (errors instead)."""
+def test_usage_floor_warnings_empty_when_under_budget() -> None:
+    """usage_floor_warnings is always empty under budget (errors instead)."""
     inst = _make_instance("crn:a", 200, consumed=150)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
     chg = AllocationChange(current=200, new=100, reason="t")
     assert optimizer.usage_floor_warnings(OptimizationResult({"crn:a": chg}, {})) == []
-
-
-def test_usage_floor_warnings_reported_when_relaxed() -> None:
-    """usage_floor_warnings surfaces instances below usage when the usage floor is relaxed."""
-    inst = _make_instance("crn:a", 200, consumed=150)
-    optimizer = AllocationOptimizer(
-        _make_account(1000, inst), [_make_config("crn:a")], usage_floor_relax_above_percent=0.0
-    )
-    chg = AllocationChange(current=200, new=100, reason="t")
-    warnings = optimizer.usage_floor_warnings(OptimizationResult({"crn:a": chg}, {}))
-    assert len(warnings) == 1
-    assert "28-day usage" in warnings[0]
-
-
-def test_usage_floor_warnings_none_when_no_breach() -> None:
-    """usage_floor_warnings is empty when relaxed but no instance falls below usage."""
-    inst = _make_instance("crn:a", 200, consumed=100)
-    optimizer = AllocationOptimizer(
-        _make_account(1000, inst), [_make_config("crn:a")], usage_floor_relax_above_percent=0.0
-    )
-    assert optimizer.usage_floor_warnings(OptimizationResult({}, {})) == []
-
-
-def test_usage_floor_still_enforced_at_exact_threshold() -> None:
-    """The floor stays enforced when consumed/budget lands exactly on the configured percent (>)."""
-    inst = _make_instance("crn:a", 200, consumed=150)
-    # consumed_seconds across account = 150; budget = 1000 -> 15% usage.
-    optimizer = AllocationOptimizer(
-        _make_account(1000, inst),
-        [_make_config("crn:a")],
-        minimum_allocation_seconds=60,
-        usage_floor_relax_above_percent=15.0,
-    )
-    floor = optimizer._floor(inst)
-    assert floor.source == "consumed_seconds"
-    assert floor.value == 150
-
-
-def test_usage_floor_relaxed_just_above_threshold() -> None:
-    """The floor relaxes once consumed/budget exceeds the configured percent."""
-    inst = _make_instance("crn:a", 200, consumed=150)
-    optimizer = AllocationOptimizer(
-        _make_account(1000, inst),
-        [_make_config("crn:a")],
-        minimum_allocation_seconds=60,
-        usage_floor_relax_above_percent=14.9,
-    )
-    floor = optimizer._floor(inst)
-    assert floor.source == "minimum_allocation_seconds"
-    assert floor.value == 60
-
-
-def test_usage_floor_relax_threshold_uses_plan_wide_usage() -> None:
-    """Usage by unconfigured instances counts toward the relax threshold."""
-    inst = _make_instance("crn:a", 200, consumed=100)
-    # Configured usage is 10% of budget, but plan-wide usage is 50%.
-    optimizer = AllocationOptimizer(
-        _make_account(1000, inst, consumed=500),
-        [_make_config("crn:a")],
-        minimum_allocation_seconds=60,
-        usage_floor_relax_above_percent=20.0,
-    )
-    floor = optimizer._floor(inst)
-    assert floor.source == "minimum_allocation_seconds"
-
-
-def test_usage_floor_relaxed_when_budget_is_zero() -> None:
-    """A zero allocation_budget_seconds relaxes the floor instead of raising ZeroDivisionError."""
-    inst = _make_instance("crn:a", 0, consumed=0)
-    optimizer = AllocationOptimizer(_make_account(0, inst), [_make_config("crn:a")], minimum_allocation_seconds=60)
-    floor = optimizer._floor(inst)
-    assert floor.source == "minimum_allocation_seconds"
-    assert floor.value == 60
 
 
 # ---------------------------------------------------------------------------
@@ -1155,6 +1065,313 @@ def test_end_to_end_mixed_passes_validation(mixed_account: tuple[AccountPlan, li
     assert projected["crn:active_med_capped"] <= 400_000
     # High-activity instance soaks up most of the headroom.
     assert projected["crn:active_high"] > account.instances[0].allocation_seconds
+
+
+# ---------------------------------------------------------------------------
+# Over-budget regime: plan-wide usage >= allocation budget
+#
+# Allocation is capped at 28-day usage so fairness stays >= 1.0, and instances
+# whose usage reached their limit drop to the minimum.
+# ---------------------------------------------------------------------------
+
+
+def _fairness(result: OptimizationResult, account: AccountPlan) -> dict[str, float]:
+    projected = _projected(result, account)
+    return {inst.crn: inst.consumed_seconds / projected[inst.crn] for inst in account.instances}
+
+
+def test_over_budget_worked_example() -> None:
+    """The README example: inst-1 reached its limit, which frees headroom, the others land at fairness 1.0."""
+    inst_1 = _active_instance("crn:1", allocation=500, consumed=500, limit=500, consumed_24h=100)
+    inst_2 = _active_instance("crn:2", allocation=345, consumed=400, limit=1000, consumed_24h=100)
+    inst_3 = _active_instance("crn:3", allocation=155, consumed=300, limit=1000, consumed_24h=100)
+    account = _make_account(1000, inst_1, inst_2, inst_3, consumed=1200)
+    optimizer = AllocationOptimizer(account, [_make_config("crn:1"), _make_config("crn:2"), _make_config("crn:3")])
+    assert optimizer.account_over_budget
+
+    result = optimizer.optimize()
+
+    assert _projected(result, account) == {"crn:1": 60, "crn:2": 400, "crn:3": 300}
+    fairness = _fairness(result, account)
+    assert fairness["crn:2"] == fairness["crn:3"] == 1.0
+    assert optimizer.limit_reached_crns == {"crn:1"}
+    assert "Limit reached" in result.allocation_changes["crn:1"].reason
+    assert "capped at 28d usage" in result.allocation_changes["crn:2"].reason
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+    assert optimizer.usage_floor_warnings(result) == []
+
+
+def test_over_budget_starts_when_usage_equals_budget() -> None:
+    inst = _active_instance("crn:a", allocation=500, consumed=400)
+    optimizer = AllocationOptimizer(_make_account(1000, inst, consumed=1000), [_make_config("crn:a")])
+    assert optimizer.account_over_budget
+    assert _projected(optimizer.optimize(), optimizer.account)["crn:a"] == 400
+
+
+def test_under_budget_one_second_below() -> None:
+    inst = _active_instance("crn:a", allocation=500, consumed=400)
+    optimizer = AllocationOptimizer(_make_account(1000, inst, consumed=999), [_make_config("crn:a")])
+    assert not optimizer.account_over_budget
+    assert _projected(optimizer.optimize(), optimizer.account)["crn:a"] == 1000
+
+
+def test_over_budget_uses_plan_wide_usage() -> None:
+    """Usage by unconfigured instances counts toward the budget."""
+    inst = _active_instance("crn:a", allocation=500, consumed=100)
+    optimizer = AllocationOptimizer(_make_account(1000, inst, consumed=1000), [_make_config("crn:a")])
+    assert optimizer.account_over_budget
+
+
+def test_over_budget_when_budget_is_zero() -> None:
+    """A zero budget is over budget instead of raising ZeroDivisionError."""
+    inst = _make_instance("crn:a", 0, consumed=0)
+    optimizer = AllocationOptimizer(_make_account(0, inst), [_make_config("crn:a")], minimum_allocation_seconds=60)
+    assert optimizer.account_over_budget
+    assert optimizer._floor(inst).value == 60
+
+
+def test_over_budget_limit_reached_drops_to_minimum() -> None:
+    inst = _active_instance("crn:a", allocation=500, consumed=500, limit=500)
+    optimizer = AllocationOptimizer(_make_account(500, inst), [_make_config("crn:a")])
+
+    result = optimizer.optimize()
+
+    assert _projected(result, optimizer.account)["crn:a"] == 60
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+
+
+def test_under_budget_limit_reached_is_reported_and_pinned_at_usage() -> None:
+    inst = _active_instance("crn:a", allocation=500, consumed=500, limit=500)
+    other = _active_instance("crn:b", allocation=100, consumed=100)
+    account = _make_account(10_000, inst, other)
+    optimizer = AllocationOptimizer(account, [_make_config("crn:a"), _make_config("crn:b")])
+    assert not optimizer.account_over_budget
+
+    result = optimizer.optimize()
+
+    assert optimizer.limit_reached_crns == {"crn:a"}
+    assert _projected(result, account)["crn:a"] == 500
+    assert "crn:a" not in result.allocation_changes
+
+
+def test_over_budget_unused_instance_keeps_full_minimum() -> None:
+    """With no usage fairness is 0 anyway, so keep the minimum as a buffer rather than 1s."""
+    unused = _inactive_instance("crn:unused", allocation=300)
+    busy = _active_instance("crn:busy", allocation=700, consumed=2000)
+    account = _make_account(1000, unused, busy)
+    optimizer = AllocationOptimizer(account, [_make_config("crn:unused"), _make_config("crn:busy")])
+
+    result = optimizer.optimize()
+
+    assert _projected(result, account) == {"crn:unused": 60, "crn:busy": 940}
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+    warnings = optimizer.usage_floor_warnings(result)
+    assert len(warnings) == 1
+    assert "crn:unused" in warnings[0]
+    assert "fairness is below 1.0" in warnings[0]
+
+
+def test_over_budget_usage_below_minimum_drops_to_usage() -> None:
+    inst = _active_instance("crn:a", allocation=300, consumed=20)
+    optimizer = AllocationOptimizer(_make_account(1000, inst, consumed=1000), [_make_config("crn:a")])
+
+    result = optimizer.optimize()
+
+    assert _projected(result, optimizer.account)["crn:a"] == 20
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+    warnings = optimizer.usage_floor_warnings(result)
+    assert len(warnings) == 1
+    assert "below minimum_allocation_seconds" in warnings[0]
+
+
+def test_over_budget_usage_above_minimum_is_water_filled_up_to_usage() -> None:
+    """Water-fill still splits by score, but no instance goes past its usage."""
+    a = _active_instance("crn:a", allocation=500, consumed=900, consumed_24h=1)
+    b = _active_instance("crn:b", allocation=500, consumed=150, consumed_24h=1_000)
+    account = _make_account(1000, a, b)
+    optimizer = AllocationOptimizer(account, [_make_config("crn:a"), _make_config("crn:b")])
+
+    result = optimizer.optimize()
+
+    # b's score dominates, but it caps at its usage; the rest flows to a.
+    assert _projected(result, account) == {"crn:a": 850, "crn:b": 150}
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+
+
+def test_over_budget_never_archives() -> None:
+    """minimum_allocation_seconds=0 with no usage still yields 1s, never 0."""
+    unused = _inactive_instance("crn:unused", allocation=300)
+    busy = _active_instance("crn:busy", allocation=700, consumed=2000)
+    account = _make_account(1000, unused, busy)
+    optimizer = AllocationOptimizer(
+        account, [_make_config("crn:unused"), _make_config("crn:busy")], minimum_allocation_seconds=0
+    )
+
+    result = optimizer.optimize()
+
+    assert _projected(result, account)["crn:unused"] == 1
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+
+
+def test_over_budget_net_grant_lifts_limit_reached_on_the_same_run() -> None:
+    """A net grant raising the limit above usage means the instance can run again."""
+    inst = _active_instance("crn:a", allocation=500, consumed=500, limit=500)
+    grant = NetGrant(
+        start_date=datetime(2026, 4, 1, tzinfo=timezone.utc),
+        net_grant_seconds=1000,
+        end_date=datetime(2026, 4, 29, tzinfo=timezone.utc),
+    )
+    cfg = InstanceConfig(name="a", crn="crn:a", target_limit_seconds=500, net_grants=(grant,))
+    optimizer = AllocationOptimizer(_make_account(500, inst), [cfg], today=date(2026, 4, 1))
+
+    result = optimizer.optimize()
+
+    assert optimizer.limit_reached_crns == frozenset()
+    assert result.limit_changes["crn:a"].new == 1500
+    assert _projected(result, optimizer.account)["crn:a"] == 500
+
+
+def test_over_budget_every_instance_at_limit_leaves_leftover_unallocated() -> None:
+    a = _active_instance("crn:a", allocation=500, consumed=500, limit=500)
+    b = _active_instance("crn:b", allocation=500, consumed=600, limit=600)
+    account = _make_account(1000, a, b)
+    optimizer = AllocationOptimizer(account, [_make_config("crn:a"), _make_config("crn:b")])
+
+    result = optimizer.optimize()
+
+    assert _projected(result, account) == {"crn:a": 60, "crn:b": 60}
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+
+
+def test_over_budget_limit_below_minimum() -> None:
+    """An instance at its limit with usage below the minimum is held at its usage, not the minimum."""
+    inst = _active_instance("crn:a", allocation=500, consumed=30, limit=30)
+    optimizer = AllocationOptimizer(_make_account(1000, inst, consumed=1000), [_make_config("crn:a")])
+
+    result = optimizer.optimize()
+
+    assert optimizer.limit_reached_crns == {"crn:a"}
+    assert _projected(result, optimizer.account)["crn:a"] == 30
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+    warnings = optimizer.usage_floor_warnings(result)
+    assert len(warnings) == 1
+    assert "below minimum_allocation_seconds" in warnings[0]
+
+
+def test_over_budget_no_limit_never_reaches_limit() -> None:
+    inst = _active_instance("crn:a", allocation=500, consumed=2000)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
+
+    result = optimizer.optimize()
+
+    assert optimizer.limit_reached_crns == frozenset()
+    assert _projected(result, optimizer.account)["crn:a"] == 1000
+
+
+def test_over_budget_positive_score_with_no_usage_keeps_minimum() -> None:
+    """The 28-day and sub-window figures come from different endpoints and can disagree.
+
+    Sub-window usage gives a positive score, but 28-day usage of 0 caps water-fill at 0,
+    so the instance keeps its minimum like any unused instance.
+    """
+    inst = _active_instance("crn:a", allocation=500, consumed=0, consumed_24h=100)
+    optimizer = AllocationOptimizer(_make_account(1000, inst, consumed=1000), [_make_config("crn:a")])
+
+    result = optimizer.optimize()
+
+    assert _projected(result, optimizer.account)["crn:a"] == 60
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+
+
+def test_over_budget_with_reserve() -> None:
+    a = _active_instance("crn:a", allocation=500, consumed=2000)
+    account = _make_account(1000, a)
+    optimizer = AllocationOptimizer(account, [_make_config("crn:a")], allocation_reserve_percent=20.0)
+
+    result = optimizer.optimize()
+
+    assert _projected(result, account)["crn:a"] == 800
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+
+
+def test_over_budget_with_unmanaged_allocation() -> None:
+    managed = _active_instance("crn:m", allocation=300, consumed=2000)
+    unconfigured = _active_instance("crn:u", allocation=400, consumed=100)
+    account = _make_account(1000, managed, unconfigured)
+    optimizer = AllocationOptimizer(account, [_make_config("crn:m")])
+
+    result = optimizer.optimize()
+
+    assert "crn:u" not in result.allocation_changes
+    assert _projected(result, account)["crn:m"] == 600
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+
+
+def test_over_budget_single_instance_holding_whole_account() -> None:
+    inst = _active_instance("crn:a", allocation=1000, consumed=1500)
+    optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
+
+    result = optimizer.optimize()
+
+    assert result.allocation_changes == {}
+    is_valid, errors = optimizer.validate_allocations(result)
+    assert is_valid, errors
+
+
+def test_over_budget_validate_rejects_allocation_above_usage() -> None:
+    inst = _make_instance("crn:a", 200, consumed=150)
+    optimizer = AllocationOptimizer(_make_account(1000, inst, consumed=1000), [_make_config("crn:a")])
+    chg = AllocationChange(current=200, new=300, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
+    assert not is_valid
+    assert any("exceeds 28-day usage" in e for e in errors)
+
+
+def test_over_budget_validate_accepts_unused_instance_at_minimum() -> None:
+    inst = _make_instance("crn:a", 200, consumed=0)
+    optimizer = AllocationOptimizer(_make_account(1000, inst, consumed=1000), [_make_config("crn:a")])
+    chg = AllocationChange(current=200, new=60, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
+    assert is_valid, errors
+
+
+def test_over_budget_validate_rejects_below_lesser_of_minimum_and_usage() -> None:
+    inst = _make_instance("crn:a", 200, consumed=30)
+    optimizer = AllocationOptimizer(_make_account(1000, inst, consumed=1000), [_make_config("crn:a")])
+    chg = AllocationChange(current=200, new=20, reason="t")
+    is_valid, errors = optimizer.validate_allocations(OptimizationResult({"crn:a": chg}, {}))
+    assert not is_valid
+    assert any("below the lesser of minimum (60s) and 28-day usage (30s)" in e for e in errors)
+
+
+def test_over_budget_budget_breach_names_the_regime() -> None:
+    """Floors are all at most the minimum, so the diagnostic names the regime, not usage."""
+    a = _inactive_instance("crn:a", allocation=50)
+    b = _inactive_instance("crn:b", allocation=50)
+    optimizer = AllocationOptimizer(
+        _make_account(100, a, b, consumed=100),
+        [_make_config("crn:a"), _make_config("crn:b")],
+        minimum_allocation_seconds=80,
+    )
+
+    is_valid, errors = optimizer.validate_allocations(optimizer.optimize())
+
+    assert not is_valid
+    msg = next(e for e in errors if "account budget" in e)
+    assert "over its allocation budget, and floors require 160s" in msg
+    assert "28-day usage requires" not in msg
+    assert "To fix: lower minimum_allocation_seconds." in msg
 
 
 # ---------------------------------------------------------------------------

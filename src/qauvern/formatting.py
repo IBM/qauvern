@@ -41,8 +41,16 @@ def format_optional_seconds(seconds: int | None) -> str:
     return format_seconds(seconds)
 
 
-def format_fairness(fairness: float) -> str:
-    """Format fairness value with color indicators."""
+def format_fairness(fairness: float, *, over_allocation_budget: bool = False) -> str:
+    """Format fairness value with color indicators.
+
+    Once the account is over its allocation budget, fairness >= 1.0 is the goal
+    rather than a warning sign, so the colors flip.
+    """
+    if over_allocation_budget:
+        if fairness >= 1.0:
+            return click.style(f"{fairness:.2f} ✓", fg="green")
+        return click.style(f"{fairness:.2f} ⚠", fg="yellow")
     if fairness < 0.5:
         return click.style(f"{fairness:.2f} ✓", fg="green")
     elif fairness < 1.0:
@@ -100,6 +108,8 @@ def _truncate(text: str, max_len: int) -> str:
 
 def format_instance_summary_table(
     instances: Sequence[InstanceState],
+    *,
+    over_allocation_budget: bool = False,
 ) -> tuple[list[list[str]], list[str]]:
     """Build the summary table used by `show` and `instances`.
 
@@ -120,7 +130,7 @@ def format_instance_summary_table(
                 format_seconds(inst.consumed_seconds),
                 util_str,
                 format_optional_seconds(inst.limit_seconds),
-                format_fairness(inst.fairness),
+                format_fairness(inst.fairness, over_allocation_budget=over_allocation_budget),
             ]
         )
     return rows, headers

@@ -44,6 +44,7 @@ CSV_COLUMNS: tuple[str, ...] = (
     "consumed_24h",
     "fairness",
     "activity_score",
+    "limit_reached",
 )
 
 
@@ -56,6 +57,8 @@ class AnalyzeReport:
     instance_configs: tuple[InstanceConfig, ...]
     validation_errors: tuple[str, ...]
     usage_floor_warnings: tuple[str, ...]
+    account_over_budget: bool
+    limit_reached_crns: frozenset[str]
     allocation_reserve_percent: float
     redistribution_pool_seconds: int
     limit_breakdowns: dict[str, LimitBreakdown | None]
@@ -80,6 +83,8 @@ class AnalyzeReport:
             instance_configs=tuple(instance_configs),
             validation_errors=tuple(errors),
             usage_floor_warnings=tuple(warnings),
+            account_over_budget=optimizer.account_over_budget,
+            limit_reached_crns=optimizer.limit_reached_crns,
             allocation_reserve_percent=optimizer.allocation_reserve_percent,
             redistribution_pool_seconds=pool_seconds,
             limit_breakdowns=optimizer.limit_breakdowns,
@@ -111,6 +116,8 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         lines += ["", "=" * 80, "WARNINGS", "=" * 80]
         for warning in report.usage_floor_warnings:
             lines.append(f"⚠ {warning}")
+
+    lines += _format_over_budget_section(report)
 
     limit_str = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
 
@@ -166,6 +173,25 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         lines += ["", "✓ No optimization recommendations. Allocations are optimal."]
 
     return "\n".join(lines)
+
+
+def _format_over_budget_section(report: AnalyzeReport) -> list[str]:
+    """Explain the over-budget regime when it is in effect, or nothing otherwise."""
+    if not report.account_over_budget:
+        return []
+    lines = [
+        "",
+        "=" * 80,
+        "OVER ALLOCATION BUDGET",
+        "=" * 80,
+        "28-day usage has reached the allocation budget, so each instance's allocation is capped at",
+        "its 28-day usage: every instance with usage that can still run sits at fairness >= 1.0.",
+    ]
+    limit_reached = [inst for inst in report.account.instances if inst.crn in report.limit_reached_crns]
+    if limit_reached:
+        lines.append("These instances reached their limit, so they are held at the minimum allocation:")
+        lines += [f"  - {inst.name}" for inst in limit_reached]
+    return lines
 
 
 def _breakdown_payload(breakdown: LimitBreakdown | None) -> dict[str, Any] | None:
@@ -263,6 +289,7 @@ def format_analyze_json(report: AnalyzeReport) -> str:
                 "fairness": fairness,
                 "activity_score": inst.activity_score,
                 "limit_breakdown": _breakdown_payload(report.limit_breakdowns.get(inst.crn)),
+                "limit_reached": inst.crn in report.limit_reached_crns,
             }
         )
 
@@ -277,6 +304,7 @@ def format_analyze_json(report: AnalyzeReport) -> str:
             "configured_consumed_seconds": account.configured_consumed_seconds,
             "limit_seconds": account.limit_seconds,
             "unmanaged_allocation_seconds": account.unmanaged_allocation_seconds,
+            "over_allocation_budget": report.account_over_budget,
         },
         "reserve": {
             "percent": report.allocation_reserve_percent,
@@ -339,6 +367,7 @@ def format_analyze_csv(report: AnalyzeReport) -> str:
                 "limit_grant_funded": breakdown.grant_funded_seconds if breakdown is not None else "",
                 "limit_unspent_grant": breakdown.unspent_grant_seconds if breakdown is not None else "",
                 "limit_overage": breakdown.pre_boost_overage_seconds if breakdown is not None else "",
+                "limit_reached": inst.crn in report.limit_reached_crns,
             }
         )
     return buf.getvalue()

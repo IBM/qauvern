@@ -19,27 +19,57 @@ from .limit_resolver import LimitBreakdown, resolve_limit
 from .models import AccountPlan, AllocationChange, InstanceConfig, InstanceState, LimitChange, OptimizationResult
 
 FloorSource = Literal["consumed_seconds", "minimum_allocation_seconds"]
+CeilingSource = Literal["consumed_seconds", "effective_limit"]
 
 
 @dataclass(frozen=True)
 class Floor:
     """The minimum allocation we'll pin an instance to, and why.
 
-    `consumed_seconds` is the IBM Quantum hard floor — the API technically
-    does not enforce it, but pinning to it closes a queue-priority exploit:
-    dropping an instance's allocation below its usage frees allocation that
-    didn't actually exist as spare capacity, which can then be handed to
-    another instance to jump it to the front of the fair-share queue.
-    `usage_floor_relax_above_percent` (see AllocationOptimizer) disables this
-    floor once account usage crosses that percent of the account budget, for
-    accounts where the floor becomes unenforceable at that point.
+    While the account is under its allocation budget, an instance's allocation
+    never drops below its `consumed_seconds`.
+
+    Once the account is over its allocation budget (see AllocationOptimizer),
+    the invariant inverts: allocation is capped at usage (see `Ceiling`) so that
+    fairness stays >= 1.0. The floor is then `minimum_allocation_seconds`, except
+    that it drops to `consumed_seconds` when usage is below the minimum, since
+    honoring the minimum would leave fairness below 1.0. Unused instances keep
+    the full minimum: their fairness is 0 whatever the allocation, and the
+    minimum is a buffer for their first runs.
+
+    The floor also applies to instances that reached their limit (see
+    `AllocationOptimizer.limit_reached_crns`): holding more than their usage
+    would give allocation to an instance that cannot run. Keeping the floor
+    independent of the instance's limit this way also means
+    `redistribution_pool()` does not need usage data to resolve limits.
+
     `minimum_allocation_seconds` is a qauvern-level config knob that the
-    user can lower. Ties go to `consumed_seconds` so the user sees the
-    unfixable source first.
+    user can lower. Under budget, ties go to `consumed_seconds` so the user
+    sees the unfixable source first. Over budget, ties go to
+    `minimum_allocation_seconds`, since lowering it lowers the floor.
     """
 
     value: int
     source: FloorSource
+
+
+@dataclass(frozen=True)
+class Ceiling:
+    """The maximum allocation water-fill may award an instance, and why.
+
+    Under budget, the ceiling is the instance's effective limit (`source =
+    "effective_limit"`), above which it cannot run.
+
+    Over budget, the ceiling is instead the instance's 28-day usage (`source
+    = "consumed_seconds"`), so that every instance with usage keeps fairness
+    >= 1.0. This usage-based ceiling never exceeds the effective limit,
+    because an instance whose usage reached its limit is excluded from
+    water-fill entirely rather than given a `Ceiling` (see
+    `AllocationOptimizer.limit_reached_crns`).
+    """
+
+    value: int
+    source: CeilingSource
 
 
 class AllocationOptimizer:
@@ -51,37 +81,27 @@ class AllocationOptimizer:
         instance_configs: list[InstanceConfig],
         minimum_allocation_seconds: int = 60,
         allocation_reserve_percent: float = 0.0,
-        usage_floor_relax_above_percent: float = 100.0,
         today: date | None = None,
     ):
         """Initialize the optimizer.
+
+        Once the account is over its allocation budget (`AccountPlan.over_allocation_budget`),
+        the optimizer switches to the over-budget regime: see `Floor`, `Ceiling`, and
+        `limit_reached_crns`. The account *limit* plays no part: it is a separate, higher
+        ceiling above which nothing runs at all.
 
         Args:
             account: AccountPlan with instances to optimize
             instance_configs: List of instance configs with allocation constraints
             minimum_allocation_seconds: Minimum allocation to maintain for each instance (default: 60 seconds)
             allocation_reserve_percent: Fraction of available seconds to hold back from redistribution
-            usage_floor_relax_above_percent: Once account usage exceeds this percent of the account's
-                allocation budget (consumed_seconds / allocation_budget_seconds * 100), the invariant that
-                an instance's allocation must stay >= its consumed 28-day usage is relaxed. Defaults to 100,
-                a sentinel meaning the floor is always enforced, even for accounts already over budget.
-                Relaxing is only safe for accounts whose plan allows an instance's usage to exceed its
-                allocation (e.g. via an account limit set above the account allocation).
             today: Date to use for limit override resolution (defaults to today in UTC)
         """
         self.account = account
         self.instance_configs = instance_configs
         self.minimum_allocation_seconds = minimum_allocation_seconds
         self.allocation_reserve_percent = allocation_reserve_percent
-
-        if account.allocation_budget_seconds <= 0:
-            self._usage_floor_relaxed = True
-        elif usage_floor_relax_above_percent >= 100:
-            self._usage_floor_relaxed = False
-        else:
-            usage_percent = account.consumed_seconds / account.allocation_budget_seconds * 100
-            self._usage_floor_relaxed = usage_percent > usage_floor_relax_above_percent
-
+        self.account_over_budget = account.over_allocation_budget
         self.today = today or datetime.now(timezone.utc).date()
         self._configs = {config.crn: config for config in instance_configs}
 
@@ -94,13 +114,55 @@ class AllocationOptimizer:
         path) — computed lazily so callers that never touch this property are
         unaffected.
         """
-        managed = [inst for inst in self.account.instances if inst.crn in self._configs]
-        return {inst.crn: resolve_limit(self._configs[inst.crn], inst, self.today) for inst in managed}
+        return {inst.crn: resolve_limit(self._configs[inst.crn], inst, self.today) for inst in self._managed}
+
+    @cached_property
+    def effective_limits(self) -> dict[str, int | None]:
+        """Effective limit per managed instance: the resolved config limit, else the live IQP limit.
+
+        The resolved value wins so that a limit raised on this run (e.g. by a new
+        net grant) already counts, even though IQP still has the old one.
+        """
+        return {
+            inst.crn: breakdown.total
+            if (breakdown := self.limit_breakdowns[inst.crn]) is not None
+            else inst.limit_seconds
+            for inst in self._managed
+        }
+
+    @cached_property
+    def limit_reached_crns(self) -> frozenset[str]:
+        """Managed instances that cannot run because their usage reached their effective limit.
+
+        They are held at their floor and excluded from water-fill. In the
+        over-budget regime, that frees the allocation they held for instances
+        that can run. Under budget, their floor of `consumed_seconds` already
+        leaves them no room, so excluding them changes nothing.
+        """
+        return frozenset(
+            inst.crn
+            for inst in self._managed
+            if (limit := self.effective_limits[inst.crn]) is not None and inst.consumed_seconds >= limit
+        )
+
+    @cached_property
+    def _managed(self) -> list[InstanceState]:
+        return [inst for inst in self.account.instances if inst.crn in self._configs]
 
     def _floor(self, instance: InstanceState) -> Floor:
-        if not self._usage_floor_relaxed and instance.consumed_seconds >= self.minimum_allocation_seconds:
-            return Floor(instance.consumed_seconds, "consumed_seconds")
-        return Floor(self.minimum_allocation_seconds, "minimum_allocation_seconds")
+        # Never 0, which IQP treats as archiving the instance, even if the config
+        # sets minimum_allocation_seconds to 0.
+        minimum = Floor(max(1, self.minimum_allocation_seconds), "minimum_allocation_seconds")
+        consumed = Floor(instance.consumed_seconds, "consumed_seconds")
+        if not self.account_over_budget:
+            return consumed if consumed.value >= minimum.value else minimum
+        return consumed if 0 < consumed.value < minimum.value else minimum
+
+    def _ceiling(self, instance: InstanceState) -> Ceiling | None:
+        if self.account_over_budget:
+            return Ceiling(instance.consumed_seconds, "consumed_seconds")
+        limit = self.effective_limits[instance.crn]
+        return Ceiling(limit, "effective_limit") if limit is not None else None
 
     def redistribution_pool(self) -> tuple[int, int]:
         """Return (distributable_pool, reserve_amount) in seconds.
@@ -115,11 +177,10 @@ class AllocationOptimizer:
         can swallow the entire pool). Unlike the reserve, it is not a fixed fraction
         of anything — it is what water-fill is actually allowed to award.
         """
-        managed = [inst for inst in self.account.instances if inst.crn in self._configs]
         raw_pool = max(
             0,
             self.account.unallocated_seconds
-            + sum(inst.allocation_seconds - self._floor(inst).value for inst in managed),
+            + sum(inst.allocation_seconds - self._floor(inst).value for inst in self._managed),
         )
         reserve_amount = int(self.account.allocation_budget_seconds * self.allocation_reserve_percent / 100)
         distributable = max(0, raw_pool - reserve_amount)
@@ -131,53 +192,49 @@ class AllocationOptimizer:
         Algorithm:
         1. Resolve effective limit for each managed instance via resolve_limit.
         2. Categorize active (activity_score > 0) vs inactive (score == 0).
-        3. Pin every managed instance at floor = max(minimum_allocation_seconds,
-           consumed_seconds). Inactive instances stay there.
+           Instances whose usage reached their effective limit are treated as
+           inactive.
+        3. Pin every managed instance at its floor (see `_floor`). Inactive
+           instances stay there.
         4. Build the redistribution pool from unallocated headroom plus what
            managed instances hold above their floor, then withhold the
            budget-based reserve (allocation_budget * reserve_percent / 100) so
            total allocation stays under budget * (1 - reserve_percent / 100).
         5. Water-fill the pool across active instances proportional to activity
-           score. Instances that hit their effective limit drop out of the round
-           and the leftover flows to the rest. Leftover after all active
-           instances are capped stays unallocated.
+           score, up to each instance's ceiling (see `_ceiling`). Instances that
+           hit their ceiling drop out of the round and the leftover flows to the
+           rest. Leftover after all active instances are capped stays unallocated.
         6. Emit AllocationChange / LimitChange where the projected value differs
            from the live state.
         """
-        managed = [inst for inst in self.account.instances if inst.crn in self._configs]
-
-        effective_limits: dict[str, int | None] = {
-            inst.crn: limit_breakdown.total
-            if (limit_breakdown := self.limit_breakdowns[inst.crn]) is not None
-            else inst.limit_seconds
-            for inst in managed
-        }
 
         # First, set all instances to their floor. This sometimes increases the allocation
         # to ensure that we meet invariants like >=28-day consumption. Otherwise, it often
         # frees up allocation so that we can redistribute it later based on the activity score.
-        floors: dict[str, Floor] = {inst.crn: self._floor(inst) for inst in managed}
-        new_alloc: dict[str, int] = {crn: f.value for crn, f in floors.items()}
+        new_alloc: dict[str, int] = {inst.crn: self._floor(inst).value for inst in self._managed}
 
         pool, _ = self.redistribution_pool()
 
-        active = [inst for inst in managed if inst.activity_score > 0]
+        active = [inst for inst in self._managed if inst.activity_score > 0 and inst.crn not in self.limit_reached_crns]
         if active and pool > 0:
-            self._water_fill(active, pool, effective_limits, new_alloc)
+            caps = {
+                inst.crn: ceiling.value if (ceiling := self._ceiling(inst)) is not None else None for inst in active
+            }
+            self._water_fill(active, pool, caps, new_alloc)
 
         allocation_changes: dict[str, AllocationChange] = {}
-        for inst in managed:
+        for inst in self._managed:
             projected = new_alloc[inst.crn]
             if projected != inst.allocation_seconds:
                 allocation_changes[inst.crn] = AllocationChange(
                     current=inst.allocation_seconds,
                     new=projected,
-                    reason=self._reason_for(inst, projected, effective_limits[inst.crn]),
+                    reason=self._reason_for(inst, projected),
                 )
 
         limit_changes = {
             inst.crn: LimitChange(current=inst.limit_seconds, new=limit_breakdown.total)
-            for inst in managed
+            for inst in self._managed
             if (limit_breakdown := self.limit_breakdowns[inst.crn]) is not None
             and limit_breakdown.total != inst.limit_seconds
         }
@@ -188,29 +245,25 @@ class AllocationOptimizer:
         self,
         active: list[InstanceState],
         pool: int,
-        effective_limits: dict[str, int | None],
+        caps: dict[str, int | None],
         new_alloc: dict[str, int],
     ) -> None:
-        """Distribute `pool` seconds across `active` proportional to activity score, capping at effective limit.
+        """Distribute `pool` seconds across `active` proportional to activity score, capping at `caps`.
 
-        Instances that hit their effective limit drop out of the candidate set and
-        their leftover share flows to the remaining candidates in the next round.
+        Instances that hit their cap drop out of the candidate set and their
+        leftover share flows to the remaining candidates in the next round.
         """
         scores = {inst.crn: inst.activity_score for inst in active}
         candidates = list(active)
         remaining = pool
 
         while remaining > 0 and candidates:
-            # Drop candidates with no room (new_alloc >= limit) before computing
+            # Drop candidates with no room (new_alloc >= cap) before computing
             # total_score. This can be true from the first round: new_alloc starts
-            # at each instance's floor (consumed_seconds), which can exceed the
-            # effective limit if target_limit_seconds was tightened below 28-day
-            # usage.
-            candidates = [
-                inst
-                for inst in candidates
-                if (limit := effective_limits[inst.crn]) is None or limit > new_alloc[inst.crn]
-            ]
+            # at each instance's floor, which can reach the cap, e.g. if
+            # target_limit_seconds was tightened below 28-day usage, or when an
+            # over-budget instance has less usage than minimum_allocation_seconds.
+            candidates = [inst for inst in candidates if (cap := caps[inst.crn]) is None or cap > new_alloc[inst.crn]]
             if not candidates:
                 break
 
@@ -222,12 +275,12 @@ class AllocationOptimizer:
             still_active: list[InstanceState] = []
             for inst in candidates:
                 share = int((scores[inst.crn] / total_score) * remaining)
-                limit = effective_limits[inst.crn]
-                room = (limit - new_alloc[inst.crn]) if limit is not None else share
+                cap = caps[inst.crn]
+                room = (cap - new_alloc[inst.crn]) if cap is not None else share
                 give = max(0, min(share, room))
                 new_alloc[inst.crn] += give
                 awarded += give
-                if limit is None or new_alloc[inst.crn] < limit:
+                if cap is None or new_alloc[inst.crn] < cap:
                     still_active.append(inst)
 
             remaining -= awarded
@@ -237,13 +290,16 @@ class AllocationOptimizer:
                 # round, so break.
                 break
 
-    def _reason_for(self, inst: InstanceState, projected: int, effective_limit: int | None) -> str:
+    def _reason_for(self, inst: InstanceState, projected: int) -> str:
+        floor_label = "28d usage" if self._floor(inst).source == "consumed_seconds" else "config minimum"
+        if inst.crn in self.limit_reached_crns:
+            return f"Limit reached — pinned to {floor_label}"
         if inst.activity_score == 0:
-            floor = self._floor(inst)
-            label = "28d usage" if floor.source == "consumed_seconds" else "config minimum"
-            return f"Inactive — pinned to {label}"
-        capped = effective_limit is not None and projected >= effective_limit
-        suffix = " — capped at limit" if capped else ""
+            return f"Inactive — pinned to {floor_label}"
+        ceiling = self._ceiling(inst)
+        suffix = ""
+        if ceiling is not None and projected >= ceiling.value:
+            suffix = " — capped at 28d usage" if ceiling.source == "consumed_seconds" else " — capped at limit"
         return f"Active (score {inst.activity_score:.1f}, fairness {inst.fairness:.2f}){suffix}"
 
     def _budget_breach_error(self, total_allocated: int, budget: int, reserve_amount: int) -> str:
@@ -263,6 +319,10 @@ class AllocationOptimizer:
         minimum, unmanaged instances) and offers the qauvern-owned knobs that can
         close the gap. Consumed usage and unmanaged allocation aren't user-fixable,
         so when neither knob is in play the message simply states the breach.
+
+        In the over-budget regime, 28-day usage never pushes a floor above the
+        config minimum, so rather than blaming usage, the message names the regime
+        with the total the floors require.
         """
         effective_budget = budget - reserve_amount
         over = total_allocated - effective_budget
@@ -275,7 +335,7 @@ class AllocationOptimizer:
         else:
             cap_expr = f"the {budget}s account budget"
 
-        floors = [self._floor(inst) for inst in self.account.instances if inst.crn in self._configs]
+        floors = [self._floor(inst) for inst in self._managed]
         floor_total = sum(f.value for f in floors)
         unmanaged = self.account.unmanaged_allocation_seconds
 
@@ -286,10 +346,16 @@ class AllocationOptimizer:
         min_alloc_bucket = floor_total - consumed_bucket
 
         drivers: list[str] = []
-        if consumed_bucket > 0:
-            drivers.append(f"28-day usage requires {consumed_bucket}s")
-        if min_alloc_bucket > 0:
-            drivers.append(f"minimum_allocation_seconds requires {min_alloc_bucket}s")
+        if self.account_over_budget:
+            drivers.append(
+                f"the account is over its allocation budget, and floors require {floor_total}s "
+                "(each instance's minimum_allocation_seconds, or its 28-day usage if lower)"
+            )
+        else:
+            if consumed_bucket > 0:
+                drivers.append(f"28-day usage requires {consumed_bucket}s")
+            if min_alloc_bucket > 0:
+                drivers.append(f"minimum_allocation_seconds requires {min_alloc_bucket}s")
         if unmanaged > 0:
             drivers.append(f"unmanaged instances hold {unmanaged}s")
 
@@ -297,7 +363,8 @@ class AllocationOptimizer:
         fixes: list[str] = []
         if reserve_amount > 0:
             fixes.append("lower allocation_reserve_percent")
-        if min_alloc_bucket > 0:
+        # Over budget, every floor is at most the minimum, so lowering it always helps.
+        if min_alloc_bucket > 0 or self.account_over_budget:
             fixes.append("lower minimum_allocation_seconds")
 
         message = f"Total instance allocations ({total_allocated}s) exceed {cap_expr} by {over}s."
@@ -308,24 +375,36 @@ class AllocationOptimizer:
         return message
 
     def usage_floor_warnings(self, result: OptimizationResult) -> list[str]:
-        """Warn about instances whose new_allocation falls below 28-day usage.
+        """Warn about instances the over-budget regime can't fully accommodate.
 
-        Only meaningful when the usage floor is relaxed — otherwise this
-        situation is a validate_allocations() error instead, not a warning. Callers
-        should print these to stderr; they aren't a reason to block applying changes.
+        Over budget, allocation is capped at 28-day usage so fairness stays >= 1.0.
+        That leaves two exceptions worth surfacing:
+
+        - Usage below minimum_allocation_seconds: the minimum is not honored.
+        - Allocation above usage, i.e. fairness below 1.0: in optimize() output,
+          only instances with no usage, whose fairness is 0 whatever the allocation.
+
+        Always empty under budget, where these situations are validate_allocations()
+        errors instead. Callers should print these to stderr; they aren't a reason
+        to block applying changes.
         """
-        if not self._usage_floor_relaxed:
+        if not self.account_over_budget:
             return []
         warnings = []
-        for inst in self.account.instances:
-            if inst.crn not in self._configs:
-                continue
+        for inst in self._managed:
             alloc_chg = result.allocation_changes.get(inst.crn)
             new_alloc = alloc_chg.new if alloc_chg is not None else inst.allocation_seconds
-            if new_alloc < inst.consumed_seconds:
+            if new_alloc < self.minimum_allocation_seconds:
                 warnings.append(
-                    f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below "
-                    f"28-day usage ({inst.consumed_seconds}s) — usage floor is relaxed"
+                    f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below minimum_allocation_seconds "
+                    f"({self.minimum_allocation_seconds}s) to keep fairness >= 1.0 while the account is over "
+                    "its allocation budget"
+                )
+            elif new_alloc > inst.consumed_seconds:
+                warnings.append(
+                    f"Instance {inst.crn}: new_allocation ({new_alloc}s) is above 28-day usage "
+                    f"({inst.consumed_seconds}s), so fairness is below 1.0 while the account is over its "
+                    "allocation budget"
                 )
         return warnings
 
@@ -334,13 +413,15 @@ class AllocationOptimizer:
 
         Checks (in order):
         1. Total projected allocation fits under the effective budget =  account budget − reserve.
-        2. Each managed instance's new_allocation >= its 28-day consumed usage (skipped
-           when the usage floor is relaxed).
-        3. Each managed instance's new_allocation >= minimum_allocation_seconds.
+        2. Each managed instance's new_allocation >= its 28-day consumed usage. In the
+           over-budget regime this inverts: new_allocation <= 28-day consumed usage,
+           unless the floor forces it higher (an instance with no usage).
+        3. Each managed instance's new_allocation >= minimum_allocation_seconds. In the
+           over-budget regime: new_allocation >= min(minimum_allocation_seconds,
+           28-day usage), and >= 1 (see invariant 5).
         4. Each managed instance's new_allocation <= its effective limit (if set),
-           unless invariants 2 or 3 force it higher: the floor max(consumed_seconds,
-           minimum_allocation_seconds) takes precedence, since a tightened limit
-           below that floor is an unavoidable, non-actionable breach.
+           unless the floor forces it higher, since a tightened limit below the floor
+           is an unavoidable, non-actionable breach.
         5. No managed instance's new_allocation is 0 (archiving is not allowed).
 
         Unmanaged instances (those not in self.account.instances) contribute their
@@ -372,33 +453,44 @@ class AllocationOptimizer:
             errors.append(self._budget_breach_error(total_allocated, budget, reserve_amount))
 
         # Invariants 2–5: per managed instance
-        for inst in self.account.instances:
-            if inst.crn not in self._configs:
-                continue
+        for inst in self._managed:
             alloc_chg = result.allocation_changes.get(inst.crn)
             new_alloc = alloc_chg.new if alloc_chg is not None else inst.allocation_seconds
+            floor = self._floor(inst).value
 
-            # Invariant 2: allocation >= 28-day usage
-            if not self._usage_floor_relaxed and new_alloc < inst.consumed_seconds:
+            # Invariant 2: allocation >= 28-day usage, or <= 28-day usage when over
+            # budget. The latter only fires when the breach exceeds the floor, like
+            # invariant 4, so an unused instance's minimum isn't reported.
+            if not self.account_over_budget and new_alloc < inst.consumed_seconds:
                 errors.append(
                     f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below "
                     f"28-day usage ({inst.consumed_seconds}s)"
                 )
+            if self.account_over_budget and new_alloc > inst.consumed_seconds and new_alloc > floor:
+                errors.append(
+                    f"Instance {inst.crn}: new_allocation ({new_alloc}s) exceeds 28-day usage "
+                    f"({inst.consumed_seconds}s) while the account is over its allocation budget"
+                )
 
-            # Invariant 3: allocation >= minimum_allocation_seconds
-            if new_alloc < self.minimum_allocation_seconds:
+            # Invariant 3: allocation >= minimum_allocation_seconds, relaxed to 28-day
+            # usage when over budget. A 0 result is left to invariant 5.
+            if not self.account_over_budget and new_alloc < self.minimum_allocation_seconds:
                 errors.append(
                     f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below "
                     f"minimum ({self.minimum_allocation_seconds}s)"
                 )
+            if self.account_over_budget and new_alloc < min(self.minimum_allocation_seconds, inst.consumed_seconds):
+                errors.append(
+                    f"Instance {inst.crn}: new_allocation ({new_alloc}s) is below the lesser of "
+                    f"minimum ({self.minimum_allocation_seconds}s) and 28-day usage ({inst.consumed_seconds}s)"
+                )
 
             # Invariant 4: allocation <= effective limit (limit_changes take precedence).
-            # Invariants 2 and 3 win: only fire when the breach exceeds the
-            # floor they would force, so a limit tightened below that floor
-            # doesn't surface as a separate, unactionable error.
+            # The floor wins: only fire when the breach exceeds it, so a limit
+            # tightened below the floor doesn't surface as a separate, unactionable
+            # error.
             limit_chg = result.limit_changes.get(inst.crn)
             effective_limit = limit_chg.new if limit_chg is not None else inst.limit_seconds
-            floor = max(self.minimum_allocation_seconds, inst.consumed_seconds if not self._usage_floor_relaxed else 0)
             if effective_limit is not None and new_alloc > effective_limit and new_alloc > floor:
                 errors.append(
                     f"Instance {inst.crn}: new_allocation ({new_alloc}s) exceeds effective limit ({effective_limit}s)"

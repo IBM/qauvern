@@ -36,11 +36,11 @@ For each managed instance:
 
 Then, account-wide:
 
-3. **Pin every managed instance to its floor.** The floor is `max(minimum_allocation_seconds, consumed_seconds_28d)` — we never reduce an instance below what it has already consumed in the rolling window, and we never go below the user-configured minimum. Inactive instances stay at the floor.
+3. **Pin every managed instance to its floor.** The floor is `max(minimum_allocation_seconds, consumed_seconds_28d)` — we never reduce an instance below what it has already consumed in the rolling window, and we never go below the user-configured minimum. Inactive instances stay at the floor. (The [over-budget regime](#over-budget-regime) uses a different floor.)
 4. **Build the redistribution pool** from unallocated headroom plus everything managed instances hold above their floor. If `allocation_reserve_percent` is set, withhold a fixed fraction of the total account budget (`allocation_budget_seconds × reserve_percent / 100`) from the pool so total allocation stays under `budget × (1 − reserve_percent / 100)`.
 5. **Use the water-fill algorithm to distribute the pool across active instances** proportional to activity score:
    - Each round, every active instance is offered `(score / total_score) * remaining_pool`.
-   - If an instance would exceed its effective limit, it takes only enough to reach the limit and drops out of the candidate set; the surplus from its proportional share flows to the remaining candidates in the next round.
+   - If an instance would exceed its cap, it takes only enough to reach the cap and drops out of the candidate set; the surplus from its proportional share flows to the remaining candidates in the next round. The cap is the effective limit, or 28-day usage in the [over-budget regime](#over-budget-regime).
    - When every active instance is capped by limits, leftover capacity stays unallocated rather than being forced onto any instance.
 6. **Apply changes to IBM Cloud** wherever the projected allocation or limit differs from the live state.
 
@@ -49,10 +49,31 @@ Then, account-wide:
 The optimizer validates the resulting plan against these invariants and refuses to apply changes that fail validation:
 
 1. Total projected allocation fits under the **effective budget** = `allocation_budget_seconds − reserve`, where `reserve = allocation_budget_seconds × reserve_percent / 100`.
-2. Each managed instance's new allocation is `>= consumed_seconds_28d`, unless the usage floor is relaxed via `usage_floor_relax_above_percent` (see below), in which case a warning is emitted instead.
-3. Each managed instance's new allocation is `>= minimum_allocation_seconds`.
-4. Each managed instance's new allocation is `<= effective limit`, unless invariants 2 or 3 force it higher (a limit tightened below the floor is an unavoidable, non-actionable breach and is not flagged here).
-5. No managed instance's new allocation is 0 (archiving is not allowed).
+2. Each managed instance's new allocation is `>= consumed_seconds_28d`. In the over-budget regime this inverts to `<= consumed_seconds_28d`, unless the floor forces it higher.
+3. Each managed instance's new allocation is `>= minimum_allocation_seconds`. In the over-budget regime: `>= min(minimum_allocation_seconds, consumed_seconds_28d)`.
+4. Each managed instance's new allocation is `<= effective limit`, unless the floor forces it higher (a limit tightened below the floor is an unavoidable, non-actionable breach and is not flagged here).
+5. No managed instance's new allocation is 0 (archiving is not allowed). The floor is always at least 1s, even if `minimum_allocation_seconds` is 0.
+
+### Over-budget regime
+
+Some plans let an account's usage exceed its allocation budget. Once the account's 28-day usage across every instance on the account+plan (including unconfigured ones, from `/v1/analytics/usage` filtered by `plan`) reaches `allocation_budget_seconds`, the optimizer switches regimes automatically. A zero budget always counts as over budget. The account *limit* plays no part: it is a separate, higher ceiling above which nothing runs at all.
+
+Once an account is over its allocation budget, every instance should have `fairness >= 1.0`. Since `fairness = usage / allocation`, the regime makes this structural by inverting invariant 2: allocation is capped at 28-day usage rather than floored at it. Water-fill still distributes by activity score, up to that cap, so a busy instance lands *at* 1.0 rather than far above it.
+
+An instance has **reached its limit** when its 28-day usage is at or above its effective limit, so it cannot run. These instances are excluded from water-fill and held at their floor, freeing allocation for instances that can run. (This exclusion applies under budget too, where it changes nothing: the floor of `consumed_seconds` already leaves no room.) The check reads the resolved limit, so if a net grant raises the limit above usage, the instance is no longer considered to have reached it, and becomes eligible for water-fill again on that same `optimize()` run.
+
+`minimum_allocation_seconds` is honored except where relaxing it buys `fairness >= 1.0`:
+
+| Case | Allocation | Fairness |
+| -- | -- | -- |
+| limit reached — `usage >= effective limit` | floor, as below; excluded from water-fill | `>= 1.0` when `usage >= min` |
+| `usage == 0` | `minimum_allocation_seconds` | 0, unavoidable |
+| `0 < usage < min` | `usage` | 1.0 |
+| `usage >= min` | floor `min`, water-filled up to a cap of `usage` | `>= 1.0` |
+
+So every instance with usage that has not reached its limit lands at `fairness >= 1.0`. The exceptions are unused instances, which keep the full minimum as a buffer for their first runs since dropping it gains nothing, and instances that reached their limit, whose allocation is irrelevant to the scheduler because they cannot run. `analyze` and `optimize` print a warning for each instance below the minimum or above its usage.
+
+The floor never depends on the instance's limit, so `redistribution_pool()` (used by `show`) does not need per-day usage data to resolve limits.
 
 ## Limit-centric configuration
 
@@ -61,10 +82,6 @@ Some clients manage consumption primarily via limits, rather than saturating all
 ### `allocation_reserve_percent` (account level)
 
 Holds back a percentage of the **total account budget** (`allocation_budget_seconds`) as a hard buffer: total allocation across all instances will never exceed `budget × (1 − reserve_percent / 100)`. The reserved amount stays unallocated and is not distributed to any instance. Because the reserve is anchored to the budget rather than the movable pool, the cap is predictable regardless of current allocations or usage. Defaults to 0 (no reserve). Must be in `[0, 100)`. Configured at the top level of the YAML.
-
-### `usage_floor_relax_above_percent` (account level)
-
-Controls whether an instance's allocation is pinned at or above its 28-day consumed usage (invariant 2 above). Pinning to consumed usage is a queue-priority exploit protection (see `optimizer.Floor` docstring), but it becomes unenforceable once total account usage can legitimately exceed `allocation_budget_seconds`. This field is a percent threshold: once `consumed_seconds / allocation_budget_seconds * 100` exceeds it (where `consumed_seconds` is the 28-day usage of every instance on the account+plan, including unconfigured ones, from `/v1/analytics/usage` filtered by `plan`), the floor relaxes to `minimum_allocation_seconds` only, and `optimize`/`analyze` print a warning instead of a validation error when an instance's allocation lands below its usage. Defaults to `100`, a sentinel meaning the floor is always enforced, even for accounts already over budget. Setting it to `0` disables the floor unconditionally. Must be in `[0, 100]`.
 
 ### `limit_seconds` (instance level)
 
@@ -85,7 +102,7 @@ An expired grant does **not** immediately vanish from the effective limit. Becau
 - Attribution is **grant-first** (a day's usage is charged to the grants live that day before the base limit), which makes the guarantee exact: once no grant is active, `breakdown.total - in-window usage` reduces to `InstanceConfig.target_limit_seconds - sum(attribution.base_seconds_in_window.values())`, so spending grant time cannot consume base capacity. Charging base first would break it — base 10 with a grant of 100 fully spent would bill 10 to the base limit, leaving 0 available for up to 28 days.
 - The identity does not hold while a grant is still **active**, and should not: the instance can also draw on that grant's undrawn budget, so available is higher by that plus any pre-boost overage.
 - A cliff legitimately remains at expiry for the **unspent** portion; only usage a grant actually funded carries over.
-- The limit written to IQP stays above `limit_seconds` for up to 28 days after `end_date`, keeping `optimizer._water_fill`'s cap elevated that long. That is load-bearing: `_floor` pins allocation at `consumed_seconds`, which stays high for the same 28 days, so snapping the limit back at `end_date` would leave the floor above the cap. On a grant longer than the window the limit also declines mid-grant as budget is drawn, so `optimize` writes a shrinking limit rather than a flat one.
+- The limit written to IQP stays above `limit_seconds` for up to 28 days after `end_date`, keeping `optimizer._water_fill`'s cap elevated that long. That is load-bearing: under budget, `_floor` pins allocation at `consumed_seconds`, which stays high for the same 28 days, so snapping the limit back at `end_date` would leave the floor above the cap. In the over-budget regime, it would instead leave the instance at its limit, so it could not run. On a grant longer than the window the limit also declines mid-grant as budget is drawn, so `optimize` writes a shrinking limit rather than a flat one.
 
 ### `resolve_limit`
 
