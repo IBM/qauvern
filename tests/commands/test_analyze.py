@@ -161,7 +161,7 @@ def test_from_optimizer_no_validation_errors_when_valid() -> None:
     assert report.validation_errors == ()
 
 
-def test_from_optimizer_usage_floor_warning_when_over_budget() -> None:
+def test_from_optimizer_over_budget_warning() -> None:
     inst = _make_instance(CRN_A, allocation=200, consumed=30)
     # Unconfigured instances account for the rest of the plan-wide usage.
     account = _make_account((inst,), budget=1000, unallocated=800, consumed=1000)
@@ -172,15 +172,15 @@ def test_from_optimizer_usage_floor_warning_when_over_budget() -> None:
     report = _report(account, result, [cfg], optimizer)
     assert report.account.over_allocation_budget
     assert report.validation_errors == ()
-    assert len(report.usage_floor_warnings) == 1
-    assert "below minimum_allocation_seconds" in report.usage_floor_warnings[0]
+    assert len(report.over_budget_warnings) == 1
+    assert "below minimum_allocation_seconds" in report.over_budget_warnings[0]
 
 
 def test_from_optimizer_not_over_budget() -> None:
     account, result, cfgs, optimizer = _no_changes_setup()
     report = _report(account, result, cfgs, optimizer)
     assert not report.account.over_allocation_budget
-    assert report.usage_floor_warnings == ()
+    assert report.over_budget_warnings == ()
 
 
 def test_from_optimizer_pool_zero_when_reserve_zero() -> None:
@@ -542,7 +542,7 @@ def test_json_top_level_keys_present() -> None:
         "account",
         "reserve",
         "validation_errors",
-        "usage_floor_warnings",
+        "over_budget_warnings",
         "instances",
     }
 

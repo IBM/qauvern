@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - qauvern now automatically detects when an account's usage has exceeded its allocation budget and keeps optimizing instead of refusing to apply changes: it caps each instance's allocation at its 28-day usage (so fairness stays `>= 1.0`) and reallocates from instances that have hit their limit and can no longer run to those that can. See [When Usage Exceeds the Allocation Budget](README.md#when-usage-exceeds-the-allocation-budget). `analyze` and `show` report this regime and the account's full 28-day usage (including unconfigured instances); see the README for format-specific details.
 - Removed `usage_floor_relax_above_percent`, as it is superseded by the automatic behavior above.
+- In `analyze --format json`, renamed `usage_floor_warnings` to `over_budget_warnings`.
 - In `analyze --format json`, `account.consumed_seconds` now includes usage by unconfigured instances. The previous value, which only counted configured instances, is now `account.configured_consumed_seconds`.
 
 ## [0.13.0] - 2026-08-10

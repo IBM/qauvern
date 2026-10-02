@@ -376,7 +376,7 @@ class AllocationOptimizer:
             message += f" To fix: {' and/or '.join(fixes)}."
         return message
 
-    def usage_floor_warnings(self, result: OptimizationResult) -> list[str]:
+    def over_budget_warnings(self, result: OptimizationResult) -> list[str]:
         """Warn about instances the over-budget regime can't fully accommodate.
 
         Over budget, allocation is capped at 28-day usage so fairness stays >= 1.0.

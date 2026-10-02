@@ -56,7 +56,7 @@ class AnalyzeReport:
     result: OptimizationResult
     instance_configs: tuple[InstanceConfig, ...]
     validation_errors: tuple[str, ...]
-    usage_floor_warnings: tuple[str, ...]
+    over_budget_warnings: tuple[str, ...]
     limit_reached_crns: frozenset[str]
     allocation_reserve_percent: float
     redistribution_pool_seconds: int
@@ -72,7 +72,7 @@ class AnalyzeReport:
         optimizer: AllocationOptimizer,
     ) -> "AnalyzeReport":
         _, errors = optimizer.validate_allocations(result)
-        warnings = optimizer.usage_floor_warnings(result)
+        warnings = optimizer.over_budget_warnings(result)
         pool_seconds = 0
         if optimizer.allocation_reserve_percent > 0:
             pool_seconds, _ = optimizer.redistribution_pool()
@@ -81,7 +81,7 @@ class AnalyzeReport:
             result=result,
             instance_configs=tuple(instance_configs),
             validation_errors=tuple(errors),
-            usage_floor_warnings=tuple(warnings),
+            over_budget_warnings=tuple(warnings),
             limit_reached_crns=optimizer.limit_reached_crns,
             allocation_reserve_percent=optimizer.allocation_reserve_percent,
             redistribution_pool_seconds=pool_seconds,
@@ -110,9 +110,9 @@ def format_analyze_table(report: AnalyzeReport) -> str:
         for error in report.validation_errors:
             lines.append(f"❌ {error}")
 
-    if report.usage_floor_warnings:
+    if report.over_budget_warnings:
         lines += ["", "=" * 80, "WARNINGS", "=" * 80]
-        for warning in report.usage_floor_warnings:
+        for warning in report.over_budget_warnings:
             lines.append(f"⚠ {warning}")
 
     lines += _format_over_budget_section(report)
@@ -311,7 +311,7 @@ def format_analyze_json(report: AnalyzeReport) -> str:
             "distributable_pool_seconds": report.redistribution_pool_seconds,
         },
         "validation_errors": list(report.validation_errors),
-        "usage_floor_warnings": list(report.usage_floor_warnings),
+        "over_budget_warnings": list(report.over_budget_warnings),
         "instances": instances,
     }
     return json.dumps(payload, indent=2)

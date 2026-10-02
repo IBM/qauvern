@@ -389,7 +389,7 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str, preview_d
     if fmt == "csv":
         for error in report.validation_errors:
             click.echo(f"Warning: {error}", err=True)
-        for warning in report.usage_floor_warnings:
+        for warning in report.over_budget_warnings:
             click.echo(f"Warning: {warning}", err=True)
         click.echo(format_analyze_csv(report), nl=False)
     elif fmt == "json":
@@ -453,7 +453,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
             click.echo(f"❌ {err}", err=True)
         raise click.ClickException("Validation failed; refusing to apply changes.")
 
-    for warning in optimizer.usage_floor_warnings(result):
+    for warning in optimizer.over_budget_warnings(result):
         click.echo(f"Warning: {warning}", err=True)
 
     if not result.allocation_changes and not result.limit_changes:

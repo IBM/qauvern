@@ -448,12 +448,12 @@ def test_validate_allocations_usage_floor_violation() -> None:
     assert any("28-day usage" in e for e in errors)
 
 
-def test_usage_floor_warnings_empty_when_under_budget() -> None:
-    """usage_floor_warnings is always empty under budget (errors instead)."""
+def test_over_budget_warnings_empty_when_under_budget() -> None:
+    """over_budget_warnings is always empty under budget (errors instead)."""
     inst = _make_instance("crn:a", 200, consumed=150)
     optimizer = AllocationOptimizer(_make_account(1000, inst), [_make_config("crn:a")])
     chg = AllocationChange(current=200, new=100, reason="t")
-    assert optimizer.usage_floor_warnings(OptimizationResult({"crn:a": chg}, {})) == []
+    assert optimizer.over_budget_warnings(OptimizationResult({"crn:a": chg}, {})) == []
 
 
 # ---------------------------------------------------------------------------
@@ -1110,7 +1110,7 @@ def test_over_budget_worked_example() -> None:
     assert "capped at 28d usage" in result.allocation_changes["crn:2"].reason
     is_valid, errors = optimizer.validate_allocations(result)
     assert is_valid, errors
-    assert optimizer.usage_floor_warnings(result) == []
+    assert optimizer.over_budget_warnings(result) == []
 
 
 def test_over_budget_starts_when_usage_equals_budget() -> None:
@@ -1178,7 +1178,7 @@ def test_over_budget_unused_instance_keeps_full_minimum() -> None:
     assert _projected(result, account) == {"crn:unused": 60, "crn:busy": 940}
     is_valid, errors = optimizer.validate_allocations(result)
     assert is_valid, errors
-    warnings = optimizer.usage_floor_warnings(result)
+    warnings = optimizer.over_budget_warnings(result)
     assert len(warnings) == 1
     assert "crn:unused" in warnings[0]
     assert "fairness is below 1.0" in warnings[0]
@@ -1193,7 +1193,7 @@ def test_over_budget_usage_below_minimum_drops_to_usage() -> None:
     assert _projected(result, optimizer.account)["crn:a"] == 20
     is_valid, errors = optimizer.validate_allocations(result)
     assert is_valid, errors
-    warnings = optimizer.usage_floor_warnings(result)
+    warnings = optimizer.over_budget_warnings(result)
     assert len(warnings) == 1
     assert "below minimum_allocation_seconds" in warnings[0]
 
@@ -1271,7 +1271,7 @@ def test_over_budget_limit_below_minimum() -> None:
     assert _projected(result, optimizer.account)["crn:a"] == 30
     is_valid, errors = optimizer.validate_allocations(result)
     assert is_valid, errors
-    warnings = optimizer.usage_floor_warnings(result)
+    warnings = optimizer.over_budget_warnings(result)
     assert len(warnings) == 1
     assert "below minimum_allocation_seconds" in warnings[0]
 
