@@ -161,20 +161,26 @@ def test_from_optimizer_no_validation_errors_when_valid() -> None:
     assert report.validation_errors == ()
 
 
-def test_from_optimizer_usage_floor_warning_when_relaxed() -> None:
-    inst = _make_instance(CRN_A, allocation=200, consumed=150)
-    account = _make_account((inst,), budget=1000)
+def test_from_optimizer_over_budget_warning() -> None:
+    inst = _make_instance(CRN_A, allocation=200, consumed=30)
+    # Unconfigured instances account for the rest of the plan-wide usage.
+    account = _make_account((inst,), budget=1000, unallocated=800, consumed=1000)
     cfg = _make_config(CRN_A)
-    optimizer = AllocationOptimizer(account, [cfg], usage_floor_relax_above_percent=0.0)
-    result = OptimizationResult(
-        allocation_changes={CRN_A: AllocationChange(current=200, new=100, reason="t")},
-        limit_changes={},
-    )
+    optimizer = AllocationOptimizer(account, [cfg], minimum_allocation_seconds=60)
+    result = optimizer.optimize()
 
     report = _report(account, result, [cfg], optimizer)
+    assert report.account.over_allocation_budget
     assert report.validation_errors == ()
-    assert report.usage_floor_warnings
-    assert "28-day usage" in report.usage_floor_warnings[0]
+    assert len(report.over_budget_warnings) == 1
+    assert "below minimum_allocation_seconds" in report.over_budget_warnings[0]
+
+
+def test_from_optimizer_not_over_budget() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    report = _report(account, result, cfgs, optimizer)
+    assert not report.account.over_allocation_budget
+    assert report.over_budget_warnings == ()
 
 
 def test_from_optimizer_pool_zero_when_reserve_zero() -> None:
@@ -536,7 +542,7 @@ def test_json_top_level_keys_present() -> None:
         "account",
         "reserve",
         "validation_errors",
-        "usage_floor_warnings",
+        "over_budget_warnings",
         "instances",
     }
 
@@ -794,3 +800,51 @@ def test_csv_limit_breakdown_columns_blank_without_config_limit() -> None:
     _, rows = _parse_csv(format_analyze_csv(_report(account, result, cfgs, optimizer)))
     assert rows[0]["limit_base"] == ""
     assert rows[0]["limit_overage"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Over-budget regime
+# ---------------------------------------------------------------------------
+
+CRN_B = "crn:v1:bluemix:public:quantum-computing:us-east:a/acc:inst-b::"
+
+
+def _over_budget_setup():
+    """crn A reached its limit; crn B can still run."""
+    at_limit = _make_instance(CRN_A, allocation=500, name="AtLimit", consumed=500, limit=500, consumed_24h=1)
+    running = _make_instance(CRN_B, allocation=500, name="Running", consumed=700, consumed_24h=1)
+    account = _make_account((at_limit, running), budget=1000)
+    cfgs = [_make_config(CRN_A, name="AtLimit"), _make_config(CRN_B, name="Running")]
+    optimizer = AllocationOptimizer(account, cfgs, minimum_allocation_seconds=60)
+    return account, optimizer.optimize(), cfgs, optimizer
+
+
+def test_table_over_budget_section_lists_limit_reached_instances() -> None:
+    output = format_analyze_table(_report(*_over_budget_setup()))
+    assert "OVER ALLOCATION BUDGET" in output
+    assert "  - AtLimit" in output
+    assert "  - Running" not in output
+
+
+def test_table_no_over_budget_section_under_budget() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    assert "OVER ALLOCATION BUDGET" not in format_analyze_table(_report(account, result, cfgs, optimizer))
+
+
+def test_json_over_budget_and_limit_reached() -> None:
+    payload = json.loads(format_analyze_json(_report(*_over_budget_setup())))
+    assert payload["account"]["over_allocation_budget"] is True
+    assert [(i["name"], i["limit_reached"]) for i in payload["instances"]] == [("AtLimit", True), ("Running", False)]
+    assert [i["new_allocation_seconds"] for i in payload["instances"]] == [60, 700]
+
+
+def test_json_not_over_budget() -> None:
+    account, result, cfgs, optimizer = _no_changes_setup()
+    payload = json.loads(format_analyze_json(_report(account, result, cfgs, optimizer)))
+    assert payload["account"]["over_allocation_budget"] is False
+    assert payload["instances"][0]["limit_reached"] is False
+
+
+def test_csv_limit_reached_column() -> None:
+    _, rows = _parse_csv(format_analyze_csv(_report(*_over_budget_setup())))
+    assert [row["limit_reached"] for row in rows] == ["True", "False"]

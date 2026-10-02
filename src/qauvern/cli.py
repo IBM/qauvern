@@ -241,6 +241,8 @@ def show(ctx, config: str, api_key: str | None):
     click.echo(f"Unallocated: {format_seconds(account.unallocated_seconds)}")
     click.echo(f"Consumed (all instances): {format_seconds(account.consumed_seconds)}")
     click.echo(f"Consumed (configured instances): {format_seconds(account.configured_consumed_seconds)}")
+    if account.over_allocation_budget:
+        click.echo("Over allocation budget: allocations are capped at 28-day usage (fairness >= 1.0)")
     if account.unmanaged_allocation_seconds > 0:
         click.echo(
             f"Held by unconfigured instances: {format_seconds(account.unmanaged_allocation_seconds)} "
@@ -252,7 +254,6 @@ def show(ctx, config: str, api_key: str | None):
             config_parser.instance_configs,
             config_parser.minimum_allocation_seconds,
             allocation_reserve_percent=config_parser.allocation_reserve_percent,
-            usage_floor_relax_above_percent=config_parser.usage_floor_relax_above_percent,
         ).redistribution_pool()
         click.echo(format_reserve_summary(pool, config_parser.allocation_reserve_percent))
     limit_display = format_seconds(account.limit_seconds) if account.limit_seconds else "Unlimited"
@@ -263,7 +264,9 @@ def show(ctx, config: str, api_key: str | None):
     click.echo(f"INSTANCE USAGE SUMMARY ({len(account.instances)} configured)")
     click.echo("=" * 80)
 
-    table_data, headers = format_instance_summary_table(account.instances)
+    table_data, headers = format_instance_summary_table(
+        account.instances, over_allocation_budget=account.over_allocation_budget
+    )
 
     click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
 
@@ -377,7 +380,6 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str, preview_d
         instance_configs,
         config_parser.minimum_allocation_seconds,
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
-        usage_floor_relax_above_percent=config_parser.usage_floor_relax_above_percent,
         today=preview_date.date() if preview_date else None,
     )
     result = optimizer.optimize()
@@ -387,7 +389,7 @@ def analyze(ctx, config: str, api_key: str | None, output_format: str, preview_d
     if fmt == "csv":
         for error in report.validation_errors:
             click.echo(f"Warning: {error}", err=True)
-        for warning in report.usage_floor_warnings:
+        for warning in report.over_budget_warnings:
             click.echo(f"Warning: {warning}", err=True)
         click.echo(format_analyze_csv(report), nl=False)
     elif fmt == "json":
@@ -441,7 +443,6 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
         instance_configs,
         minimum_allocation_seconds,
         allocation_reserve_percent=config_parser.allocation_reserve_percent,
-        usage_floor_relax_above_percent=config_parser.usage_floor_relax_above_percent,
     )
     result = optimizer.optimize()
 
@@ -452,7 +453,7 @@ def optimize(ctx, config: str, api_key: str | None, dry_run: bool, yes: bool):
             click.echo(f"❌ {err}", err=True)
         raise click.ClickException("Validation failed; refusing to apply changes.")
 
-    for warning in optimizer.usage_floor_warnings(result):
+    for warning in optimizer.over_budget_warnings(result):
         click.echo(f"Warning: {warning}", err=True)
 
     if not result.allocation_changes and not result.limit_changes:

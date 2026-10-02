@@ -178,59 +178,6 @@ instances:
         os.unlink(path)
 
 
-def test_usage_floor_relax_above_percent_defaults_to_100() -> None:
-    """Test that usage_floor_relax_above_percent defaults to 100.0 when absent."""
-    path = _write_config("""
-account_id: "acc-1"
-plan: "internal"
-minimum_allocation_seconds: 60
-instances:
-  - name: "Project A"
-    crn: "crn:test:1"
-""")
-    try:
-        parser = ConfigParser(path)
-        assert parser.usage_floor_relax_above_percent == 100.0
-    finally:
-        os.unlink(path)
-
-
-def test_usage_floor_relax_above_percent_parsed() -> None:
-    """Test that usage_floor_relax_above_percent is parsed from config."""
-    path = _write_config("""
-account_id: "acc-1"
-plan: "internal"
-minimum_allocation_seconds: 60
-usage_floor_relax_above_percent: 90
-instances:
-  - name: "Project A"
-    crn: "crn:test:1"
-""")
-    try:
-        parser = ConfigParser(path)
-        assert parser.usage_floor_relax_above_percent == 90.0
-    finally:
-        os.unlink(path)
-
-
-def test_usage_floor_relax_above_percent_out_of_range_raises() -> None:
-    """Test that usage_floor_relax_above_percent outside [0, 100] raises ValueError."""
-    path = _write_config("""
-account_id: "acc-1"
-plan: "internal"
-minimum_allocation_seconds: 60
-usage_floor_relax_above_percent: 101
-instances:
-  - name: "Project A"
-    crn: "crn:test:1"
-""")
-    try:
-        with pytest.raises(ValueError, match="usage_floor_relax_above_percent"):
-            ConfigParser(path)
-    finally:
-        os.unlink(path)
-
-
 def test_reserve_percent_out_of_range_raises() -> None:
     """Test that allocation_reserve_percent >= 100 raises ValueError."""
     path = _write_config("""

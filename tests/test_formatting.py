@@ -74,6 +74,12 @@ def test_format_exact_fairness() -> None:
     assert "1.00" in result
 
 
+def test_format_fairness_over_budget_treats_one_as_the_goal() -> None:
+    assert "✓" in format_fairness(1.0, over_allocation_budget=True)
+    assert "✓" in format_fairness(8.33, over_allocation_budget=True)
+    assert "⚠" in format_fairness(0.5, over_allocation_budget=True)
+
+
 # -------------------------------------------------------------------
 # Fixtures
 # -------------------------------------------------------------------

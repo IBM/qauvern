@@ -151,6 +151,14 @@ class AccountPlan:
     limit_seconds: int | None
     instances: tuple[InstanceState, ...]
 
+    @property
+    def over_allocation_budget(self) -> bool:
+        """Whether plan-wide 28-day usage has reached the allocation budget, which some plans allow.
+
+        A zero budget always counts, as there is nothing to be under.
+        """
+        return self.consumed_seconds >= self.allocation_budget_seconds
+
     @cached_property
     def configured_consumed_seconds(self) -> int:
         """28-day usage summed over only `self.instances`."""

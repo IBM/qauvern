@@ -79,11 +79,6 @@ minimum_allocation_seconds: 60
 # Hold back a percentage of account allocation from rebalancing (optional, default: 0)
 # allocation_reserve_percent: 20
 
-# Once account usage exceeds this percent of the account's allocation budget, stop
-# requiring every instance's allocation to stay >= its 28-day usage (optional, default: 100,
-# meaning always enforced).
-# usage_floor_relax_above_percent: 90
-
 instances:
   - name: "Quantum Chemistry Research"
     crn: "crn:v1:bluemix:public:quantum-computing:us-east:a/abc123:instance-1::"
@@ -156,7 +151,6 @@ After generating the configuration, optionally make these edits:
 - Set `limit_seconds` and `net_grants` per instance to control hard caps and temporary bonuses.
 - Change `minimum_allocation_seconds` from its default of 60 seconds.
 - Set `allocation_reserve_percent` from `[0, 100)` to hold back a buffer as a fraction of the total account budget (e.g. `20` caps total allocation at 80% of budget).
-- Lower `usage_floor_relax_above_percent` below its default of `100` if your account's plan allows an instance to consume more than its allocation once account usage crosses that percent of the account budget (qauvern otherwise always refuses to let allocation drop below 28-day usage).
 
 Use [`qauvern update`](#update-reconcile-configuration) to keep the file in sync as instances are added, removed, or renamed.
 
@@ -335,6 +329,29 @@ Then, account-wide:
 5. **Uses the water-fill algorithm to distribute the pool across active instances** proportional to activity score. When an instance hits its effective limit, it drops out and its surplus flows to the rest. If every active instance is capped, leftover capacity stays unallocated rather than being forced onto any instance.
 
 See [Design.md](Design.md) for full algorithm details and the invariants the optimizer enforces.
+
+### When Usage Exceeds the Allocation Budget
+
+Some plans allow an account's usage to exceed its allocation budget, up to a limit. qauvern handles this automatically: once the account's 28-day usage, across every instance on the plan, reaches the allocation budget, it changes how it allocates.
+
+Once your account has used its whole budget, qauvern keeps each of your instances at `fairness >= 1.0`. Within that cap, allocation is still distributed by activity score.
+
+An instance whose usage has reached its limit cannot run, so qauvern drops it to `minimum_allocation_seconds` (or to its usage, if lower), freeing that allocation for instances that can run.
+
+For example, with a budget of 1000s, 28-day account usage of 1200s, and `minimum_allocation_seconds: 60`:
+
+| Instance | 28-day usage | Limit | Allocation | Fairness |
+| --- | --- | --- | --- | --- |
+| inst-1 | 500s | 500s | 60s (reached its limit) | 8.33 |
+| inst-2 | 400s | 1000s | 400s | 1.00 |
+| inst-3 | 300s | 1000s | 300s | 1.00 |
+
+`analyze` and `optimize` print a warning for two cases:
+
+- An instance with no 28-day usage keeps the full `minimum_allocation_seconds`, as a buffer for its first runs. Its fairness is 0 no matter its allocation.
+- An instance whose 28-day usage is below `minimum_allocation_seconds` gets an allocation equal to its usage, below the minimum.
+
+`analyze` explains when this applies: an `OVER ALLOCATION BUDGET` section in `--format table`, `account.over_allocation_budget` and per-instance `limit_reached` in `--format json`, and a `limit_reached` column in `--format csv`.
 
 ### How Net Grants Expire
 

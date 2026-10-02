@@ -5,16 +5,14 @@ All notable changes to qauvern will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.14.0] - 2026-xx-xx
-
-### Added
-
-- `analyze` and `show` now also report 28-day usage across every instance on the account and plan, including unconfigured instances.
+## [0.14.0] - 2026-10-02
 
 ### Changed
 
+- qauvern now automatically detects when an account's usage has exceeded its allocation budget and keeps optimizing instead of refusing to apply changes: it caps each instance's allocation at its 28-day usage (so fairness stays `>= 1.0`) and reallocates from instances that have hit their limit and can no longer run to those that can. See [When Usage Exceeds the Allocation Budget](README.md#when-usage-exceeds-the-allocation-budget). `analyze` and `show` report this regime and the account's full 28-day usage (including unconfigured instances); see the README for format-specific details.
+- Removed `usage_floor_relax_above_percent`, as it is superseded by the automatic behavior above.
+- In `analyze --format json`, renamed `usage_floor_warnings` to `over_budget_warnings`.
 - In `analyze --format json`, `account.consumed_seconds` now includes usage by unconfigured instances. The previous value, which only counted configured instances, is now `account.configured_consumed_seconds`.
-- `usage_floor_relax_above_percent` now compares the account budget against 28-day usage from every instance on the account and plan, including unconfigured instances, rather than only configured instances.
 
 ## [0.13.0] - 2026-08-10
 
@@ -207,6 +205,7 @@ The focus of this release is improving `qauvern configure` and the configuration
 - YAML configuration with `configure` command for auto-discovery
 - Configurable minimum allocation floor
 
+[0.14.0]: https://github.com/ibm/qauvern/releases/tag/v0.14.0
 [0.13.0]: https://github.com/ibm/qauvern/releases/tag/v0.13.0
 [0.12.0]: https://github.com/ibm/qauvern/releases/tag/v0.12.0
 [0.11.0]: https://github.com/ibm/qauvern/releases/tag/v0.11.0
