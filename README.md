@@ -346,7 +346,7 @@ For example, with a budget of 1000s, 28-day account usage of 1200s, and `minimum
 | inst-2 | 400s | 1000s | 400s | 1.00 |
 | inst-3 | 300s | 1000s | 300s | 1.00 |
 
-Two cases fall outside `fairness >= 1.0`, and `analyze` and `optimize` print a warning for them:
+`analyze` and `optimize` print a warning for two cases:
 
 - An instance with no 28-day usage keeps the full `minimum_allocation_seconds`, as a buffer for its first runs. Its fairness is 0 no matter its allocation.
 - An instance whose 28-day usage is below `minimum_allocation_seconds` gets an allocation equal to its usage, below the minimum.

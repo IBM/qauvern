@@ -50,7 +50,7 @@ The optimizer validates the resulting plan against these invariants and refuses 
 
 1. Total projected allocation fits under the **effective budget** = `allocation_budget_seconds − reserve`, where `reserve = allocation_budget_seconds × reserve_percent / 100`.
 2. Each managed instance's new allocation is `>= consumed_seconds_28d`. In the over-budget regime this inverts to `<= consumed_seconds_28d`, unless the floor forces it higher.
-3. Each managed instance's new allocation is `>= minimum_allocation_seconds`. In the over-budget regime: `>= min(minimum_allocation_seconds, consumed_seconds_28d)`.
+3. Each managed instance's new allocation is `>= minimum_allocation_seconds`. In the over-budget regime, this relaxes to `>= consumed_seconds_28d` when usage is below the minimum but nonzero.
 4. Each managed instance's new allocation is `<= effective limit`, unless the floor forces it higher (a limit tightened below the floor is an unavoidable, non-actionable breach and is not flagged here).
 5. No managed instance's new allocation is 0 (archiving is not allowed). The floor is always at least 1s, even if `minimum_allocation_seconds` is 0.
 
@@ -66,7 +66,7 @@ An instance has **reached its limit** when its 28-day usage is at or above its e
 
 | Case | Allocation | Fairness |
 | -- | -- | -- |
-| limit reached — `usage >= effective limit` | floor, as below; excluded from water-fill | `>= 1.0` when `usage >= min` |
+| limit reached — `usage >= effective limit` | floor, as below; excluded from water-fill | `>= 1.0`, unless `usage == 0` |
 | `usage == 0` | `minimum_allocation_seconds` | 0, unavoidable |
 | `0 < usage < min` | `usage` | 1.0 |
 | `usage >= min` | floor `min`, water-filled up to a cap of `usage` | `>= 1.0` |

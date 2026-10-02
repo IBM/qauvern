@@ -57,7 +57,6 @@ class AnalyzeReport:
     instance_configs: tuple[InstanceConfig, ...]
     validation_errors: tuple[str, ...]
     usage_floor_warnings: tuple[str, ...]
-    account_over_budget: bool
     limit_reached_crns: frozenset[str]
     allocation_reserve_percent: float
     redistribution_pool_seconds: int
@@ -83,7 +82,6 @@ class AnalyzeReport:
             instance_configs=tuple(instance_configs),
             validation_errors=tuple(errors),
             usage_floor_warnings=tuple(warnings),
-            account_over_budget=optimizer.account_over_budget,
             limit_reached_crns=optimizer.limit_reached_crns,
             allocation_reserve_percent=optimizer.allocation_reserve_percent,
             redistribution_pool_seconds=pool_seconds,
@@ -177,7 +175,7 @@ def format_analyze_table(report: AnalyzeReport) -> str:
 
 def _format_over_budget_section(report: AnalyzeReport) -> list[str]:
     """Explain the over-budget regime when it is in effect, or nothing otherwise."""
-    if not report.account_over_budget:
+    if not report.account.over_allocation_budget:
         return []
     lines = [
         "",
@@ -185,11 +183,13 @@ def _format_over_budget_section(report: AnalyzeReport) -> list[str]:
         "OVER ALLOCATION BUDGET",
         "=" * 80,
         "28-day usage has reached the allocation budget, so each instance's allocation is capped at",
-        "its 28-day usage: every instance with usage that can still run sits at fairness >= 1.0.",
+        "its 28-day usage, keeping fairness >= 1.0.",
     ]
     limit_reached = [inst for inst in report.account.instances if inst.crn in report.limit_reached_crns]
     if limit_reached:
-        lines.append("These instances reached their limit, so they are held at the minimum allocation:")
+        lines.append(
+            "These instances reached their limit, so they are held at minimum_allocation_seconds (or their usage, if lower):"
+        )
         lines += [f"  - {inst.name}" for inst in limit_reached]
     return lines
 
@@ -304,7 +304,7 @@ def format_analyze_json(report: AnalyzeReport) -> str:
             "configured_consumed_seconds": account.configured_consumed_seconds,
             "limit_seconds": account.limit_seconds,
             "unmanaged_allocation_seconds": account.unmanaged_allocation_seconds,
-            "over_allocation_budget": report.account_over_budget,
+            "over_allocation_budget": account.over_allocation_budget,
         },
         "reserve": {
             "percent": report.allocation_reserve_percent,

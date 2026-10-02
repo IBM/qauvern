@@ -170,7 +170,7 @@ def test_from_optimizer_usage_floor_warning_when_over_budget() -> None:
     result = optimizer.optimize()
 
     report = _report(account, result, [cfg], optimizer)
-    assert report.account_over_budget
+    assert report.account.over_allocation_budget
     assert report.validation_errors == ()
     assert len(report.usage_floor_warnings) == 1
     assert "below minimum_allocation_seconds" in report.usage_floor_warnings[0]
@@ -179,7 +179,7 @@ def test_from_optimizer_usage_floor_warning_when_over_budget() -> None:
 def test_from_optimizer_not_over_budget() -> None:
     account, result, cfgs, optimizer = _no_changes_setup()
     report = _report(account, result, cfgs, optimizer)
-    assert not report.account_over_budget
+    assert not report.account.over_allocation_budget
     assert report.usage_floor_warnings == ()
 
 
